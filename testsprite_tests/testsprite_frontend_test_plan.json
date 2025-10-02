@@ -1,0 +1,616 @@
+[
+  {
+    "id": "TC001",
+    "title": "User Registration with Valid Data",
+    "description": "Verify that a new user can register successfully with all valid input data including required fields and valid email format.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the registration page."
+      },
+      {
+        "type": "action",
+        "description": "Fill in all required fields with valid data (e.g., username, email, password, role selection)."
+      },
+      {
+        "type": "action",
+        "description": "Submit the registration form."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify that the registration is successful and user is redirected to appropriate dashboard or login."
+      }
+    ]
+  },
+  {
+    "id": "TC002",
+    "title": "User Registration Input Validation",
+    "description": "Verify that input validations work properly for user registration form including empty fields, invalid email format, and password minimum length.",
+    "category": "error handling",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the registration page."
+      },
+      {
+        "type": "action",
+        "description": "Attempt registration with empty required fields."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify appropriate error messages for missing required fields."
+      },
+      {
+        "type": "action",
+        "description": "Enter invalid email formats and weak passwords."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify validation errors for email format and password strength."
+      }
+    ]
+  },
+  {
+    "id": "TC003",
+    "title": "User Login with Correct Credentials",
+    "description": "Verify successful login with valid username/email and password combination for different user roles (buyer, seller, admin).",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the login page."
+      },
+      {
+        "type": "action",
+        "description": "Input valid username/email and password."
+      },
+      {
+        "type": "action",
+        "description": "Click the login button."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify user is logged in and redirected to role-based dashboard."
+      }
+    ]
+  },
+  {
+    "id": "TC004",
+    "title": "User Login with Incorrect Credentials",
+    "description": "Verify that login fails with invalid username/email or password and appropriate error messages are displayed.",
+    "category": "error handling",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the login page."
+      },
+      {
+        "type": "action",
+        "description": "Input invalid username/email and/or password."
+      },
+      {
+        "type": "action",
+        "description": "Click the login button."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify that login fails with appropriate error message."
+      }
+    ]
+  },
+  {
+    "id": "TC005",
+    "title": "Browse Car Catalog with Search and Filtering",
+    "description": "Verify that users can search and filter cars by various attributes such as brand, price, year, and type, and results reflect search criteria.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the car catalog page."
+      },
+      {
+        "type": "action",
+        "description": "Use search box to enter keywords for car model or brand."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify that search results include matching vehicles."
+      },
+      {
+        "type": "action",
+        "description": "Apply multiple filters (e.g., price range, year, color)."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify that filtered results meet all selected filter criteria."
+      }
+    ]
+  },
+  {
+    "id": "TC006",
+    "title": "Car Detail Page Displays Complete Information",
+    "description": "Verify that detailed vehicle page shows all relevant specifications, pricing, photos, seller info, and contact options.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Open a vehicle detail page from the catalog."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify display of vehicle specifications, price, photos gallery, seller/showroom data, and contact buttons."
+      }
+    ]
+  },
+  {
+    "id": "TC007",
+    "title": "Add and Remove Cars from Wishlist",
+    "description": "Verify that authenticated users can add cars to wishlist, view wishlist, and remove cars from it.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as a buyer."
+      },
+      {
+        "type": "action",
+        "description": "Navigate to a vehicle detail page and add car to wishlist."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify car is added to wishlist."
+      },
+      {
+        "type": "action",
+        "description": "Navigate to wishlist page."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the added car appears in wishlist."
+      },
+      {
+        "type": "action",
+        "description": "Remove car from wishlist."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify car is removed successfully."
+      }
+    ]
+  },
+  {
+    "id": "TC008",
+    "title": "Car Comparison Tool Functionality",
+    "description": "Verify user can select multiple cars and compare their detailed specifications side by side.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to car catalog."
+      },
+      {
+        "type": "action",
+        "description": "Select two or more vehicles to compare."
+      },
+      {
+        "type": "action",
+        "description": "Open comparison page or modal."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify specifications of selected cars are displayed side by side accurately."
+      }
+    ]
+  },
+  {
+    "id": "TC009",
+    "title": "Credit Simulation with EMI Calculation",
+    "description": "Verify users can input criteria (car price, down payment, interest rate, tenure) and receive accurate EMI and budget recommendations.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to credit simulation page."
+      },
+      {
+        "type": "action",
+        "description": "Input car price, down payment, interest rate, and loan tenure."
+      },
+      {
+        "type": "action",
+        "description": "Submit simulation."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify EMI calculation outputs and suggested car budget recommendations are correct."
+      }
+    ]
+  },
+  {
+    "id": "TC010",
+    "title": "Transaction Processing and Invoice Generation",
+    "description": "Verify end-to-end purchase flow including selecting car, confirming purchase, payment validation, and generation of invoice.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as buyer."
+      },
+      {
+        "type": "action",
+        "description": "Select a car and proceed to purchase."
+      },
+      {
+        "type": "action",
+        "description": "Confirm purchase details and make payment."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify payment processing is successful and invoice is generated and accessible."
+      }
+    ]
+  },
+  {
+    "id": "TC011",
+    "title": "Transaction Failure Handling",
+    "description": "Verify that transaction fails gracefully if payment is declined and user is notified with error messages.",
+    "category": "error handling",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Simulate payment decline scenario during transaction."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify transaction is not completed and user receives clear error notification."
+      }
+    ]
+  },
+  {
+    "id": "TC012",
+    "title": "Test Drive Booking Workflow",
+    "description": "Verify users can submit test drive requests, admins can approve or deny, and notifications are sent accordingly.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as user and submit a test drive booking request with desired date/time."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify request is stored and user receives confirmation of submission."
+      },
+      {
+        "type": "action",
+        "description": "Login as admin and view pending test drive requests."
+      },
+      {
+        "type": "action",
+        "description": "Approve or deny a test drive request."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify user receives notification about approval or denial."
+      }
+    ]
+  },
+  {
+    "id": "TC013",
+    "title": "Trade-In Evaluation and Negotiation Flow",
+    "description": "Verify users can submit trade-in vehicle info with photos, receive price estimation, negotiate, schedule survey, and finalize contract.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as user and submit trade-in vehicle info including photo uploads."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify price estimation is received."
+      },
+      {
+        "type": "action",
+        "description": "Engage in negotiation process within system."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify negotiation records and status updates."
+      },
+      {
+        "type": "action",
+        "description": "Schedule survey appointment after agreed terms."
+      },
+      {
+        "type": "action",
+        "description": "Finalize trade-in with contract generation."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify contract is accessible and trade-in process is marked complete."
+      }
+    ]
+  },
+  {
+    "id": "TC014",
+    "title": "AI Chatbot Response and Escalation",
+    "description": "Verify AI assistant chatbot answers common queries and escalates complex issues to human operators seamlessly.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Open chat interface and ask a common question."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify chatbot provides an accurate automated response."
+      },
+      {
+        "type": "action",
+        "description": "Ask a question beyond AI capability to trigger escalation."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify chat is escalated and human operator joins the conversation."
+      }
+    ]
+  },
+  {
+    "id": "TC015",
+    "title": "Advertisement Life Cycle Management",
+    "description": "Verify users can create advertisements with photo uploads, admins moderate and approve ads, payments can be processed for promotions, and ads are displayed appropriately.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as user and create a new advertisement including uploading photos."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify ad is submitted and pending moderation."
+      },
+      {
+        "type": "action",
+        "description": "Login as admin and review pending advertisements."
+      },
+      {
+        "type": "action",
+        "description": "Approve or reject advertisement."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify user receives notification of moderation status."
+      },
+      {
+        "type": "action",
+        "description": "Process payment for ad promotion if approved."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify ad appears in promoted section after payment confirmation."
+      }
+    ]
+  },
+  {
+    "id": "TC016",
+    "title": "Admin Dashboard User Management",
+    "description": "Verify admins can view, edit, deactivate, and assign roles to users within the admin dashboard.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as admin and navigate to user management section."
+      },
+      {
+        "type": "action",
+        "description": "View list of registered users."
+      },
+      {
+        "type": "action",
+        "description": "Edit user information and change roles."
+      },
+      {
+        "type": "action",
+        "description": "Deactivate a user account."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify changes are saved and reflected correctly in the system."
+      }
+    ]
+  },
+  {
+    "id": "TC017",
+    "title": "Executive Dashboard KPI and Reporting",
+    "description": "Verify showroom owners can access and view real-time KPIs, detailed analytics, financial reports, and strategic metrics.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as showroom owner and navigate to executive dashboard."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify visibility of key performance indicators and trend charts."
+      },
+      {
+        "type": "action",
+        "description": "Generate and export financial and strategic reports."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify reports have accurate data and correct export format."
+      }
+    ]
+  },
+  {
+    "id": "TC018",
+    "title": "Real-Time Messaging Between Users and Dealers",
+    "description": "Verify chat system functionality including sending, receiving messages in real-time between buyers, sellers, and admins with message status indicators.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as buyer and open chat with a seller."
+      },
+      {
+        "type": "action",
+        "description": "Send a message."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify message appears instantly on sender and receiver ends with read/delivered status."
+      },
+      {
+        "type": "action",
+        "description": "Receive reply message from seller."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify real-time reception and correct display of message."
+      }
+    ]
+  },
+  {
+    "id": "TC019",
+    "title": "Payment System Validation and Security Compliance",
+    "description": "Verify that the payment processing system validates payment inputs, handles payment gateways securely, and complies with PCI DSS standards.",
+    "category": "security",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Initiate payment with valid card details."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify successful payment transaction and compliance labels in logs."
+      },
+      {
+        "type": "action",
+        "description": "Attempt payment with invalid or expired card."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify payment is rejected with secure error handling."
+      }
+    ]
+  },
+  {
+    "id": "TC020",
+    "title": "System Administration Security and Backup Operations",
+    "description": "Verify that system admin functionalities including user rights management, security settings, backup scheduling, and system health monitoring operate correctly.",
+    "category": "security",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as system admin and navigate to user rights management."
+      },
+      {
+        "type": "action",
+        "description": "Modify user permissions and validate access changes."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify security policies are enforced accordingly."
+      },
+      {
+        "type": "action",
+        "description": "Trigger system backup and monitor process."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify backup completes successfully and backup logs are accurate."
+      },
+      {
+        "type": "action",
+        "description": "Review system monitoring dashboard."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify all performance and security sensors report correct system health."
+      }
+    ]
+  },
+  {
+    "id": "TC021",
+    "title": "Cross-Device UI Compatibility",
+    "description": "Verify that all major user interfaces render and function correctly on multiple device types and screen sizes including desktop, tablet, and mobile.",
+    "category": "ui",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Access the platform on desktop browser."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify UI layout is correct and all features accessible."
+      },
+      {
+        "type": "action",
+        "description": "Access platform on tablet and mobile device browsers."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify UI adapts properly with no loss in functionality or usability."
+      }
+    ]
+  },
+  {
+    "id": "TC022",
+    "title": "Content Management System Functionality",
+    "description": "Verify that authorized users can create, edit, publish, and delete articles and customer reviews within the CMS.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as content manager."
+      },
+      {
+        "type": "action",
+        "description": "Create a new article with text and images."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify article is published and visible in the content list."
+      },
+      {
+        "type": "action",
+        "description": "Edit existing article content and save changes."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify updates are saved and reflected in published content."
+      },
+      {
+        "type": "action",
+        "description": "Delete an article and confirm removal."
+      },
+      {
+        "type": "assertion",
+        "description": "Verify article is no longer accessible."
+      }
+    ]
+  }
+]
