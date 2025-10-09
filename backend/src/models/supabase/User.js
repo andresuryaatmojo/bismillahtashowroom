@@ -25,8 +25,11 @@ class User {
   // Static methods untuk database operations
   static async create(userData) {
     try {
-      // Hash password sebelum menyimpan
+      console.log('USER MODEL - Creating user with data:', userData);
+      
+      // Hash password if provided
       if (userData.password) {
+        console.log('USER MODEL - Hashing password');
         const salt = await bcrypt.genSalt(10);
         userData.password = await bcrypt.hash(userData.password, salt);
       }
@@ -47,13 +50,23 @@ class User {
         last_login: userData.lastLogin || userData.last_login
       };
 
-      console.log('Database data to insert:', dbData);
+      console.log('USER MODEL - Database data to insert:', dbData);
       
-      // Don't create a User instance before inserting, just insert directly
+      // Insert to database
       const result = await supabaseHelpers.insert('users', dbData);
-      return result[0] ? new User(result[0]) : null;
+      console.log('USER MODEL - Insert result:', result);
+      
+      if (!result || result.length === 0) {
+        throw new Error('No data returned from database insert');
+      }
+      
+      const createdUser = new User(result[0]);
+      console.log('USER MODEL - User created successfully:', createdUser.username);
+      
+      return createdUser;
     } catch (error) {
-      console.error('Error creating user:', error);
+      console.error('USER MODEL - Error creating user:', error);
+      console.error('USER MODEL - Error stack:', error.stack);
       throw error;
     }
   }

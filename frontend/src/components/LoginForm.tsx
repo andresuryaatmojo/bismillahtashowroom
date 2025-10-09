@@ -8,37 +8,11 @@ const LoginForm = () => {
   
   const [formData, setFormData] = useState({
     username: '',
-    password: '',
-    role: 'admin' as 'admin' | 'executive'
+    password: ''
   });
   
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const success = await login(formData.username, formData.password, formData.role);
-      
-      if (success) {
-        // Redirect berdasarkan role
-        if (formData.role === 'executive') {
-          navigate('/executive');
-        } else {
-          navigate('/admin');
-        }
-      } else {
-        setError('Username atau password salah');
-      }
-    } catch (err) {
-      setError('Terjadi kesalahan saat login');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -48,18 +22,36 @@ const LoginForm = () => {
     }));
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+
+    try {
+      // Hapus parameter role, hanya gunakan username dan password
+      const success = await login(formData.username, formData.password);
+      
+      if (success) {
+        // Redirect ke dashboard umum, biarkan routing menentukan berdasarkan role
+        navigate('/dashboard');
+      } else {
+        setError('Username atau password salah');
+      }
+    } catch (error) {
+      setError('Terjadi kesalahan saat login');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Login Admin Panel
+            Sign in to your account
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Masuk ke dashboard administrasi
-          </p>
         </div>
-        
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
@@ -77,7 +69,6 @@ const LoginForm = () => {
                 placeholder="Username"
               />
             </div>
-            
             <div>
               <label htmlFor="password" className="sr-only">
                 Password
@@ -89,25 +80,9 @@ const LoginForm = () => {
                 required
                 value={formData.password}
                 onChange={handleInputChange}
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
                 placeholder="Password"
               />
-            </div>
-            
-            <div>
-              <label htmlFor="role" className="sr-only">
-                Role
-              </label>
-              <select
-                id="role"
-                name="role"
-                value={formData.role}
-                onChange={handleInputChange}
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-              >
-                <option value="admin">Admin</option>
-                <option value="executive">Executive</option>
-              </select>
             </div>
           </div>
 

@@ -6,19 +6,33 @@ class AuthController {
   // Register new user
   static async register(req, res) {
     try {
-      const { username, email, password, fullName, phoneNumber } = req.body;
+      console.log('Received registration request:', req.body);
+      
+      const { username, email, password, fullName, phoneNumber, role } = req.body;
 
       // Validate required fields
       if (!username || !email || !password) {
+        console.log('Missing required fields');
         return res.status(400).json({
           success: false,
           message: 'Username, email, dan password wajib diisi'
         });
       }
 
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Format email tidak valid'
+        });
+      }
+
       // Check if user already exists
+      console.log('Checking existing email:', email);
       const existingUser = await User.findByEmail(email);
       if (existingUser) {
+        console.log('Email already exists');
         return res.status(400).json({
           success: false,
           message: 'Email sudah terdaftar'
@@ -26,8 +40,10 @@ class AuthController {
       }
 
       // Check if username already exists
+      console.log('Checking existing username:', username);
       const existingUsername = await User.findByUsername(username);
       if (existingUsername) {
+        console.log('Username already exists');
         return res.status(400).json({
           success: false,
           message: 'Username sudah digunakan'
@@ -36,18 +52,21 @@ class AuthController {
 
       // Create new user
       const userData = {
-        username,
-        email,
+        username: username.trim(),
+        email: email.toLowerCase().trim(),
         password,
-        fullName: fullName || null,
-        phoneNumber: phoneNumber || null,
-        role: 'buyer'  // Explicitly set to buyer
+        fullName: fullName ? fullName.trim() : null,
+        phoneNumber: phoneNumber ? phoneNumber.trim() : null,
+        role: role || 'buyer'  // Default to buyer if not specified
       };
 
       console.log('AUTH CONTROLLER - Creating user with data:', JSON.stringify(userData, null, 2));
-      console.log('AUTH CONTROLLER - Role explicitly set to:', userData.role);
       const newUser = await User.create(userData);
-      console.log('AUTH CONTROLLER - User created with role:', newUser ? newUser.role : 'No user returned');
+      console.log('AUTH CONTROLLER - User created successfully:', newUser ? newUser.username : 'No user returned');
+
+      if (!newUser) {
+        throw new Error('Failed to create user');
+      }
 
       // Generate JWT token
       const token = jwt.sign(
@@ -76,10 +95,15 @@ class AuthController {
 
     } catch (error) {
       console.error('Registration error:', error);
+      console.error('Error stack:', error.stack);
+      
       res.status(500).json({
         success: false,
         message: 'Terjadi kesalahan saat registrasi',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        error: process.env.NODE_ENV === 'development' ? {
+          message: error.message,
+          stack: error.stack
+        } : undefined
       });
     }
   }

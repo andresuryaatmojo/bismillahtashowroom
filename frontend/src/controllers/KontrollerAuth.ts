@@ -120,16 +120,43 @@ class KontrollerAuth {
   // Register user
   public async register(userData: RegisterRequest): Promise<AuthResponse> {
     try {
+      console.log('Mengirim request ke:', `${API_BASE_URL}/auth/register`);
+      console.log('Data yang dikirim:', userData);
+      
       const response = await axios.post(`${API_BASE_URL}/auth/register`, userData);
       
+      console.log('Response dari server:', response.data);
+      
       if (response.data.success && response.data.data) {
-        const { user, token, refreshToken } = response.data.data;
-        this.saveTokenToStorage(token, refreshToken, user);
+        const { user, token } = response.data.data;
+        // Untuk registrasi, kita tidak perlu menyimpan token langsung
+        // Biarkan user login setelah registrasi berhasil
+        console.log('Registrasi berhasil untuk user:', user.username);
       }
       
       return response.data;
     } catch (error: any) {
       console.error('Register error:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('Error status:', error.response?.status);
+      
+      if (error.response?.status === 400) {
+        return {
+          success: false,
+          message: error.response.data?.message || 'Data registrasi tidak valid'
+        };
+      } else if (error.response?.status === 500) {
+        return {
+          success: false,
+          message: 'Terjadi kesalahan server. Silakan coba lagi nanti.'
+        };
+      } else if (error.code === 'ECONNREFUSED') {
+        return {
+          success: false,
+          message: 'Tidak dapat terhubung ke server. Pastikan server backend berjalan.'
+        };
+      }
+      
       return {
         success: false,
         message: error.response?.data?.message || 'Registrasi gagal. Silakan coba lagi.'
