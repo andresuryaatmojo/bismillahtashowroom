@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { supabase } from '../lib/supabase';
 import type { User as SupabaseUser, Session } from '@supabase/supabase-js';
 
-// ===== INTERFACE UPDATED sesuai struktur tabel baru =====
+// ===== INTERFACES =====
 export interface UserProfile {
   id: string;
   auth_user_id: string;
@@ -15,37 +15,24 @@ export interface UserProfile {
   province?: string;
   postal_code?: string;
   profile_picture?: string;
-  
-  // Role & Mode System
   role: 'user' | 'admin' | 'owner';
   current_mode: 'buyer' | 'seller';
-  
-  // Seller-specific attributes
   seller_type?: 'showroom' | 'external' | null;
   seller_verification_status: 'unverified' | 'pending' | 'verified' | 'rejected';
   seller_rating: number;
   seller_total_sales: number;
-  
-  // Account status
   account_status: 'active' | 'inactive' | 'suspended';
   is_verified: boolean;
-  
-  // Gamification
   user_level: 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond';
   total_transactions: number;
   buyer_rating: number;
-  
-  // Preferences
   preferences?: any;
-  
-  // Timestamps
   registered_at: string;
   last_login?: string;
   created_at: string;
   updated_at: string;
 }
 
-// Interface untuk user lengkap (gabungan auth + profile)
 export interface User extends UserProfile {
   permissions?: string[];
 }
@@ -78,118 +65,146 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ===== FIXED: Wrap getPermissionsByRole dengan useCallback =====
+  // Get permissions by role
   const getPermissionsByRole = useCallback((role: string): string[] => {
     const rolePermissions: { [key: string]: string[] } = {
-      'owner': [
-        'view_dashboard',
-        'manage_inventory',
-        'manage_users',
-        'view_reports',
-        'manage_system',
-        'view_analytics',
-        'export_data',
-        'manage_partnerships',
-        'manage_finances',
-        'manage_credit_params',
-        'approve_sellers',
-        'system_admin'
+      owner: [
+        'view_dashboard', 'manage_inventory', 'manage_users', 'view_reports',
+        'manage_system', 'view_analytics', 'export_data', 'manage_partnerships',
+        'manage_finances', 'manage_credit_params', 'approve_sellers', 'system_admin'
       ],
-      'admin': [
-        'view_dashboard',
-        'manage_inventory',
-        'manage_users',
-        'moderate_listings',
-        'process_transactions',
-        'handle_test_drives',
-        'moderate_reviews',
-        'manage_content',
-        'live_chat_support',
-        'manage_payments',
-        'view_reports'
+      admin: [
+        'view_dashboard', 'manage_inventory', 'manage_users', 'moderate_listings',
+        'process_transactions', 'handle_test_drives', 'moderate_reviews',
+        'manage_content', 'live_chat_support', 'manage_payments', 'view_reports'
       ],
-      'user': [
-        'view_cars',
-        'buy_cars',
-        'sell_cars',
-        'create_listings',
-        'chat',
-        'save_favorites',
-        'view_history',
-        'request_test_drive',
-        'trade_in',
-        'simulate_credit',
-        'write_reviews'
+      user: [
+        'view_cars', 'buy_cars', 'sell_cars', 'create_listings', 'chat',
+        'save_favorites', 'view_history', 'request_test_drive', 'trade_in',
+        'simulate_credit', 'write_reviews'
       ]
     };
-    
     return rolePermissions[role] || rolePermissions['user'];
   }, []);
 
-  // ===== FIXED: Wrap loadUserProfile dengan useCallback =====
+  // Load user profile
   const loadUserProfile = useCallback(async (authUser: SupabaseUser): Promise<User | null> => {
     try {
+      console.log('📥 [1/3] Loading profile for user:', authUser.id);
+      
       const { data: profile, error } = await supabase
         .from('users')
         .select('*')
-        .eq('auth_user_id', authUser.id)
-        .single();
+        .or(`id.eq.${authUser.id},auth_user_id.eq.${authUser.id}`)
+        .maybeSingle();
+
+      console.log('📥 [2/3] Query result:', { 
+        hasData: !!profile, 
+        hasError: !!error,
+        errorCode: error?.code 
+      });
 
       if (error) {
         console.error('❌ Error loading user profile:', error);
+        if (error.code === 'PGRST116') {
+          console.warn('⚠️ No profile found for user');
+        }
         return null;
       }
 
       if (profile) {
+        console.log('✅ [3/3] Profile loaded:', profile.username);
+        
         const userWithPermissions: User = {
           ...profile,
           permissions: getPermissionsByRole(profile.role)
         };
         
-        // Update last_login
-        await supabase
-          .from('users')
-          .update({ last_login: new Date().toISOString() })
-          .eq('auth_user_id', authUser.id);
+        // Update last_login (non-blocking)
+        (async () => {
+          try {
+            const { error } = await supabase
+              .from('users')
+              .update({ last_login: new Date().toISOString() })
+              .or(`id.eq.${authUser.id},auth_user_id.eq.${authUser.id}`);
+            
+            if (error) {
+              console.warn('⚠️ Failed to update last_login:', error);
+            } else {
+              console.log('✅ Last login updated');
+            }
+          } catch (err) {
+            console.warn('⚠️ Exception updating last_login:', err);
+          }
+        })();
         
         return userWithPermissions;
       }
 
+      console.warn('⚠️ No profile data found');
       return null;
+      
     } catch (error) {
       console.error('❌ Error in loadUserProfile:', error);
       return null;
     }
   }, [getPermissionsByRole]);
 
-  // ===== FIXED: useEffect dengan dependency yang benar =====
+  // Initialize auth
   useEffect(() => {
     let mounted = true;
+    let initTimeout: NodeJS.Timeout;
     
     const initializeAuth = async () => {
       try {
         console.log('🔄 Initializing auth...');
         
-        // Get initial session
-        const { data: { session } } = await supabase.auth.getSession();
+        // Timeout failsafe
+        initTimeout = setTimeout(() => {
+          if (mounted) {
+            console.error('❌ Auth initialization timeout after 8s');
+            setIsLoading(false);
+          }
+        }, 8000);
+        
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ Session error:', sessionError);
+          clearTimeout(initTimeout);
+          if (mounted) setIsLoading(false);
+          return;
+        }
         
         if (!mounted) return;
         
+        console.log('📦 Session:', session ? 'Found' : 'Not found');
         setSession(session);
+        
         if (session?.user) {
           console.log('✅ Session found, loading profile...');
-          const profile = await loadUserProfile(session.user);
-          if (mounted) {
-            setUser(profile);
-            console.log('✅ User profile loaded:', profile?.username);
+          
+          try {
+            const profile = await loadUserProfile(session.user);
+            if (mounted) {
+              setUser(profile);
+              console.log('✅ User loaded:', profile ? 'Success' : 'Failed');
+            }
+          } catch (profileError) {
+            console.error('❌ Profile load error:', profileError);
+            if (mounted) setUser(null);
           }
         } else {
           console.log('ℹ️ No active session');
         }
+        
+        clearTimeout(initTimeout);
+        
       } catch (error) {
         console.error('❌ Error initializing auth:', error);
       } finally {
         if (mounted) {
+          console.log('✅ Auth initialization complete');
           setIsLoading(false);
         }
       }
@@ -197,56 +212,58 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     initializeAuth();
 
-    // Listen for auth changes
+    // Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
         
         console.log('🔔 Auth state changed:', event);
         
-        // PENTING: Skip loadUserProfile saat SIGNED_IN dari signup
-        // Biar fungsi register yang handle profile loading
         if (event === 'SIGNED_IN') {
-          console.log('ℹ️ SIGNED_IN event detected, skipping profile load (handled by register function)');
+          console.log('ℹ️ SIGNED_IN event, skipping profile load');
           setSession(session);
-          if (mounted) {
-            setIsLoading(false);
-          }
-          return; // Skip loadUserProfile
+          if (mounted) setIsLoading(false);
+          return;
+        }
+        
+        if (event === 'SIGNED_OUT') {
+          console.log('ℹ️ SIGNED_OUT event');
+          setSession(null);
+          setUser(null);
+          if (mounted) setIsLoading(false);
+          return;
         }
         
         setSession(session);
         
         if (session?.user) {
-          const profile = await loadUserProfile(session.user);
-          if (mounted) {
-            setUser(profile);
+          try {
+            const profile = await loadUserProfile(session.user);
+            if (mounted) setUser(profile);
+          } catch (error) {
+            console.error('❌ Profile load error:', error);
+            if (mounted) setUser(null);
           }
         } else {
-          if (mounted) {
-            setUser(null);
-          }
+          if (mounted) setUser(null);
         }
         
-        if (mounted) {
-          setIsLoading(false);
-        }
+        if (mounted) setIsLoading(false);
       }
     );
 
     return () => {
       mounted = false;
+      if (initTimeout) clearTimeout(initTimeout);
       subscription.unsubscribe();
     };
   }, [loadUserProfile]);
 
-  // ===== FUNGSI REGISTER DENGAN DATABASE TRIGGER - FIXED =====
+  // Register function
   const register = async (userData: RegisterData): Promise<{ success: boolean; error?: string }> => {
     try {
-      console.log('🚀 [1/3] Starting registration for:', userData.email);
+      console.log('🚀 [1/4] Starting registration for:', userData.email);
       
-      // Step 1: SIGNUP KE SUPABASE AUTH (trigger akan auto-create profile)
-      console.log('📝 [2/3] Creating auth account...');
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: userData.email,
         password: userData.password,
@@ -262,103 +279,81 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (authError) {
         console.error('❌ Auth signup error:', authError);
         
-        // Handle specific errors
-        if (authError.message.includes('already registered') || authError.message.includes('User already registered')) {
-          return { 
-            success: false, 
-            error: 'Email sudah terdaftar. Silakan gunakan email lain atau login.' 
-          };
+        if (authError.message.includes('already registered')) {
+          return { success: false, error: 'Email sudah terdaftar.' };
         }
-        
         if (authError.message.includes('Invalid email')) {
-          return { 
-            success: false, 
-            error: 'Format email tidak valid.' 
-          };
+          return { success: false, error: 'Format email tidak valid.' };
         }
-        
         if (authError.message.includes('Password')) {
-          return { 
-            success: false, 
-            error: 'Password terlalu lemah. Minimal 6 karakter.' 
-          };
+          return { success: false, error: 'Password minimal 6 karakter.' };
         }
         
-        return { 
-          success: false, 
-          error: authError.message || 'Gagal membuat akun. Silakan coba lagi.' 
-        };
+        return { success: false, error: authError.message };
       }
 
       if (!authData.user) {
-        console.error('❌ No user returned from auth');
-        return { 
-          success: false, 
-          error: 'Gagal membuat akun. Tidak ada user data.' 
-        };
+        return { success: false, error: 'Gagal membuat akun.' };
       }
 
-      console.log('✅ Auth account created:', authData.user.id);
+      console.log('✅ [2/4] Auth account created:', authData.user.id);
 
-      // Step 2: TUNGGU TRIGGER SELESAI (polling method dengan timeout yang benar)
-      console.log('⏳ [3/3] Waiting for database trigger to complete...');
+      // Wait for database trigger
+      console.log('⏳ [3/4] Waiting for database trigger...');
       
       let profileCreated = false;
       let attempts = 0;
-      const maxAttempts = 8; // 8 attempts x 400ms = 3.2 seconds max
+      const maxAttempts = 8;
       
       while (!profileCreated && attempts < maxAttempts) {
         attempts++;
         
-        // Wait sebelum check (kecuali attempt pertama)
         if (attempts > 1) {
           await new Promise(resolve => setTimeout(resolve, 400));
         }
         
-        console.log(`⏳ Checking profile... attempt ${attempts}/${maxAttempts}`);
+        console.log(`⏳ Checking profile... ${attempts}/${maxAttempts}`);
         
         try {
-          const { data: profile, error: checkError } = await supabase
+          const { data: profile } = await supabase
             .from('users')
             .select('id')
-            .eq('id', authData.user.id)
+            .or(`id.eq.${authData.user.id},auth_user_id.eq.${authData.user.id}`)
             .maybeSingle();
           
-          if (profile && profile.id) {
+          if (profile?.id) {
             profileCreated = true;
-            console.log('✅ Profile created by database trigger');
+            console.log('✅ Profile created');
             break;
           }
-          
-          if (checkError && checkError.code !== 'PGRST116') {
-            console.warn('⚠️ Error checking profile:', checkError.message);
-            // Jangan throw error, lanjutkan polling
-          }
-        } catch (checkError) {
-          console.warn('⚠️ Exception while checking profile:', checkError);
-          // Lanjutkan polling
+        } catch (error) {
+          console.warn('⚠️ Check error:', error);
         }
       }
       
       if (!profileCreated) {
-        console.warn('⚠️ Profile check timeout, but auth successful');
-        // Auth berhasil, anggap registrasi sukses meskipun tidak bisa confirm profile
-        // User bisa langsung login
+        console.warn('⚠️ Profile check timeout');
+      }
+
+      // Logout after registration
+      console.log('👋 [4/4] Logging out after registration...');
+      try {
+        await supabase.auth.signOut();
+        console.log('✅ Logged out');
+      } catch (err) {
+        console.warn('⚠️ Logout error:', err);
       }
 
       console.log('🎉 Registration complete!');
       return { success: true };
       
     } catch (error: any) {
-      console.error('❌ Unexpected registration error:', error);
-      return { 
-        success: false, 
-        error: error?.message || 'Terjadi kesalahan tidak terduga. Silakan coba lagi.' 
-      };
+      console.error('❌ Registration error:', error);
+      return { success: false, error: error?.message || 'Terjadi kesalahan.' };
     }
   };
 
-  // ===== FUNGSI LOGIN =====
+  // Login function
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
       console.log('🔐 Attempting login for:', email);
@@ -382,22 +377,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (!profile) {
           console.error('❌ Profile not found');
           setIsLoading(false);
-          return { success: false, error: 'Profil pengguna tidak ditemukan' };
+          return { success: false, error: 'Profil tidak ditemukan' };
         }
         
-        // Cek status akun
         if (profile.account_status === 'suspended') {
           setIsLoading(false);
-          return { success: false, error: 'Akun Anda telah dinonaktifkan. Hubungi admin.' };
+          return { success: false, error: 'Akun dinonaktifkan.' };
         }
         
         if (profile.account_status === 'inactive') {
           setIsLoading(false);
-          return { success: false, error: 'Akun Anda tidak aktif. Hubungi admin.' };
+          return { success: false, error: 'Akun tidak aktif.' };
         }
         
         setUser(profile);
-        console.log('✅ Login successful for:', profile.username);
+        console.log('✅ Login successful:', profile.username);
       }
 
       setIsLoading(false);
@@ -406,11 +400,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (error: any) {
       console.error('❌ Login error:', error);
       setIsLoading(false);
-      return { success: false, error: error.message || 'Terjadi kesalahan saat login' };
+      return { success: false, error: error.message || 'Terjadi kesalahan' };
     }
   };
 
-  // ===== FUNGSI LOGOUT =====
+  // Logout function
   const logout = async (): Promise<void> => {
     try {
       console.log('👋 Logging out...');
@@ -423,33 +417,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // ===== FUNGSI SWITCH MODE BUYER/SELLER =====
+  // Switch mode function
   const switchMode = async (newMode: 'buyer' | 'seller'): Promise<{ success: boolean; error?: string }> => {
     if (!user) {
       return { success: false, error: 'User tidak ditemukan' };
     }
 
-    // Jika switch ke seller, cek apakah sudah verifikasi
     if (newMode === 'seller') {
       if (user.seller_verification_status === 'unverified') {
-        return { 
-          success: false, 
-          error: 'Anda perlu verifikasi sebagai penjual terlebih dahulu' 
-        };
+        return { success: false, error: 'Perlu verifikasi penjual' };
       }
-      
       if (user.seller_verification_status === 'rejected') {
-        return { 
-          success: false, 
-          error: 'Verifikasi penjual Anda ditolak. Hubungi admin.' 
-        };
+        return { success: false, error: 'Verifikasi ditolak' };
       }
-      
       if (user.seller_verification_status === 'pending') {
-        return { 
-          success: false, 
-          error: 'Verifikasi penjual Anda masih dalam proses' 
-        };
+        return { success: false, error: 'Verifikasi dalam proses' };
       }
     }
 
@@ -466,7 +448,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { success: false, error: error.message };
       }
 
-      // Update local state
       setUser({ ...user, current_mode: newMode });
       console.log(`✅ Mode switched to: ${newMode}`);
       
@@ -478,7 +459,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // ===== HELPER FUNCTIONS =====
+  // Helper functions
   const hasRole = (role: string): boolean => {
     return user?.role === role;
   };

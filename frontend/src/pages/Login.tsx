@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -26,9 +26,10 @@ const FacebookIcon = ({ className }: { className?: string }) => (
     <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" fill="#1877F2"/>
   </svg>
 );
+
 const Login: React.FC = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, isAuthenticated, user, isLoading } = useAuth();
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -45,6 +46,14 @@ const Login: React.FC = () => {
   
   const [generalError, setGeneralError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // ===== REDIRECT IF ALREADY LOGGED IN =====
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && user) {
+      console.log('✅ User already authenticated, redirecting to dashboard...');
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, user, isLoading, navigate]);
 
   const validateForm = () => {
     const newErrors = { email: '', password: '' };
@@ -90,35 +99,89 @@ const Login: React.FC = () => {
     }
   };
 
+  // ===== FIXED: handleSubmit dengan Database Integration =====
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validasi form
     if (!validateForm()) {
+      console.log('⚠️ Form validation failed');
       return;
     }
     
+    console.log('=== LOGIN START ===');
+    
+    // Reset error state
     setGeneralError('');
+    
+    // Start loading
     setIsSubmitting(true);
+    console.log('🔐 Starting login process...');
     
     try {
+      console.log('📤 Calling login function with email:', formData.email);
+      
+      // Call login function dari AuthContext
       const result = await login(formData.email, formData.password);
       
+      console.log('📥 Login result:', result);
+      
       if (result.success) {
-        // Show success alert
-        alert('🎉 Login berhasil! Selamat datang kembali.');
-        navigate('/dashboard');
+        console.log('✅ Login successful!');
+        
+        // Clear form
+        setFormData({
+          email: '',
+          password: '',
+          rememberMe: false
+        });
+        setErrors({ email: '', password: '' });
+        
+        // Show success notification
+        alert('🎉 Login Berhasil!\n\nSelamat datang kembali!');
+        
+        // Redirect ke dashboard
+        console.log('🔀 Redirecting to dashboard...');
+        setTimeout(() => {
+          navigate('/dashboard', { replace: true });
+        }, 500);
+        
       } else {
-        // Show error alert
-        alert('❌ Login gagal! ' + (result.error || 'Username atau password salah. Silakan coba lagi.'));
-        setGeneralError(result.error || 'Username atau password salah. Silakan coba lagi.');
+        // Handle login error
+        console.error('❌ Login failed:', result.error);
+        
+        let errorMessage = result.error || 'Login gagal. Silakan coba lagi.';
+        
+        // Customize error messages
+        if (errorMessage.includes('Invalid login credentials')) {
+          errorMessage = 'Email atau password salah. Silakan coba lagi.';
+        } else if (errorMessage.includes('Email not confirmed')) {
+          errorMessage = 'Email Anda belum diverifikasi. Silakan cek inbox email Anda.';
+        } else if (errorMessage.includes('Account not found')) {
+          errorMessage = 'Akun tidak ditemukan. Silakan daftar terlebih dahulu.';
+        }
+        
+        setGeneralError(errorMessage);
+        
+        // Scroll ke atas untuk melihat error
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      const errorMessage = 'Terjadi kesalahan saat login. Silakan coba lagi.';
-      alert('❌ ' + errorMessage);
+      
+    } catch (error: any) {
+      // Handle unexpected error
+      console.error('❌ Unexpected login error:', error);
+      
+      const errorMessage = error?.message || 'Terjadi kesalahan. Silakan coba lagi.';
       setGeneralError(errorMessage);
+      
+      // Scroll ke atas untuk melihat error
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      
     } finally {
+      // PENTING: Selalu set isSubmitting ke false untuk stop loading
+      console.log('✋ Stopping loading state...');
       setIsSubmitting(false);
+      console.log('=== LOGIN END ===');
     }
   };
 
@@ -129,6 +192,18 @@ const Login: React.FC = () => {
   const handleFacebookLogin = () => {
     alert('🚧 Fitur login dengan Facebook akan segera tersedia!');
   };
+
+  // Show loading state while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Memuat...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center p-4">
@@ -171,17 +246,18 @@ const Login: React.FC = () => {
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-medium text-gray-700 flex items-center gap-2">
                   <User className="w-4 h-4" />
-                  Username atau Email
+                  Email
                 </Label>
                 <Input
                   id="email"
                   name="email"
                   type="email"
-                  placeholder="harisfalih@gmail.com"
+                  placeholder="email@example.com"
                   value={formData.email}
                   onChange={handleInputChange}
                   className={`h-12 bg-blue-50/50 border-blue-200 focus:border-blue-400 focus:ring-blue-400 ${errors.email ? 'border-red-500' : ''}`}
                   disabled={isSubmitting}
+                  autoComplete="email"
                 />
                 {errors.email && (
                   <p className="text-red-500 text-xs mt-1">{errors.email}</p>
@@ -203,6 +279,7 @@ const Login: React.FC = () => {
                     onChange={handleInputChange}
                     className={`h-12 pr-12 bg-blue-50/50 border-blue-200 focus:border-blue-400 focus:ring-blue-400 ${errors.password ? 'border-red-500' : ''}`}
                     disabled={isSubmitting}
+                    autoComplete="current-password"
                   />
                   <button
                     type="button"
@@ -229,7 +306,7 @@ const Login: React.FC = () => {
                     }
                     disabled={isSubmitting}
                   />
-                  <Label htmlFor="rememberMe" className="text-sm text-gray-600">
+                  <Label htmlFor="rememberMe" className="text-sm text-gray-600 cursor-pointer">
                     Ingat saya
                   </Label>
                 </div>
@@ -243,11 +320,20 @@ const Login: React.FC = () => {
 
               <Button
                 type="submit"
-                className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-all duration-200 flex items-center justify-center gap-2"
+                className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={!formData.email || !formData.password || isSubmitting}
               >
-                <LogIn className="w-5 h-5" />
-                {isSubmitting ? 'Memproses...' : 'Masuk'}
+                {isSubmitting ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Memproses...
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-5 h-5" />
+                    Masuk
+                  </>
+                )}
               </Button>
             </form>
             
@@ -267,6 +353,7 @@ const Login: React.FC = () => {
                   variant="outline"
                   className="w-full h-12 border-gray-300 hover:bg-gray-50 flex items-center justify-center gap-3"
                   onClick={handleGoogleLogin}
+                  disabled={isSubmitting}
                 >
                   <GoogleIcon className="w-5 h-5" />
                   <span className="text-gray-700">Masuk dengan Google</span>
@@ -277,6 +364,7 @@ const Login: React.FC = () => {
                   variant="outline"
                   className="w-full h-12 border-gray-300 hover:bg-gray-50 flex items-center justify-center gap-3"
                   onClick={handleFacebookLogin}
+                  disabled={isSubmitting}
                 >
                   <FacebookIcon className="w-5 h-5" />
                   <span className="text-gray-700">Masuk dengan Facebook</span>
