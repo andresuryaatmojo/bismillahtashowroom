@@ -39,12 +39,14 @@ export interface User extends UserProfile {
 
 interface AuthContextType {
   user: User | null;
+  profile: User | null;
   session: Session | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (userData: RegisterData) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
   hasRole: (role: string) => boolean;
   hasPermission: (permission: string) => boolean;
   switchMode: (newMode: 'buyer' | 'seller') => Promise<{ success: boolean; error?: string }>;
@@ -65,7 +67,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Get permissions by role
   const getPermissionsByRole = useCallback((role: string): string[] => {
     const rolePermissions: { [key: string]: string[] } = {
       owner: [
@@ -87,7 +88,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return rolePermissions[role] || rolePermissions['user'];
   }, []);
 
-  // Load user profile
   const loadUserProfile = useCallback(async (authUser: SupabaseUser): Promise<User | null> => {
     try {
       console.log('📥 [1/3] Loading profile for user:', authUser.id);
@@ -120,7 +120,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           permissions: getPermissionsByRole(profile.role)
         };
         
-        // Update last_login (non-blocking)
         (async () => {
           try {
             const { error } = await supabase
@@ -150,7 +149,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [getPermissionsByRole]);
 
-  // Initialize auth
   useEffect(() => {
     let mounted = true;
     let initTimeout: NodeJS.Timeout;
@@ -159,7 +157,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         console.log('🔄 Initializing auth...');
         
-        // Timeout failsafe
         initTimeout = setTimeout(() => {
           if (mounted) {
             console.error('❌ Auth initialization timeout after 8s');
@@ -212,7 +209,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     initializeAuth();
 
-    // Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
@@ -259,7 +255,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [loadUserProfile]);
 
-  // Register function
   const register = async (userData: RegisterData): Promise<{ success: boolean; error?: string }> => {
     try {
       console.log('🚀 [1/4] Starting registration for:', userData.email);
@@ -298,7 +293,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       console.log('✅ [2/4] Auth account created:', authData.user.id);
 
-      // Wait for database trigger
       console.log('⏳ [3/4] Waiting for database trigger...');
       
       let profileCreated = false;
@@ -335,7 +329,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.warn('⚠️ Profile check timeout');
       }
 
-      // Logout after registration
       console.log('👋 [4/4] Logging out after registration...');
       try {
         await supabase.auth.signOut();
@@ -353,7 +346,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Login function
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
       console.log('🔐 Attempting login for:', email);
@@ -404,7 +396,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Logout function
   const logout = async (): Promise<void> => {
     try {
       console.log('👋 Logging out...');
@@ -417,7 +408,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Switch mode function
+  const refreshProfile = async (): Promise<void> => {
+    if (session?.user) {
+      console.log('🔄 Refreshing profile...');
+      try {
+        const profile = await loadUserProfile(session.user);
+        setUser(profile);
+        console.log('✅ Profile refreshed');
+      } catch (error) {
+        console.error('❌ Error refreshing profile:', error);
+      }
+    } else {
+      console.warn('⚠️ No session, cannot refresh profile');
+    }
+  };
+
   const switchMode = async (newMode: 'buyer' | 'seller'): Promise<{ success: boolean; error?: string }> => {
     if (!user) {
       return { success: false, error: 'User tidak ditemukan' };
@@ -459,7 +464,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Helper functions
   const hasRole = (role: string): boolean => {
     return user?.role === role;
   };
@@ -470,12 +474,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const value: AuthContextType = {
     user,
+    profile: user,
     session,
     isAuthenticated: !!session && !!user,
     isLoading,
     login,
     register,
     logout,
+    refreshProfile,
     hasRole,
     hasPermission,
     switchMode
