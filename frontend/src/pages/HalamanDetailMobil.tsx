@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -12,56 +12,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { Separator } from '../components/ui/separator';
 import { 
-  Car, 
-  Phone, 
-  MapPin, 
-  Star, 
-  Calendar, 
-  Clock, 
-  CheckCircle, 
-  Fuel, 
-  Gauge, 
-  Settings, 
-  Zap,
-  Shield,
-  Award,
-  CreditCard
+  Car, Phone, MapPin, Star, Calendar, Clock, CheckCircle, 
+  Fuel, Gauge, Settings, Zap, Shield, Award, CreditCard, ArrowLeft, Loader2
 } from 'lucide-react';
-
-interface CarData {
-  id: string;
-  brand: string;
-  model: string;
-  year: number;
-  price: number;
-  originalPrice?: number;
-  images: string[];
-  description: string;
-  specifications: {
-    engine: string;
-    power: string;
-    torque: string;
-    transmission: string;
-    fuelType: string;
-    fuelCapacity: string;
-    seating: number;
-    dimensions: {
-      length: number;
-      width: number;
-      height: number;
-    };
-    features: string[];
-  };
-  dealer: {
-    name: string;
-    location: string;
-    phone: string;
-    rating: number;
-  };
-  condition: 'new' | 'used';
-  mileage?: number;
-  status: 'available' | 'sold' | 'reserved';
-}
+import { carService } from '../services/carService';
+import { testDriveService } from '../services/testDriveService';
+import { supabase } from '../lib/supabase';
 
 interface BookingForm {
   fullName: string;
@@ -75,8 +31,10 @@ interface BookingForm {
 
 const HalamanDetailMobil: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const [car, setCar] = useState<CarData | null>(null);
+  const navigate = useNavigate();
+  const [car, setCar] = useState<any | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [bookingForm, setBookingForm] = useState<BookingForm>({
     fullName: '',
     email: '',
@@ -89,69 +47,56 @@ const HalamanDetailMobil: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadCarData();
+    loadUser();
   }, [id]);
 
-  const loadCarData = () => {
+  const loadUser = async () => {
+    const { data } = await supabase.auth.getUser();
+    if (data.user) {
+      setCurrentUser(data.user);
+      // Pre-fill form if user logged in
+      const { data: userData } = await supabase
+        .from('users')
+        .select('full_name, email, phone_number')
+        .eq('auth_user_id', data.user.id)
+        .single();
+      
+      if (userData) {
+        setBookingForm(prev => ({
+          ...prev,
+          fullName: userData.full_name || '',
+          email: userData.email || '',
+          phone: userData.phone_number || ''
+        }));
+      }
+    }
+  };
+
+  const loadCarData = async () => {
+    if (!id) return;
+    
     setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      const mockCar: CarData = {
-        id: id || '1',
-        brand: 'Toyota',
-        model: 'Camry Hybrid',
-        year: 2024,
-        price: 750000000,
-        originalPrice: 800000000,
-        images: [
-          'https://via.placeholder.com/800x600/0066CC/FFFFFF?text=Toyota+Camry+1',
-          'https://via.placeholder.com/800x600/0066CC/FFFFFF?text=Toyota+Camry+2',
-          'https://via.placeholder.com/800x600/0066CC/FFFFFF?text=Toyota+Camry+3',
-          'https://via.placeholder.com/800x600/0066CC/FFFFFF?text=Toyota+Camry+4'
-        ],
-        description: 'Sedan premium dengan teknologi hybrid terdepan, memberikan efisiensi bahan bakar optimal tanpa mengorbankan performa. Dilengkapi dengan fitur keselamatan Toyota Safety Sense 2.5+ dan interior mewah dengan teknologi terkini.',
-        specifications: {
-          engine: '2.5L 4-Cylinder Hybrid',
-          power: '215 HP Combined',
-          torque: '221 Nm @ 3,600-5,200 rpm',
-          transmission: 'CVT Automatic',
-          fuelType: 'Hybrid (Bensin + Listrik)',
-          fuelCapacity: '50 Liter',
-          seating: 5,
-          dimensions: {
-            length: 4885,
-            width: 1840,
-            height: 1455
-          },
-          features: [
-            'Toyota Safety Sense 2.5+',
-            'Adaptive Cruise Control',
-            'Lane Departure Alert',
-            'Pre-Collision System',
-            'Automatic High Beam',
-            'Wireless Charging Pad',
-            'Premium JBL Audio System',
-            'Dual Zone Climate Control',
-            'Smart Entry & Push Start',
-            'LED Headlights & Taillights',
-            '9-inch Touchscreen Display',
-            'Apple CarPlay & Android Auto'
-          ]
-        },
-        dealer: {
-          name: 'Toyota Fatmawati',
-          location: 'Jakarta Selatan',
-          phone: '021-7501234',
-          rating: 4.8
-        },
-        condition: 'new',
-        status: 'available'
-      };
-      setCar(mockCar);
+    setError(null);
+    
+    try {
+      const carData = await carService.getCarById(id);
+      
+      if (!carData) {
+        setError('Mobil tidak ditemukan');
+        return;
+      }
+      
+      setCar(carData);
+    } catch (err) {
+      console.error('Error loading car:', err);
+      setError('Gagal memuat data mobil');
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const formatCurrency = (amount: number): string => {
@@ -164,54 +109,125 @@ const HalamanDetailMobil: React.FC = () => {
 
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!currentUser) {
+      alert('Silakan login terlebih dahulu untuk booking test drive');
+      navigate('/login');
+      return;
+    }
+
+    if (!id) return;
+
     setSubmitting(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      setSubmitting(false);
-      setShowSuccessModal(true); // Show success modal
-      // Reset form
-      setBookingForm({
-        fullName: '',
-        email: '',
-        phone: '',
-        preferredDate: '',
-        preferredTime: '',
-        message: '',
-        bookingType: 'test-drive'
+    try {
+      console.log('Submitting test drive request...');
+      
+      // Create test drive request - pass currentUser.id (auth user ID)
+      const result = await testDriveService.createTestDrive(currentUser.id, {
+        car_id: id,
+        scheduled_date: bookingForm.preferredDate,
+        scheduled_time: bookingForm.preferredTime,
+        user_notes: bookingForm.message,
+        location: 'Showroom'
       });
-    }, 2000);
+
+      console.log('Test drive result:', result);
+
+      if (result.success) {
+        setShowSuccessModal(true);
+        // Reset form
+        setBookingForm(prev => ({
+          ...prev,
+          preferredDate: '',
+          preferredTime: '',
+          message: ''
+        }));
+      } else {
+        alert(result.error || 'Gagal membuat permintaan test drive');
+      }
+    } catch (error) {
+      console.error('Error submitting booking:', error);
+      alert('Terjadi kesalahan saat memproses permintaan');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const timeSlots = [
     '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00'
   ];
 
+  // Map fuel types
+  const getFuelTypeLabel = (type: string) => {
+    const labels: any = {
+      'gasoline': 'Bensin',
+      'diesel': 'Diesel',
+      'electric': 'Listrik',
+      'hybrid': 'Hybrid',
+      'phev': 'PHEV'
+    };
+    return labels[type] || type;
+  };
+
+  // Map transmission types
+  const getTransmissionLabel = (type: string) => {
+    const labels: any = {
+      'manual': 'Manual',
+      'automatic': 'Automatic',
+      'cvt': 'CVT',
+      'dct': 'DCT',
+      'amt': 'AMT'
+    };
+    return labels[type] || type;
+  };
+
+  // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">Memuat detail mobil...</p>
         </div>
       </div>
     );
   }
 
-  if (!car) {
+  // Error state
+  if (error || !car) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Mobil Tidak Ditemukan</h2>
-          <p className="text-gray-600">Mobil yang Anda cari tidak tersedia.</p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">
+            {error || 'Mobil Tidak Ditemukan'}
+          </h2>
+          <p className="text-gray-600 mb-6">Mobil yang Anda cari tidak tersedia.</p>
+          <Button onClick={() => navigate('/katalog')}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Kembali ke Katalog
+          </Button>
         </div>
       </div>
     );
   }
 
+  const primaryImage = car.car_images?.find((img: any) => img.is_primary) || car.car_images?.[0];
+  const specs = car.car_specifications || {};
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Back Button */}
+        <Button 
+          variant="ghost" 
+          className="mb-4"
+          onClick={() => navigate('/katalog')}
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Kembali ke Katalog
+        </Button>
+
         {/* Header */}
         <motion.div 
           className="mb-8"
@@ -222,8 +238,9 @@ const HalamanDetailMobil: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-bold text-gray-900">
-                {car.brand} {car.model} {car.year}
+                {car.car_brands.name} {car.car_models.name} {car.year}
               </h1>
+              <p className="text-lg text-gray-600 mt-1">{car.title}</p>
               <div className="flex items-center mt-2 space-x-4">
                 <Badge variant={car.condition === 'new' ? 'default' : 'secondary'}>
                   <Car className="w-3 h-3 mr-1" />
@@ -233,27 +250,36 @@ const HalamanDetailMobil: React.FC = () => {
                   <CheckCircle className="w-3 h-3 mr-1" />
                   {car.status === 'available' ? 'Tersedia' : 'Tidak Tersedia'}
                 </Badge>
+                {car.is_verified && (
+                  <Badge className="bg-emerald-500">
+                    <CheckCircle className="w-3 h-3 mr-1" />
+                    Terverifikasi
+                  </Badge>
+                )}
                 <div className="flex items-center text-yellow-500">
                   <Star className="w-4 h-4 mr-1 fill-current" />
-                  <span className="text-sm font-medium">{car.dealer.rating}</span>
+                  <span className="text-sm font-medium">{car.average_rating?.toFixed(1) || '0.0'}</span>
                 </div>
               </div>
             </div>
             <div className="text-right">
-              <div className="text-3xl font-bold text-primary">
+              <div className="text-3xl font-bold text-blue-600">
                 {formatCurrency(car.price)}
               </div>
-              {car.originalPrice && car.originalPrice > car.price && (
+              {car.market_price && car.market_price > car.price && (
                 <div className="text-lg text-gray-500 line-through">
-                  {formatCurrency(car.originalPrice)}
+                  {formatCurrency(car.market_price)}
                 </div>
+              )}
+              {car.is_negotiable && (
+                <Badge variant="outline" className="mt-2">Harga Nego</Badge>
               )}
             </div>
           </div>
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column - Images and Details */}
+          {/* Left Column */}
           <div className="lg:col-span-2 space-y-8">
             {/* Image Gallery */}
             <motion.div
@@ -265,22 +291,22 @@ const HalamanDetailMobil: React.FC = () => {
                 <CardContent className="p-0">
                   <div className="relative">
                     <img
-                      src={car.images[selectedImageIndex]}
-                      alt={`${car.brand} ${car.model}`}
+                      src={car.car_images[selectedImageIndex]?.image_url || 'https://via.placeholder.com/800x600'}
+                      alt={car.title}
                       className="w-full h-96 object-cover"
                     />
                     <div className="absolute bottom-4 left-4 right-4">
                       <div className="flex space-x-2 overflow-x-auto">
-                        {car.images.map((image, index) => (
+                        {car.car_images.map((image: any, index: number) => (
                           <button
-                            key={index}
+                            key={image.id}
                             onClick={() => setSelectedImageIndex(index)}
                             className={`flex-shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-colors ${
-                              selectedImageIndex === index ? 'border-primary' : 'border-white'
+                              selectedImageIndex === index ? 'border-blue-600' : 'border-white'
                             }`}
                           >
                             <img
-                              src={image}
+                              src={image.image_url}
                               alt={`Thumbnail ${index + 1}`}
                               className="w-full h-full object-cover"
                             />
@@ -307,106 +333,168 @@ const HalamanDetailMobil: React.FC = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-gray-600 leading-relaxed">{car.description}</p>
+                  <p className="text-gray-600 leading-relaxed">
+                    {car.description || 'Tidak ada deskripsi tersedia.'}
+                  </p>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <Gauge className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+                      <div className="font-bold">{car.mileage?.toLocaleString() || 0} km</div>
+                      <div className="text-sm text-gray-600">Kilometer</div>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <Settings className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+                      <div className="font-bold">{getTransmissionLabel(car.transmission)}</div>
+                      <div className="text-sm text-gray-600">Transmisi</div>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <Fuel className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+                      <div className="font-bold">{getFuelTypeLabel(car.fuel_type)}</div>
+                      <div className="text-sm text-gray-600">Bahan Bakar</div>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <Zap className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+                      <div className="font-bold">{car.engine_capacity || 0} cc</div>
+                      <div className="text-sm text-gray-600">Mesin</div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </motion.div>
 
             {/* Specifications */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Settings className="w-5 h-5 mr-2" />
-                    Spesifikasi
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Engine & Performance */}
-                  <div>
-                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                      <Zap className="w-4 h-4 mr-2" />
-                      Mesin & Performa
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600 flex items-center">
-                          <Gauge className="w-4 h-4 mr-1" />
-                          Mesin
-                        </span>
-                        <span className="font-medium">{car.specifications.engine}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Tenaga</span>
-                        <span className="font-medium">{car.specifications.power}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Torsi</span>
-                        <span className="font-medium">{car.specifications.torque}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Transmisi</span>
-                        <span className="font-medium">{car.specifications.transmission}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600 flex items-center">
-                          <Fuel className="w-4 h-4 mr-1" />
-                          Bahan Bakar
-                        </span>
-                        <span className="font-medium">{car.specifications.fuelType}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Kapasitas Tangki</span>
-                        <span className="font-medium">{car.specifications.fuelCapacity}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  {/* Dimensions */}
-                  <div>
-                    <h4 className="font-semibold text-gray-900 mb-3">Dimensi</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Panjang</span>
-                        <span className="font-medium">{car.specifications.dimensions.length} mm</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Lebar</span>
-                        <span className="font-medium">{car.specifications.dimensions.width} mm</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Tinggi</span>
-                        <span className="font-medium">{car.specifications.dimensions.height} mm</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  {/* Features */}
-                  <div>
-                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                      <Shield className="w-4 h-4 mr-2" />
-                      Fitur
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {car.specifications.features.map((feature, index) => (
-                        <div key={index} className="flex items-center">
-                          <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                          <span className="text-sm text-gray-700">{feature}</span>
+            {specs && (
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6, delay: 0.4 }}
+              >
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <Settings className="w-5 h-5 mr-2" />
+                      Spesifikasi Detail
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-2 gap-4">
+                      {specs.doors && (
+                        <div className="flex justify-between py-2 border-b">
+                          <span className="text-gray-600">Pintu</span>
+                          <span className="font-medium">{specs.doors}</span>
                         </div>
-                      ))}
+                      )}
+                      {specs.seats && (
+                        <div className="flex justify-between py-2 border-b">
+                          <span className="text-gray-600">Tempat Duduk</span>
+                          <span className="font-medium">{specs.seats}</span>
+                        </div>
+                      )}
+                      {specs.airbags && (
+                        <div className="flex justify-between py-2 border-b">
+                          <span className="text-gray-600">Airbags</span>
+                          <span className="font-medium">{specs.airbags}</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+
+                    <Separator />
+
+                    {/* Safety Features */}
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                        <Shield className="w-4 h-4 mr-2" />
+                        Fitur Keselamatan
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        {specs.has_abs && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">ABS</span>
+                          </div>
+                        )}
+                        {specs.has_ebd && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">EBD</span>
+                          </div>
+                        )}
+                        {specs.has_esc && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">ESC</span>
+                          </div>
+                        )}
+                        {specs.has_parking_sensor && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Parking Sensor</span>
+                          </div>
+                        )}
+                        {specs.has_parking_camera && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Parking Camera</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Comfort Features */}
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-3">Fitur Kenyamanan</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        {specs.has_ac && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">AC</span>
+                          </div>
+                        )}
+                        {specs.has_power_steering && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Power Steering</span>
+                          </div>
+                        )}
+                        {specs.has_power_window && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Power Window</span>
+                          </div>
+                        )}
+                        {specs.has_central_lock && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Central Lock</span>
+                          </div>
+                        )}
+                        {specs.has_keyless_entry && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Keyless Entry</span>
+                          </div>
+                        )}
+                        {specs.has_push_start && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Push Start</span>
+                          </div>
+                        )}
+                        {specs.has_sunroof && (
+                          <div className="flex items-center">
+                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm">Sunroof</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
 
             {/* Dealer Information */}
             <motion.div
@@ -418,39 +506,46 @@ const HalamanDetailMobil: React.FC = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Award className="w-5 h-5 mr-2" />
-                    Informasi Dealer
+                    Informasi Penjual
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-start space-x-4">
                     <Avatar className="w-16 h-16">
-                      <AvatarImage src="/api/placeholder/64/64" alt={car.dealer.name} />
-                      <AvatarFallback>{car.dealer.name.charAt(0)}</AvatarFallback>
+                      <AvatarFallback>{car.users.full_name?.charAt(0) || 'S'}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 space-y-3">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Nama Dealer</span>
-                        <span className="font-medium">{car.dealer.name}</span>
+                        <span className="text-gray-600">Nama</span>
+                        <span className="font-medium">{car.users.full_name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Tipe</span>
+                        <span className="font-medium">
+                          {car.seller_type === 'showroom' ? 'Showroom' : 'Penjual Eksternal'}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600 flex items-center">
                           <MapPin className="w-4 h-4 mr-1" />
                           Lokasi
                         </span>
-                        <span className="font-medium">{car.dealer.location}</span>
+                        <span className="font-medium">{car.location_city}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 flex items-center">
-                          <Phone className="w-4 h-4 mr-1" />
-                          Telepon
-                        </span>
-                        <span className="font-medium">{car.dealer.phone}</span>
-                      </div>
+                      {car.users.phone_number && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 flex items-center">
+                            <Phone className="w-4 h-4 mr-1" />
+                            Telepon
+                          </span>
+                          <span className="font-medium">{car.users.phone_number}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span className="text-gray-600">Rating</span>
                         <div className="flex items-center">
                           <Star className="w-4 h-4 text-yellow-500 mr-1 fill-current" />
-                          <span className="font-medium">{car.dealer.rating}/5.0</span>
+                          <span className="font-medium">{car.users.seller_rating?.toFixed(1) || '0.0'}/5.0</span>
                         </div>
                       </div>
                     </div>
@@ -472,7 +567,7 @@ const HalamanDetailMobil: React.FC = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Calendar className="w-5 h-5 mr-2" />
-                    Book Test / Test Drive
+                    Booking Test Drive
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -528,6 +623,7 @@ const HalamanDetailMobil: React.FC = () => {
                       <Select 
                         value={bookingForm.preferredTime} 
                         onValueChange={(value) => setBookingForm({...bookingForm, preferredTime: value})}
+                        required
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Pilih waktu" />
@@ -546,32 +642,6 @@ const HalamanDetailMobil: React.FC = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="bookingType">Jenis Booking</Label>
-                      <Select 
-                        value={bookingForm.bookingType} 
-                        onValueChange={(value) => setBookingForm({...bookingForm, bookingType: value as 'test-drive' | 'purchase-inquiry'})}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="test-drive">
-                            <div className="flex items-center">
-                              <Car className="w-4 h-4 mr-2" />
-                              Test Drive
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="purchase-inquiry">
-                            <div className="flex items-center">
-                              <CreditCard className="w-4 h-4 mr-2" />
-                              Konsultasi Pembelian
-                            </div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
                       <Label htmlFor="message">Pesan (Opsional)</Label>
                       <Textarea
                         id="message"
@@ -585,10 +655,17 @@ const HalamanDetailMobil: React.FC = () => {
                     <Button
                       type="submit"
                       size="lg"
-                      className="w-full"
-                      disabled={submitting}
+                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
+                      disabled={submitting || car.status !== 'available'}
                     >
-                      {submitting ? 'Memproses...' : 'Kirim Permintaan'}
+                      {submitting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Memproses...
+                        </>
+                      ) : (
+                        'Kirim Permintaan'
+                      )}
                     </Button>
                   </form>
 
@@ -597,7 +674,7 @@ const HalamanDetailMobil: React.FC = () => {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-lg font-semibold text-gray-900">Harga</span>
-                      <span className="text-2xl font-bold text-primary">{formatCurrency(car.price)}</span>
+                      <span className="text-2xl font-bold text-blue-600">{formatCurrency(car.price)}</span>
                     </div>
                     
                     <div className="space-y-2 text-sm text-gray-600">
@@ -606,7 +683,7 @@ const HalamanDetailMobil: React.FC = () => {
                         <span className="font-medium">{formatCurrency(Math.floor(car.price / 60))}/bulan</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>DP minimal</span>
+                        <span>DP minimal (20%)</span>
                         <span className="font-medium">{formatCurrency(Math.floor(car.price * 0.2))}</span>
                       </div>
                     </div>
@@ -615,6 +692,7 @@ const HalamanDetailMobil: React.FC = () => {
                       variant="outline"
                       size="lg"
                       className="w-full"
+                      onClick={() => alert('Fitur simulasi kredit segera hadir!')}
                     >
                       <CreditCard className="w-4 h-4 mr-2" />
                       Simulasi Kredit
@@ -640,17 +718,16 @@ const HalamanDetailMobil: React.FC = () => {
           </DialogHeader>
           <div className="text-center space-y-4">
             <DialogDescription>
-              Terima kasih! Permintaan {bookingForm.bookingType === 'test-drive' ? 'test drive' : 'konsultasi'} Anda telah diterima.
+              Terima kasih! Permintaan test drive Anda telah diterima.
             </DialogDescription>
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Detail Permintaan:</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-sm text-gray-600">
-                <div>Mobil: {car.brand} {car.model} {car.year}</div>
+                <div>Mobil: {car.car_brands.name} {car.car_models.name} {car.year}</div>
                 <div>Tanggal: {bookingForm.preferredDate}</div>
                 <div>Waktu: {bookingForm.preferredTime}</div>
-                <div>Jenis: {bookingForm.bookingType === 'test-drive' ? 'Test Drive' : 'Konsultasi Pembelian'}</div>
               </CardContent>
             </Card>
             <p className="text-sm text-gray-500">
