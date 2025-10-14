@@ -48,10 +48,23 @@ const AppContent: React.FC = () => {
   const location = useLocation();
   
   const authPages = ['/login', '/register'];
-  const guestPages = ['/', '/katalog', '/artikel', '/kemitraan', '/simulasi', '/perbandingan', '/test-drive', '/trade-in'];
+  const guestPages = [
+    '/', 
+    '/katalog', 
+    '/artikel', 
+    '/kemitraan', 
+    '/simulasi', 
+    '/perbandingan', 
+    '/test-drive', 
+    '/trade-in'
+  ];
   
   const isAuthPage = authPages.includes(location.pathname);
-  const isGuestPage = guestPages.includes(location.pathname);
+  
+  // Check if current path is guest page or artikel detail page
+  const isGuestPage = guestPages.includes(location.pathname) || 
+                      location.pathname.startsWith('/artikel/');
+  
   const isAuthenticatedPage = !isAuthPage && !isGuestPage;
 
   return (
@@ -63,7 +76,11 @@ const AppContent: React.FC = () => {
         {/* PUBLIC ROUTES */}
         <Route path="/" element={<HalamanBeranda />} />
         <Route path="/katalog" element={<HalamanKatalog />} />
+        
+        {/* ARTIKEL ROUTES */}
         <Route path="/artikel" element={<HalamanArtikel />} />
+        <Route path="/artikel/:slug" element={<HalamanArtikel />} />
+        
         <Route path="/kemitraan" element={<HalamanKemitraan />} />
         <Route path="/simulasi" element={<HalamanSimulasi />} />
         <Route path="/perbandingan" element={<HalamanPerbandingan />} />
@@ -209,4 +226,4 @@ function App() {
   );
 }
 
-export default App
+export default App;

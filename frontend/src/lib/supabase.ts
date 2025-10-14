@@ -107,6 +107,211 @@ export interface Database {
           updated_at?: string;
         };
       };
+      articles: {
+        Row: {
+          id: string;
+          category_id: number;
+          author_id: string;
+          title: string;
+          slug: string;
+          excerpt: string | null;
+          content: string;
+          featured_image: string | null;
+          featured_image_alt: string | null;
+          gallery_images: any | null;
+          meta_title: string | null;
+          meta_description: string | null;
+          seo_keywords: string | null;
+          status: 'draft' | 'review' | 'published' | 'archived' | 'deleted';
+          is_featured: boolean | null;
+          is_pinned: boolean | null;
+          visibility: 'public' | 'private' | 'members_only' | null;
+          view_count: number | null;
+          share_count: number | null;
+          like_count: number | null;
+          comment_count: number | null;
+          reading_time_minutes: number | null;
+          published_at: string | null;
+          scheduled_publish_at: string | null;
+          related_car_brands: any | null;
+          related_car_models: any | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          category_id: number;
+          author_id: string;
+          title: string;
+          slug?: string;
+          excerpt?: string | null;
+          content: string;
+          featured_image?: string | null;
+          featured_image_alt?: string | null;
+          gallery_images?: any | null;
+          meta_title?: string | null;
+          meta_description?: string | null;
+          seo_keywords?: string | null;
+          status?: 'draft' | 'review' | 'published' | 'archived' | 'deleted';
+          is_featured?: boolean | null;
+          is_pinned?: boolean | null;
+          visibility?: 'public' | 'private' | 'members_only' | null;
+          view_count?: number | null;
+          share_count?: number | null;
+          like_count?: number | null;
+          comment_count?: number | null;
+          reading_time_minutes?: number | null;
+          published_at?: string | null;
+          scheduled_publish_at?: string | null;
+          related_car_brands?: any | null;
+          related_car_models?: any | null;
+        };
+        Update: {
+          category_id?: number;
+          author_id?: string;
+          title?: string;
+          slug?: string;
+          excerpt?: string | null;
+          content?: string;
+          featured_image?: string | null;
+          featured_image_alt?: string | null;
+          gallery_images?: any | null;
+          meta_title?: string | null;
+          meta_description?: string | null;
+          seo_keywords?: string | null;
+          status?: 'draft' | 'review' | 'published' | 'archived' | 'deleted';
+          is_featured?: boolean | null;
+          is_pinned?: boolean | null;
+          visibility?: 'public' | 'private' | 'members_only' | null;
+          view_count?: number | null;
+          share_count?: number | null;
+          like_count?: number | null;
+          comment_count?: number | null;
+          reading_time_minutes?: number | null;
+          published_at?: string | null;
+          scheduled_publish_at?: string | null;
+          related_car_brands?: any | null;
+          related_car_models?: any | null;
+          updated_at?: string;
+        };
+      };
+      article_categories: {
+        Row: {
+          id: number;
+          name: string;
+          slug: string;
+          description: string | null;
+          icon: string | null;
+          parent_id: number | null;
+          display_order: number | null;
+          is_active: boolean | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          name: string;
+          slug: string;
+          description?: string | null;
+          icon?: string | null;
+          parent_id?: number | null;
+          display_order?: number | null;
+          is_active?: boolean | null;
+        };
+        Update: {
+          name?: string;
+          slug?: string;
+          description?: string | null;
+          icon?: string | null;
+          parent_id?: number | null;
+          display_order?: number | null;
+          is_active?: boolean | null;
+          updated_at?: string;
+        };
+      };
+      article_tags: {
+        Row: {
+          id: number;
+          name: string;
+          slug: string;
+          description: string | null;
+          usage_count: number | null;
+          is_active: boolean | null;
+          created_at: string;
+        };
+        Insert: {
+          name: string;
+          slug: string;
+          description?: string | null;
+          usage_count?: number | null;
+          is_active?: boolean | null;
+        };
+        Update: {
+          name?: string;
+          slug?: string;
+          description?: string | null;
+          usage_count?: number | null;
+          is_active?: boolean | null;
+        };
+      };
+      article_tags_relation: {
+        Row: {
+          article_id: string;
+          tag_id: number;
+          created_at: string;
+        };
+        Insert: {
+          article_id: string;
+          tag_id: number;
+        };
+        Update: {
+          article_id?: string;
+          tag_id?: number;
+        };
+      };
+      cars: {
+        Row: {
+          id: string;
+          brand: string;
+          model: string;
+          year: number;
+          price: number;
+          mileage?: number;
+          color?: string;
+          transmission?: string;
+          fuel_type?: string;
+          description?: string;
+          images?: string[];
+          status?: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          brand: string;
+          model: string;
+          year: number;
+          price: number;
+          mileage?: number;
+          color?: string;
+          transmission?: string;
+          fuel_type?: string;
+          description?: string;
+          images?: string[];
+          status?: string;
+        };
+        Update: {
+          brand?: string;
+          model?: string;
+          year?: number;
+          price?: number;
+          mileage?: number;
+          color?: string;
+          transmission?: string;
+          fuel_type?: string;
+          description?: string;
+          images?: string[];
+          status?: string;
+          updated_at?: string;
+        };
+      };
     };
   };
 }

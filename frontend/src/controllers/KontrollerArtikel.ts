@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+import { supabase } from '../lib/supabase';
 
 // Interface untuk data artikel
 export interface DataArtikel {
@@ -16,17 +16,9 @@ export interface DataArtikel {
   tanggalUpdate: string;
   status: 'draft' | 'published' | 'archived' | 'scheduled';
   views: number;
-  likes: number;
-  shares: number;
-  komentar: KomentarArtikel[];
-  seo: SEOArtikel;
-  metadata: MetadataArtikel;
-  relatedArticles: string[];
-  readingTime: number; // dalam menit
+  readingTime: number;
   featured: boolean;
   trending: boolean;
-  isBookmarked?: boolean;
-  isLiked?: boolean;
 }
 
 // Interface untuk kategori artikel
@@ -59,48 +51,6 @@ export interface PenulisArtikel {
   rating: number;
 }
 
-// Interface untuk komentar artikel
-export interface KomentarArtikel {
-  id: string;
-  nama: string;
-  email: string;
-  avatar?: string;
-  konten: string;
-  tanggal: string;
-  status: 'approved' | 'pending' | 'spam' | 'rejected';
-  likes: number;
-  replies: KomentarArtikel[];
-  parentId?: string;
-}
-
-// Interface untuk SEO artikel
-export interface SEOArtikel {
-  metaTitle: string;
-  metaDescription: string;
-  metaKeywords: string[];
-  ogTitle: string;
-  ogDescription: string;
-  ogImage: string;
-  twitterTitle: string;
-  twitterDescription: string;
-  twitterImage: string;
-  canonicalUrl: string;
-  schema: any;
-}
-
-// Interface untuk metadata artikel
-export interface MetadataArtikel {
-  readingTime: number;
-  wordCount: number;
-  language: string;
-  publishedBy: string;
-  lastModifiedBy: string;
-  version: number;
-  source?: string;
-  externalLinks: string[];
-  internalLinks: string[];
-}
-
 // Interface untuk filter artikel
 export interface FilterArtikel {
   kategori?: string[];
@@ -125,9 +75,6 @@ export interface StatistikArtikel {
   artikelDraft: number;
   artikelArchived: number;
   totalViews: number;
-  totalLikes: number;
-  totalShares: number;
-  totalKomentar: number;
   rataRataViews: number;
   rataRataReadingTime: number;
   kategoriTerpopuler: {
@@ -167,112 +114,10 @@ export interface SortOption {
   direction: 'asc' | 'desc';
 }
 
-// Interface untuk share artikel
-export interface ShareArtikel {
-  platform: 'facebook' | 'twitter' | 'linkedin' | 'whatsapp' | 'telegram' | 'email' | 'copy_link';
-  url: string;
-  title: string;
-  description: string;
-  image: string;
-  hashtags?: string[];
-}
-
-// Interface untuk analytics artikel
-export interface AnalyticsArtikel {
-  views: {
-    total: number;
-    unique: number;
-    today: number;
-    thisWeek: number;
-    thisMonth: number;
-  };
-  engagement: {
-    likes: number;
-    shares: number;
-    comments: number;
-    averageTimeOnPage: number;
-    bounceRate: number;
-  };
-  traffic: {
-    sources: {
-      direct: number;
-      search: number;
-      social: number;
-      referral: number;
-    };
-    devices: {
-      desktop: number;
-      mobile: number;
-      tablet: number;
-    };
-    locations: {
-      [country: string]: number;
-    };
-  };
-  performance: {
-    loadTime: number;
-    coreWebVitals: {
-      lcp: number; // Largest Contentful Paint
-      fid: number; // First Input Delay
-      cls: number; // Cumulative Layout Shift
-    };
-  };
-}
-
 export class KontrollerArtikel {
-  private token: string | null = null;
   private cache: Map<string, any> = new Map();
   private cacheExpiry: Map<string, number> = new Map();
   private readonly CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
-
-  constructor() {
-    this.token = localStorage.getItem('authToken');
-  }
-
-  /**
-   * Toggle bookmark artikel
-   * @param idArtikel - ID artikel
-   * @returns Promise<{success: boolean, message: string, isBookmarked: boolean}>
-   */
-  public async toggleBookmarkArtikel(idArtikel: string): Promise<{
-    success: boolean;
-    message: string;
-    isBookmarked: boolean;
-  }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/articles/${idArtikel}/bookmark`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
-        }
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Gagal toggle bookmark');
-      }
-
-      // Clear cache
-      this.clearCacheByPattern(`artikel_detail_${idArtikel}`);
-      this.clearCacheByPattern('artikel_');
-
-      return {
-        success: true,
-        message: result.message || 'Bookmark berhasil diubah',
-        isBookmarked: result.data.isBookmarked
-      };
-
-    } catch (error) {
-      console.error('Error toggling bookmark:', error);
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Terjadi kesalahan saat mengubah bookmark',
-        isBookmarked: false
-      };
-    }
-  }
 
   /**
    * Memuat halaman artikel dengan data lengkap
@@ -291,73 +136,177 @@ export class KontrollerArtikel {
     search?: string
   ): Promise<HalamanArtikel> {
     try {
-      // Check cache first
       const cacheKey = `artikel_${page}_${limit}_${JSON.stringify(filter)}_${sortBy}_${search || ''}`;
       const cachedData = this.getFromCache(cacheKey);
       if (cachedData) {
         return cachedData;
       }
 
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: limit.toString(),
-        sortBy
-      });
+      const kategoriFilter = filter?.kategori || [];
+      const slugKategori = kategoriFilter.filter(k => !/^\d+$/.test(k));
+      
+      const selectClause = `
+        *,
+        article_categories!category_id ( id, name, slug, description ),
+        users!author_id ( id, full_name, username, email, profile_picture, role )
+      `;
 
-      if (search) {
-        params.append('search', search);
+      let query = supabase
+        .from('articles')
+        .select(selectClause, { count: 'exact' });
+
+      // Default: hanya yang published (sesuai RLS)
+      if (!filter?.status || filter.status.length === 0) {
+        query = query.eq('status', 'published');
+      } else {
+        query = query.in('status', filter.status);
       }
 
-      // Add filter parameters
-      if (filter) {
-        if (filter.kategori) params.append('kategori', filter.kategori.join(','));
-        if (filter.tags) params.append('tags', filter.tags.join(','));
-        if (filter.penulis) params.append('penulis', filter.penulis.join(','));
-        if (filter.tanggalMulai) params.append('tanggalMulai', filter.tanggalMulai);
-        if (filter.tanggalSelesai) params.append('tanggalSelesai', filter.tanggalSelesai);
-        if (filter.status) params.append('status', filter.status.join(','));
-        if (filter.featured !== undefined) params.append('featured', filter.featured.toString());
-        if (filter.trending !== undefined) params.append('trending', filter.trending.toString());
-        if (filter.minViews) params.append('minViews', filter.minViews.toString());
-        if (filter.maxViews) params.append('maxViews', filter.maxViews.toString());
-        if (filter.minReadingTime) params.append('minReadingTime', filter.minReadingTime.toString());
-        if (filter.maxReadingTime) params.append('maxReadingTime', filter.maxReadingTime.toString());
+      // Pencarian sederhana
+      if (search && search.trim() !== '') {
+        const term = `%${search.trim()}%`;
+        query = query.or(`title.ilike.${term},excerpt.ilike.${term},content.ilike.${term},seo_keywords.ilike.${term}`);
       }
 
-      const response = await fetch(`${API_BASE_URL}/articles?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
+      // Featured / Trending
+      if (typeof filter?.featured === 'boolean') {
+        query = query.eq('is_featured', filter.featured);
+      }
+      if (typeof filter?.trending === 'boolean' && filter.trending) {
+        query = query.gte('view_count', 100); // Artikel trending minimal 100 views
+      }
+
+      // Kategori: ID atau slug
+      if (kategoriFilter.length > 0) {
+        const ids = kategoriFilter.filter(k => /^\d+$/.test(k)).map(Number);
+        if (ids.length > 0) {
+          query = query.in('category_id', ids);
+        }
+        if (slugKategori.length > 0) {
+          query = query.in('article_categories.slug', slugKategori);
+        }
+      }
+
+      // Sorting
+      switch (sortBy) {
+        case 'terlama':
+          query = query.order('published_at', { ascending: true, nullsFirst: true });
+          break;
+        case 'terpopuler':
+          query = query.order('view_count', { ascending: false, nullsFirst: false });
+          break;
+        case 'trending':
+          query = query.order('view_count', { ascending: false, nullsFirst: false });
+          break;
+        case 'alfabetis':
+          query = query.order('title', { ascending: true });
+          break;
+        case 'terbaru':
+        default:
+          query = query.order('published_at', { ascending: false, nullsFirst: false });
+          break;
+      }
+
+      // Pagination
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+      query = query.range(from, to);
+
+      const { data, count, error } = await query;
+      if (error) throw error;
+
+      const articles = (data || []).map(row => this.mapSupabaseArticle(row));
+      const total = count || 0;
+
+      // Derivasi kategori unik dari hasil join
+      const kategoriMap = new Map<string, KategoriArtikel>();
+      (data || []).forEach(row => {
+        const cat = (row as any).article_categories;
+        if (cat) {
+          kategoriMap.set(String(cat.id), {
+            id: String(cat.id),
+            nama: cat.name || 'Kategori',
+            slug: cat.slug || '',
+            deskripsi: cat.description || '',
+            warna: '#3B82F6',
+            icon: 'folder',
+            parentId: undefined,
+            jumlahArtikel: 0
+          });
         }
       });
+      const kategori = Array.from(kategoriMap.values());
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      // Derivasi penulis unik dari join users
+      const authorsMap = new Map<string, PenulisArtikel>();
+      (data || []).forEach(row => {
+        const u = (row as any).users;
+        if (u) {
+          authorsMap.set(String(u.id), {
+            id: String(u.id),
+            nama: u.full_name || u.username || 'Penulis',
+            email: u.email || '',
+            avatar: u.profile_picture || '',
+            bio: '',
+            jabatan: u.role === 'admin' ? 'Admin' : u.role === 'owner' ? 'Owner' : 'Penulis',
+            socialMedia: {},
+            totalArtikel: 0,
+            rating: 0
+          });
+        }
+      });
+      const penulis = Array.from(authorsMap.values());
 
-      const result = await response.json();
-      
-      const halamanData: HalamanArtikel = {
-        artikel: result.data.articles || [],
-        total: result.data.total || 0,
-        statistik: result.data.statistics || this.getDefaultStatistik(),
-        kategori: result.data.categories || [],
-        tags: result.data.tags || [],
-        penulis: result.data.authors || [],
-        filter: filter || {},
-        sortOptions: this.getSortOptions(),
-        featuredArticles: result.data.featuredArticles || [],
-        trendingArticles: result.data.trendingArticles || []
+      // Derivasi tags dari seo_keywords
+      const tags = Array.from(
+        new Set(
+          (data || [])
+            .flatMap(row => ((row as any).seo_keywords || '')
+              .split(',')
+              .map((t: string) => t.trim())
+              .filter(Boolean))
+        )
+      );
+
+      // Featured & trending
+      const featuredArticles = articles.filter(a => a.featured);
+      const trendingArticles = articles
+        .slice()
+        .sort((a, b) => (b.views || 0) - (a.views || 0))
+        .slice(0, Math.min(articles.length, 5));
+
+      // Statistik sederhana dari halaman ini
+      const statistik: StatistikArtikel = {
+        totalArtikel: total,
+        artikelPublished: articles.filter(a => a.status === 'published').length,
+        artikelDraft: articles.filter(a => a.status === 'draft').length,
+        artikelArchived: articles.filter(a => a.status === 'archived').length,
+        totalViews: articles.reduce((sum, a) => sum + (a.views || 0), 0),
+        rataRataViews: articles.length ? Math.round(articles.reduce((s, a) => s + (a.views || 0), 0) / articles.length) : 0,
+        rataRataReadingTime: articles.length ? Math.round(articles.reduce((s, a) => s + (a.readingTime || 0), 0) / articles.length) : 0,
+        kategoriTerpopuler: [],
+        penulisTeraktif: [],
+        trendBulanan: []
       };
 
-      // Cache the result
-      this.setToCache(cacheKey, halamanData);
+      const halamanData: HalamanArtikel = {
+        artikel: articles,
+        total,
+        statistik,
+        kategori,
+        tags,
+        penulis,
+        filter: filter || {},
+        sortOptions: this.getSortOptions(),
+        featuredArticles,
+        trendingArticles
+      };
 
+      this.setToCache(cacheKey, halamanData);
       return halamanData;
 
     } catch (error) {
-      console.error('Error loading article page:', error);
+      console.error('Error loading article page (Supabase):', error);
       return {
         artikel: [],
         total: 0,
@@ -384,412 +333,141 @@ export class KontrollerArtikel {
     incrementView: boolean = true
   ): Promise<DataArtikel | null> {
     try {
-      // Check cache first (only if not incrementing view)
       const cacheKey = `artikel_detail_${identifier}`;
       if (!incrementView) {
         const cachedData = this.getFromCache(cacheKey);
-        if (cachedData) {
-          return cachedData;
-        }
+        if (cachedData) return cachedData;
       }
 
-      const params = new URLSearchParams();
-      if (!incrementView) {
-        params.append('incrementView', 'false');
+      const isUuid = /^[0-9a-fA-F-]{36}$/.test(identifier);
+      let query = supabase
+        .from('articles')
+        .select(`
+          id, title, slug, content, excerpt, featured_image, gallery_images, category_id, author_id, status,
+          view_count, reading_time_minutes, is_featured, is_pinned,
+          published_at, updated_at, seo_keywords, meta_title, meta_description, featured_image_alt, visibility,
+          article_categories:category_id ( id, name, slug, description ),
+          users:author_id ( id, full_name, username, email, profile_picture, role )
+        `)
+        .limit(1);
+
+      query = isUuid ? query.eq('id', identifier) : query.eq('slug', identifier);
+
+      // Hanya artikel published
+      query = query.eq('status', 'published');
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const row = data?.[0];
+      if (!row) return null;
+
+      const artikel = this.mapSupabaseArticle(row);
+
+      // Increment view count
+      if (incrementView) {
+        const currentViews = (row as any).view_count || 0;
+        await supabase
+          .from('articles')
+          .update({ view_count: currentViews + 1 })
+          .eq('id', artikel.id);
+        
+        // Update local state
+        artikel.views = currentViews + 1;
       }
 
-      const response = await fetch(`${API_BASE_URL}/articles/${identifier}?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      // Cache the result only if not incrementing view
-      if (!incrementView) {
-        this.setToCache(cacheKey, result.data);
-      }
-
-      return result.data;
+      if (!incrementView) this.setToCache(cacheKey, artikel);
+      return artikel;
 
     } catch (error) {
-      console.error('Error loading article detail:', error);
+      console.error('Error loading article detail (Supabase):', error);
       return null;
     }
   }
 
   /**
-   * Proses share artikel ke berbagai platform
-   * @param idArtikel - ID artikel yang akan dishare
-   * @param platform - Platform tujuan share
-   * @param customMessage - Pesan kustom (opsional)
-   * @returns Promise<{success: boolean, message: string, shareUrl?: string}>
+   * Mapper Supabase row -> DataArtikel
    */
-  public async prosesShareArtikel(
-    idArtikel: string,
-    platform: string = 'copy_link',
-    customMessage?: string
-  ): Promise<{
-    success: boolean;
-    message: string;
-    shareUrl?: string;
-  }> {
-    try {
-      // Ambil detail artikel terlebih dahulu
-      const artikel = await this.muatDetailArtikel(idArtikel, false);
-      if (!artikel) {
-        return {
-          success: false,
-          message: 'Artikel tidak ditemukan'
-        };
-      }
+  private mapSupabaseArticle(row: any): DataArtikel {
+    const cat = row.article_categories;
+    const u = row.users;
 
-      // Buat data share
-      const shareData: ShareArtikel = {
-        platform: platform as any,
-        url: `${window.location.origin}/artikel/${artikel.slug}`,
-        title: artikel.judul,
-        description: artikel.ringkasan,
-        image: artikel.gambarUtama,
-        hashtags: artikel.tags
-      };
+    const kategori: KategoriArtikel = cat ? {
+      id: String(cat.id),
+      nama: cat.name || 'Kategori',
+      slug: cat.slug || '',
+      deskripsi: cat.description || '',
+      warna: '#3B82F6',
+      icon: 'folder',
+      parentId: undefined,
+      jumlahArtikel: 0
+    } : {
+      id: String(row.category_id),
+      nama: 'Kategori',
+      slug: '',
+      deskripsi: '',
+      warna: '#3B82F6',
+      icon: 'folder',
+      parentId: undefined,
+      jumlahArtikel: 0
+    };
 
-      // Proses share berdasarkan platform
-      let shareUrl = '';
-      let success = false;
-      let message = '';
+    const penulis: PenulisArtikel = u ? {
+      id: String(u.id),
+      nama: u.full_name || u.username || 'Penulis',
+      email: u.email || '',
+      avatar: u.profile_picture || '',
+      bio: '',
+      jabatan: u.role === 'admin' ? 'Admin' : u.role === 'owner' ? 'Owner' : 'Penulis',
+      socialMedia: {},
+      totalArtikel: 0,
+      rating: 0
+    } : {
+      id: String(row.author_id),
+      nama: 'Penulis',
+      email: '',
+      avatar: '',
+      bio: '',
+      jabatan: '',
+      socialMedia: {},
+      totalArtikel: 0,
+      rating: 0
+    };
 
-      switch (platform) {
-        case 'facebook':
-          shareUrl = this.generateFacebookShareUrl(shareData);
-          success = await this.openShareWindow(shareUrl);
-          message = success ? 'Artikel berhasil dibagikan ke Facebook' : 'Gagal membagikan ke Facebook';
-          break;
+    const tags = ((row.seo_keywords || '') as string)
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
 
-        case 'twitter':
-          shareUrl = this.generateTwitterShareUrl(shareData, customMessage);
-          success = await this.openShareWindow(shareUrl);
-          message = success ? 'Artikel berhasil dibagikan ke Twitter' : 'Gagal membagikan ke Twitter';
-          break;
+    const galeri = Array.isArray(row.gallery_images) ? row.gallery_images : [];
 
-        case 'linkedin':
-          shareUrl = this.generateLinkedInShareUrl(shareData);
-          success = await this.openShareWindow(shareUrl);
-          message = success ? 'Artikel berhasil dibagikan ke LinkedIn' : 'Gagal membagikan ke LinkedIn';
-          break;
+    const statusMap: Record<string, DataArtikel['status']> = {
+      published: 'published',
+      draft: 'draft',
+      archived: 'archived',
+      review: 'archived',
+      deleted: 'archived'
+    };
 
-        case 'whatsapp':
-          shareUrl = this.generateWhatsAppShareUrl(shareData, customMessage);
-          success = await this.openShareWindow(shareUrl);
-          message = success ? 'Artikel berhasil dibagikan ke WhatsApp' : 'Gagal membagikan ke WhatsApp';
-          break;
-
-        case 'telegram':
-          shareUrl = this.generateTelegramShareUrl(shareData, customMessage);
-          success = await this.openShareWindow(shareUrl);
-          message = success ? 'Artikel berhasil dibagikan ke Telegram' : 'Gagal membagikan ke Telegram';
-          break;
-
-        case 'email':
-          shareUrl = this.generateEmailShareUrl(shareData, customMessage);
-          success = await this.openShareWindow(shareUrl);
-          message = success ? 'Email client berhasil dibuka' : 'Gagal membuka email client';
-          break;
-
-        case 'copy_link':
-          success = await this.copyToClipboard(shareData.url);
-          message = success ? 'Link artikel berhasil disalin' : 'Gagal menyalin link artikel';
-          shareUrl = shareData.url;
-          break;
-
-        default:
-          return {
-            success: false,
-            message: 'Platform share tidak didukung'
-          };
-      }
-
-      // Track share analytics jika berhasil
-      if (success) {
-        await this.trackShareAnalytics(idArtikel, platform);
-      }
-
-      return {
-        success,
-        message,
-        shareUrl
-      };
-
-    } catch (error) {
-      console.error('Error sharing article:', error);
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Terjadi kesalahan saat membagikan artikel'
-      };
-    }
-  }
-
-  /**
-   * Like artikel
-   * @param idArtikel - ID artikel
-   * @returns Promise<{success: boolean, message: string, totalLikes: number}>
-   */
-  public async likeArtikel(idArtikel: string): Promise<{
-    success: boolean;
-    message: string;
-    totalLikes: number;
-  }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/articles/${idArtikel}/like`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
-        }
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Gagal memberikan like');
-      }
-
-      // Clear cache
-      this.clearCacheByPattern(`artikel_detail_${idArtikel}`);
-      this.clearCacheByPattern('artikel_');
-
-      return {
-        success: true,
-        message: result.message || 'Like berhasil diberikan',
-        totalLikes: result.data.totalLikes
-      };
-
-    } catch (error) {
-      console.error('Error liking article:', error);
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Terjadi kesalahan saat memberikan like',
-        totalLikes: 0
-      };
-    }
-  }
-
-  /**
-   * Tambah komentar artikel
-   * @param idArtikel - ID artikel
-   * @param komentar - Data komentar
-   * @returns Promise<{success: boolean, message: string, komentarId?: string}>
-   */
-  public async tambahKomentar(
-    idArtikel: string,
-    komentar: {
-      nama: string;
-      email: string;
-      konten: string;
-      parentId?: string;
-    }
-  ): Promise<{
-    success: boolean;
-    message: string;
-    komentarId?: string;
-  }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/articles/${idArtikel}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
-        },
-        body: JSON.stringify(komentar)
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Gagal menambahkan komentar');
-      }
-
-      // Clear cache
-      this.clearCacheByPattern(`artikel_detail_${idArtikel}`);
-
-      return {
-        success: true,
-        message: 'Komentar berhasil ditambahkan dan menunggu moderasi',
-        komentarId: result.data.id
-      };
-
-    } catch (error) {
-      console.error('Error adding comment:', error);
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Terjadi kesalahan saat menambahkan komentar'
-      };
-    }
-  }
-
-  /**
-   * Memuat analytics artikel
-   * @param idArtikel - ID artikel
-   * @param periode - Periode analytics ('7d' | '30d' | '90d' | '1y')
-   * @returns Promise<AnalyticsArtikel | null>
-   */
-  public async muatAnalyticsArtikel(
-    idArtikel: string,
-    periode: string = '30d'
-  ): Promise<AnalyticsArtikel | null> {
-    try {
-      // Check cache first
-      const cacheKey = `artikel_analytics_${idArtikel}_${periode}`;
-      const cachedData = this.getFromCache(cacheKey);
-      if (cachedData) {
-        return cachedData;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/articles/${idArtikel}/analytics?period=${periode}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      // Cache the result
-      this.setToCache(cacheKey, result.data);
-
-      return result.data;
-
-    } catch (error) {
-      console.error('Error loading article analytics:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Generate share URLs untuk berbagai platform
-   */
-  private generateFacebookShareUrl(shareData: ShareArtikel): string {
-    const params = new URLSearchParams({
-      u: shareData.url,
-      quote: shareData.title
-    });
-    return `https://www.facebook.com/sharer/sharer.php?${params}`;
-  }
-
-  private generateTwitterShareUrl(shareData: ShareArtikel, customMessage?: string): string {
-    const text = customMessage || `${shareData.title} - ${shareData.description}`;
-    const hashtags = shareData.hashtags?.join(',') || '';
-    
-    const params = new URLSearchParams({
-      url: shareData.url,
-      text,
-      hashtags
-    });
-    return `https://twitter.com/intent/tweet?${params}`;
-  }
-
-  private generateLinkedInShareUrl(shareData: ShareArtikel): string {
-    const params = new URLSearchParams({
-      url: shareData.url,
-      title: shareData.title,
-      summary: shareData.description
-    });
-    return `https://www.linkedin.com/sharing/share-offsite/?${params}`;
-  }
-
-  private generateWhatsAppShareUrl(shareData: ShareArtikel, customMessage?: string): string {
-    const text = customMessage || `${shareData.title}\n\n${shareData.description}\n\n${shareData.url}`;
-    const params = new URLSearchParams({ text });
-    return `https://wa.me/?${params}`;
-  }
-
-  private generateTelegramShareUrl(shareData: ShareArtikel, customMessage?: string): string {
-    const text = customMessage || `${shareData.title}\n\n${shareData.description}`;
-    const params = new URLSearchParams({
-      url: shareData.url,
-      text
-    });
-    return `https://t.me/share/url?${params}`;
-  }
-
-  private generateEmailShareUrl(shareData: ShareArtikel, customMessage?: string): string {
-    const subject = `Artikel Menarik: ${shareData.title}`;
-    const body = customMessage || `Halo,\n\nSaya ingin berbagi artikel menarik ini dengan Anda:\n\n${shareData.title}\n\n${shareData.description}\n\nBaca selengkapnya: ${shareData.url}\n\nTerima kasih!`;
-    
-    const params = new URLSearchParams({
-      subject,
-      body
-    });
-    return `mailto:?${params}`;
-  }
-
-  /**
-   * Utility methods
-   */
-  private async openShareWindow(url: string): Promise<boolean> {
-    try {
-      const popup = window.open(
-        url,
-        'share-popup',
-        'width=600,height=400,scrollbars=yes,resizable=yes'
-      );
-      return popup !== null;
-    } catch (error) {
-      console.error('Error opening share window:', error);
-      return false;
-    }
-  }
-
-  private async copyToClipboard(text: string): Promise<boolean> {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return true;
-      } else {
-        // Fallback untuk browser lama
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        textArea.style.top = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        const result = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        return result;
-      }
-    } catch (error) {
-      console.error('Error copying to clipboard:', error);
-      return false;
-    }
-  }
-
-  private async trackShareAnalytics(idArtikel: string, platform: string): Promise<void> {
-    try {
-      await fetch(`${API_BASE_URL}/articles/${idArtikel}/share-analytics`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
-        },
-        body: JSON.stringify({ platform })
-      });
-    } catch (error) {
-      console.error('Error tracking share analytics:', error);
-    }
+    return {
+      id: String(row.id),
+      judul: row.title,
+      slug: row.slug,
+      konten: row.content,
+      ringkasan: row.excerpt || '',
+      gambarUtama: row.featured_image || '',
+      galeriGambar: galeri,
+      kategori,
+      tags,
+      penulis,
+      tanggalPublish: row.published_at || row.created_at,
+      tanggalUpdate: row.updated_at,
+      status: statusMap[row.status] || 'draft',
+      views: row.view_count || 0,
+      readingTime: row.reading_time_minutes || 0,
+      featured: !!row.is_featured,
+      trending: (row.view_count || 0) >= 100
+    };
   }
 
   /**
@@ -822,9 +500,6 @@ export class KontrollerArtikel {
       artikelDraft: 0,
       artikelArchived: 0,
       totalViews: 0,
-      totalLikes: 0,
-      totalShares: 0,
-      totalKomentar: 0,
       rataRataViews: 0,
       rataRataReadingTime: 0,
       kategoriTerpopuler: [],
@@ -841,10 +516,8 @@ export class KontrollerArtikel {
       { value: 'terbaru', label: 'Terbaru', field: 'tanggalPublish', direction: 'desc' },
       { value: 'terlama', label: 'Terlama', field: 'tanggalPublish', direction: 'asc' },
       { value: 'terpopuler', label: 'Terpopuler', field: 'views', direction: 'desc' },
-      { value: 'trending', label: 'Trending', field: 'shares', direction: 'desc' },
-      { value: 'alfabetis', label: 'A-Z', field: 'judul', direction: 'asc' },
-      { value: 'most_liked', label: 'Paling Disukai', field: 'likes', direction: 'desc' },
-      { value: 'most_commented', label: 'Paling Banyak Komentar', field: 'komentar', direction: 'desc' }
+      { value: 'trending', label: 'Trending', field: 'views', direction: 'desc' },
+      { value: 'alfabetis', label: 'A-Z', field: 'judul', direction: 'asc' }
     ];
   }
 
@@ -864,17 +537,6 @@ export class KontrollerArtikel {
   private setToCache(key: string, data: any): void {
     this.cache.set(key, data);
     this.cacheExpiry.set(key, Date.now() + this.CACHE_DURATION);
-  }
-
-  private clearCacheByPattern(pattern: string): void {
-    // Convert iterator to array to avoid downlevelIteration issue
-    const cacheKeys = Array.from(this.cache.keys());
-    for (const key of cacheKeys) {
-      if (key.includes(pattern)) {
-        this.cache.delete(key);
-        this.cacheExpiry.delete(key);
-      }
-    }
   }
 
   /**

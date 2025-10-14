@@ -1,63 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import KontrollerArtikel from '../controllers/KontrollerArtikel';
-import { DataArtikel, KategoriArtikel as KategoriArtikelType, KomentarArtikel as KomentarArtikelType } from '../controllers/KontrollerArtikel';
-
-// Interface untuk artikel
-interface Artikel {
-  id: string;
-  title: string;
-  slug: string;
-  excerpt: string;
-  content: string;
-  featuredImage: string;
-  category: {
-    id: string;
-    name: string;
-    slug: string;
-    color: string;
-  };
-  author: {
-    id: string;
-    name: string;
-    avatar: string;
-    bio: string;
-  };
-  tags: string[];
-  publishedAt: string;
-  readingTime: number;
-  views: number;
-  likes: number;
-  shares: number;
-  isBookmarked: boolean;
-  isLiked: boolean;
-  comments: KomentarArtikel[];
-}
-
-// Interface untuk kategori artikel
-interface KategoriArtikel {
-  id: string;
-  name: string;
-  slug: string;
-  description: string;
-  color: string;
-  icon: string;
-  articleCount: number;
-}
-
-// Interface untuk komentar artikel
-interface KomentarArtikel {
-  id: string;
-  author: {
-    name: string;
-    avatar?: string;
-  };
-  content: string;
-  createdAt: string;
-  likes: number;
-  isLiked: boolean;
-  replies: KomentarArtikel[];
-}
+import { DataArtikel, KategoriArtikel as KategoriArtikelType } from '../controllers/KontrollerArtikel';
 
 // Interface untuk state halaman
 interface StateHalaman {
@@ -70,9 +14,6 @@ interface StateHalaman {
   searchQuery: string;
   currentPage: number;
   totalPages: number;
-  showCommentForm: boolean;
-  commentText: string;
-  submittingComment: boolean;
 }
 
 const HalamanArtikel: React.FC = () => {
@@ -91,10 +32,7 @@ const HalamanArtikel: React.FC = () => {
     selectedCategory: searchParams.get('category'),
     searchQuery: searchParams.get('search') || '',
     currentPage: parseInt(searchParams.get('page') || '1'),
-    totalPages: 1,
-    showCommentForm: false,
-    commentText: '',
-    submittingComment: false
+    totalPages: 1
   });
 
   /**
@@ -103,17 +41,17 @@ const HalamanArtikel: React.FC = () => {
   const aksesMenuArtikel = useCallback(async () => {
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
-
+  
       const result = await kontrollerArtikel.muatHalamanArtikel(
         state.currentPage,
         12, // articles per page
         {
           kategori: state.selectedCategory ? [state.selectedCategory] : undefined,
-          search: state.searchQuery || undefined,
-          status: ['published']
+          status: ['published'],
+          search: state.searchQuery || undefined
         }
       );
-
+  
       setState(prev => ({
         ...prev,
         loading: false,
@@ -121,7 +59,7 @@ const HalamanArtikel: React.FC = () => {
         kategori: result.kategori,
         totalPages: Math.ceil(result.total / 12)
       }));
-
+  
     } catch (error) {
       console.error('Error accessing article menu:', error);
       setState(prev => ({
@@ -189,138 +127,6 @@ const HalamanArtikel: React.FC = () => {
   }, [navigate]);
 
   /**
-   * Share artikel ke platform media sosial
-   * @param idArtikel - ID artikel yang akan dishare
-   */
-  const shareArtikel = useCallback(async (idArtikel: string) => {
-    try {
-      const result = await kontrollerArtikel.prosesShareArtikel(idArtikel, 'facebook');
-      
-      if (result.success && result.shareUrl) {
-        // Open share dialog
-        const shareDialog = window.confirm(
-          'Artikel akan dibagikan ke Facebook. Lanjutkan?'
-        );
-        
-        if (shareDialog) {
-          window.open(result.shareUrl, '_blank', 'width=600,height=400');
-          
-          // Update share count in UI
-          setState(prev => ({
-            ...prev,
-            artikel: prev.artikel.map(article =>
-              article.id === idArtikel
-                ? { ...article, shares: article.shares + 1 }
-                : article
-            ),
-            selectedArticle: prev.selectedArticle?.id === idArtikel
-              ? { ...prev.selectedArticle, shares: prev.selectedArticle.shares + 1 }
-              : prev.selectedArticle
-          }));
-        }
-      }
-
-    } catch (error) {
-      console.error('Error sharing article:', error);
-      alert('Gagal membagikan artikel. Silakan coba lagi.');
-    }
-  }, []);
-
-  /**
-   * Bookmark artikel untuk user
-   * @param idArtikel - ID artikel yang akan dibookmark
-   * @param idUser - ID user yang membookmark
-   */
-  const bookmarkArtikel = useCallback(async (idArtikel: string, idUser: string) => {
-    try {
-      const result = await kontrollerArtikel.toggleBookmarkArtikel(idArtikel);
-      
-      if (result.success) {
-        // Update bookmark status in UI
-        setState(prev => ({
-          ...prev,
-          artikel: prev.artikel.map(article =>
-            article.id === idArtikel
-              ? { ...article, isBookmarked: !article.isBookmarked }
-              : article
-          ),
-          selectedArticle: prev.selectedArticle?.id === idArtikel
-            ? { ...prev.selectedArticle, isBookmarked: !prev.selectedArticle.isBookmarked }
-            : prev.selectedArticle
-        }));
-
-        // Show success message
-        const message = result.isBookmarked 
-          ? 'Artikel berhasil ditambahkan ke bookmark'
-          : 'Artikel berhasil dihapus dari bookmark';
-        
-        // You can replace this with a toast notification
-        alert(message);
-      }
-
-    } catch (error) {
-      console.error('Error bookmarking article:', error);
-      alert('Gagal memproses bookmark. Silakan coba lagi.');
-    }
-  }, []);
-
-  /**
-   * Tulis komentar pada artikel
-   * @param idArtikel - ID artikel yang akan dikomentari
-   * @param isiKomentar - Isi komentar yang akan ditulis
-   */
-  const tulisKomentar = useCallback(async (idArtikel: string, isiKomentar: string) => {
-    if (!isiKomentar.trim()) {
-      alert('Komentar tidak boleh kosong');
-      return;
-    }
-
-    try {
-      setState(prev => ({ ...prev, submittingComment: true }));
-
-      const result = await kontrollerArtikel.tambahKomentar(idArtikel, {
-        nama: 'Anonymous', // You might want to get this from user context
-        email: 'user@example.com', // You might want to get this from user context
-        konten: isiKomentar.trim(),
-        parentId: undefined // For main comment, not reply
-      });
-
-      if (result.success && result.komentarId) {
-        // Create new comment object for UI
-        const newComment: KomentarArtikelType = {
-          id: result.komentarId,
-          nama: 'Anonymous',
-          email: 'user@example.com',
-          konten: isiKomentar.trim(),
-          tanggal: new Date().toISOString(),
-          status: 'pending',
-          likes: 0,
-          parentId: undefined,
-          replies: []
-        };
-        
-        setState(prev => ({
-          ...prev,
-          selectedArticle: prev.selectedArticle ? {
-            ...prev.selectedArticle,
-            komentar: [newComment, ...prev.selectedArticle.komentar]
-          } : prev.selectedArticle,
-          commentText: '',
-          showCommentForm: false,
-          submittingComment: false
-        }));
-
-        alert('Komentar berhasil ditambahkan');
-      }
-
-    } catch (error) {
-      console.error('Error adding comment:', error);
-      setState(prev => ({ ...prev, submittingComment: false }));
-      alert('Gagal menambahkan komentar. Silakan coba lagi.');
-    }
-  }, []);
-
-  /**
    * Handle search artikel
    */
   const handleSearch = useCallback((query: string) => {
@@ -349,43 +155,10 @@ const HalamanArtikel: React.FC = () => {
     const newParams = new URLSearchParams(searchParams);
     newParams.set('page', page.toString());
     setSearchParams(newParams);
+    
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [searchParams, setSearchParams]);
-
-  /**
-   * Like artikel
-   */
-  const handleLikeArtikel = useCallback(async (idArtikel: string) => {
-    try {
-      const result = await kontrollerArtikel.likeArtikel(idArtikel);
-      
-      if (result.success) {
-        setState(prev => ({
-          ...prev,
-          artikel: prev.artikel.map(article =>
-            article.id === idArtikel
-              ? { 
-                  ...article, 
-                  isLiked: !article.isLiked,
-                  likes: article.isLiked ? article.likes - 1 : article.likes + 1
-                }
-              : article
-          ),
-          selectedArticle: prev.selectedArticle?.id === idArtikel
-            ? { 
-                ...prev.selectedArticle, 
-                isLiked: !prev.selectedArticle.isLiked,
-                likes: prev.selectedArticle.isLiked 
-                  ? prev.selectedArticle.likes - 1 
-                  : prev.selectedArticle.likes + 1
-              }
-            : prev.selectedArticle
-        }));
-      }
-
-    } catch (error) {
-      console.error('Error liking article:', error);
-    }
-  }, []);
 
   // Load data on component mount and when dependencies change
   useEffect(() => {
@@ -398,7 +171,7 @@ const HalamanArtikel: React.FC = () => {
         // Load article by slug from API
         kontrollerArtikel.muatDetailArtikel(slug).then(artikel => {
           if (artikel) {
-            setState(prev => ({ ...prev, selectedArticle: artikel }));
+            setState(prev => ({ ...prev, selectedArticle: artikel, loading: false }));
           } else {
             navigate('/artikel', { replace: true });
           }
@@ -408,7 +181,7 @@ const HalamanArtikel: React.FC = () => {
       // Load article list
       aksesMenuArtikel();
     }
-  }, [slug, aksesMenuArtikel, pilihArtikel]);
+  }, [slug, state.currentPage, state.selectedCategory, state.searchQuery]);
 
   // Render loading state
   if (state.loading) {
@@ -459,87 +232,65 @@ const HalamanArtikel: React.FC = () => {
 
           {/* Article header */}
           <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-8">
-            <img
-              src={state.selectedArticle.gambarUtama}
-              alt={state.selectedArticle.judul}
-              className="w-full h-64 object-cover"
-            />
-            <div className="p-6">
-              <div className="flex items-center mb-4">
+            {state.selectedArticle.gambarUtama && (
+              <img
+                src={state.selectedArticle.gambarUtama}
+                alt={state.selectedArticle.judul}
+                className="w-full h-64 md:h-96 object-cover"
+              />
+            )}
+            <div className="p-6 md:p-8">
+              <div className="flex items-center mb-4 flex-wrap gap-2">
                 <span
                   className="px-3 py-1 rounded-full text-sm font-medium text-white"
                   style={{ backgroundColor: state.selectedArticle.kategori.warna }}
                 >
                   {state.selectedArticle.kategori.nama}
                 </span>
-                <span className="ml-4 text-gray-500 text-sm">
-                  {new Date(state.selectedArticle.tanggalPublish).toLocaleDateString('id-ID')}
+                <span className="text-gray-500 text-sm">
+                  {kontrollerArtikel.formatTanggal(state.selectedArticle.tanggalPublish)}
                 </span>
-                <span className="ml-4 text-gray-500 text-sm">
-                  {state.selectedArticle.readingTime} menit baca
+                <span className="text-gray-500 text-sm">
+                  {kontrollerArtikel.formatReadingTime(state.selectedArticle.readingTime)}
+                </span>
+                <span className="text-gray-500 text-sm flex items-center">
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  {state.selectedArticle.views} views
                 </span>
               </div>
 
-              <h1 className="text-3xl font-bold text-gray-800 mb-4">
+              <h1 className="text-3xl md:text-4xl font-bold text-gray-800 mb-4">
                 {state.selectedArticle.judul}
               </h1>
 
-              <div className="flex items-center mb-6">
-                <img
-                  src={state.selectedArticle.penulis.avatar}
-                  alt={state.selectedArticle.penulis.nama}
-                  className="w-10 h-10 rounded-full mr-3"
-                />
+              {state.selectedArticle.ringkasan && (
+                <p className="text-lg text-gray-600 mb-6">
+                  {state.selectedArticle.ringkasan}
+                </p>
+              )}
+
+              <div className="flex items-center mb-6 pb-6 border-b">
+                {state.selectedArticle.penulis.avatar && (
+                  <img
+                    src={state.selectedArticle.penulis.avatar}
+                    alt={state.selectedArticle.penulis.nama}
+                    className="w-12 h-12 rounded-full mr-3"
+                  />
+                )}
                 <div>
                   <p className="font-medium text-gray-800">{state.selectedArticle.penulis.nama}</p>
-                  <p className="text-sm text-gray-500">{state.selectedArticle.penulis.bio}</p>
+                  {state.selectedArticle.penulis.jabatan && (
+                    <p className="text-sm text-gray-500">{state.selectedArticle.penulis.jabatan}</p>
+                  )}
                 </div>
-              </div>
-
-              {/* Article actions */}
-              <div className="flex items-center space-x-4 mb-6 pb-6 border-b">
-                <button
-                  onClick={() => handleLikeArtikel(state.selectedArticle!.id)}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                    state.selectedArticle.isLiked
-                      ? 'bg-red-100 text-red-600'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                  </svg>
-                  <span>{state.selectedArticle.likes}</span>
-                </button>
-
-                <button
-                  onClick={() => shareArtikel(state.selectedArticle!.id)}
-                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
-                  </svg>
-                  <span>{state.selectedArticle.shares}</span>
-                </button>
-
-                <button
-                  onClick={() => bookmarkArtikel(state.selectedArticle!.id, 'current-user-id')}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                    state.selectedArticle.isBookmarked
-                      ? 'bg-yellow-100 text-yellow-600'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
-                  </svg>
-                  <span>Bookmark</span>
-                </button>
               </div>
 
               {/* Article content */}
               <div 
-                className="prose prose-lg max-w-none"
+                className="prose prose-lg max-w-none prose-headings:font-bold prose-h2:text-2xl prose-h3:text-xl prose-p:text-gray-700 prose-a:text-blue-600 prose-img:rounded-lg"
                 dangerouslySetInnerHTML={{ __html: state.selectedArticle.konten }}
               />
 
@@ -551,7 +302,11 @@ const HalamanArtikel: React.FC = () => {
                     {state.selectedArticle.tags.map((tag, index) => (
                       <span
                         key={index}
-                        className="px-3 py-1 bg-blue-100 text-blue-600 rounded-full text-sm"
+                        className="px-3 py-1 bg-blue-100 text-blue-600 rounded-full text-sm hover:bg-blue-200 transition-colors cursor-pointer"
+                        onClick={() => {
+                          handleSearch(tag);
+                          navigate('/artikel');
+                        }}
                       >
                         #{tag}
                       </span>
@@ -559,81 +314,24 @@ const HalamanArtikel: React.FC = () => {
                   </div>
                 </div>
               )}
-            </div>
-          </div>
 
-          {/* Comments section */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-semibold">
-                Komentar ({state.selectedArticle.komentar.length})
-              </h3>
-              <button
-                onClick={() => setState(prev => ({ ...prev, showCommentForm: !prev.showCommentForm }))}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Tulis Komentar
-              </button>
-            </div>
-
-            {/* Comment form */}
-            {state.showCommentForm && (
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <textarea
-                  value={state.commentText}
-                  onChange={(e) => setState(prev => ({ ...prev, commentText: e.target.value }))}
-                  placeholder="Tulis komentar Anda..."
-                  className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  rows={4}
-                />
-                <div className="flex justify-end space-x-3 mt-3">
-                  <button
-                    onClick={() => setState(prev => ({ ...prev, showCommentForm: false, commentText: '' }))}
-                    className="px-4 py-2 text-gray-600 hover:text-gray-700 transition-colors"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    onClick={() => tulisKomentar(state.selectedArticle!.id, state.commentText)}
-                    disabled={state.submittingComment || !state.commentText.trim()}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {state.submittingComment ? 'Mengirim...' : 'Kirim Komentar'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Comments list */}
-            <div className="space-y-4">
-              {state.selectedArticle.komentar.map((comment) => (
-                <div key={comment.id} className="border-b border-gray-200 pb-4">
-                  <div className="flex items-start space-x-3">
-                    <img
-                      src={comment.avatar || '/default-avatar.png'}
-                      alt={comment.nama}
-                      className="w-8 h-8 rounded-full"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <span className="font-medium text-gray-800">{comment.nama}</span>
-                        <span className="text-sm text-gray-500">
-                          {new Date(comment.tanggal).toLocaleDateString('id-ID')}
-                        </span>
-                      </div>
-                      <p className="text-gray-700 mb-2">{comment.konten}</p>
-                      <div className="flex items-center space-x-4 text-sm">
-                        <button className="text-gray-500 hover:text-blue-600 transition-colors">
-                          👍 {comment.likes}
-                        </button>
-                        <button className="text-gray-500 hover:text-blue-600 transition-colors">
-                          Balas
-                        </button>
-                      </div>
-                    </div>
+              {/* Gallery images */}
+              {state.selectedArticle.galeriGambar.length > 0 && (
+                <div className="mt-8 pt-6 border-t">
+                  <h3 className="text-lg font-semibold mb-4">Galeri</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {state.selectedArticle.galeriGambar.map((image, index) => (
+                      <img
+                        key={index}
+                        src={image}
+                        alt={`Galeri ${index + 1}`}
+                        className="w-full h-48 object-cover rounded-lg hover:opacity-90 transition-opacity cursor-pointer"
+                        onClick={() => window.open(image, '_blank')}
+                      />
+                    ))}
                   </div>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -647,7 +345,7 @@ const HalamanArtikel: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-4">Artikel Otomotif</h1>
+          <h1 className="text-3xl md:text-4xl font-bold text-gray-800 mb-4">Artikel Otomotif</h1>
           <p className="text-gray-600">
             Temukan artikel terbaru seputar dunia otomotif, tips, dan panduan lengkap
           </p>
@@ -665,108 +363,117 @@ const HalamanArtikel: React.FC = () => {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            <div className="flex flex-wrap gap-2">
+          </div>
+          
+          {/* Category filters */}
+          <div className="flex flex-wrap gap-2 mt-4">
+            <button
+              onClick={() => pilihKategoriArtikel(null)}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                !state.selectedCategory
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Semua
+            </button>
+            {state.kategori.map((category) => (
               <button
-                onClick={() => pilihKategoriArtikel(null)}
+                key={category.id}
+                onClick={() => pilihKategoriArtikel(category.slug)}
                 className={`px-4 py-2 rounded-lg transition-colors ${
-                  !state.selectedCategory
-                    ? 'bg-blue-600 text-white'
+                  state.selectedCategory === category.slug
+                    ? 'text-white'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
+                style={{
+                  backgroundColor: state.selectedCategory === category.slug ? category.warna : undefined
+                }}
               >
-                Semua
+                {category.nama}
               </button>
-              {state.kategori.map((category) => (
-                <button
-                  key={category.id}
-                  onClick={() => pilihKategoriArtikel(category.slug)}
-                  className={`px-4 py-2 rounded-lg transition-colors ${
-                    state.selectedCategory === category.slug
-                      ? 'text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                  style={{
-                    backgroundColor: state.selectedCategory === category.slug ? category.warna : undefined
-                  }}
-                >
-                  {category.nama} ({category.jumlahArtikel})
-                </button>
-              ))}
-            </div>
+            ))}
           </div>
         </div>
 
+        {/* No results */}
+        {state.artikel.length === 0 && (
+          <div className="text-center py-12">
+            <div className="text-gray-400 text-6xl mb-4">📰</div>
+            <h3 className="text-xl font-semibold text-gray-800 mb-2">Tidak ada artikel ditemukan</h3>
+            <p className="text-gray-600">Coba ubah kata kunci pencarian atau filter kategori</p>
+          </div>
+        )}
+
         {/* Articles grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {state.artikel.map((article) => (
-            <div
-              key={article.id}
-              className="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
-              onClick={() => pilihArtikel(article.id)}
-            >
-              <img
-                src={article.gambarUtama}
-                alt={article.judul}
-                className="w-full h-48 object-cover"
-              />
-              <div className="p-6">
-                <div className="flex items-center mb-3">
-                  <span
-                    className="px-2 py-1 rounded-full text-xs font-medium text-white"
-                    style={{ backgroundColor: article.kategori.warna }}
-                  >
-                    {article.kategori.nama}
-                  </span>
-                  <span className="ml-3 text-gray-500 text-sm">
-                    {article.readingTime} menit baca
-                  </span>
-                </div>
-                
-                <h3 className="text-lg font-semibold text-gray-800 mb-2 line-clamp-2">
-                  {article.judul}
-                </h3>
-                
-                <p className="text-gray-600 text-sm mb-4 line-clamp-3">
-                  {article.ringkasan}
-                </p>
-                
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4 text-sm text-gray-500">
-                    <span>👁️ {article.views}</span>
-                    <span>❤️ {article.likes}</span>
-                    <span>📤 {article.shares}</span>
+        {state.artikel.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            {state.artikel.map((article) => (
+              <div
+                key={article.id}
+                className="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => pilihArtikel(article.id)}
+              >
+                {article.gambarUtama && (
+                  <img
+                    src={article.gambarUtama}
+                    alt={article.judul}
+                    className="w-full h-48 object-cover"
+                  />
+                )}
+                <div className="p-6">
+                  <div className="flex items-center mb-3 flex-wrap gap-2">
+                    <span
+                      className="px-2 py-1 rounded-full text-xs font-medium text-white"
+                      style={{ backgroundColor: article.kategori.warna }}
+                    >
+                      {article.kategori.nama}
+                    </span>
+                    {article.featured && (
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                        ⭐ Featured
+                      </span>
+                    )}
+                    {article.trending && (
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        🔥 Trending
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        bookmarkArtikel(article.id, 'current-user-id');
-                      }}
-                      className={`p-1 rounded ${
-                        article.isBookmarked ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'
-                      }`}
-                    >
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
-                      </svg>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        shareArtikel(article.id);
-                      }}
-                      className="p-1 rounded text-gray-400 hover:text-blue-500"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
-                      </svg>
-                    </button>
+                  
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2 line-clamp-2 hover:text-blue-600 transition-colors">
+                    {article.judul}
+                  </h3>
+                  
+                  <p className="text-gray-600 text-sm mb-4 line-clamp-3">
+                    {article.ringkasan}
+                  </p>
+                  
+                  <div className="flex items-center justify-between text-sm text-gray-500">
+                    <div className="flex items-center space-x-3">
+                      <span className="flex items-center">
+                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {article.readingTime} min
+                      </span>
+                      <span className="flex items-center">
+                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        {article.views}
+                      </span>
+                    </div>
+                    <span className="text-xs">
+                      {kontrollerArtikel.formatTanggal(article.tanggalPublish)}
+                    </span>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Pagination */}
         {state.totalPages > 1 && (
@@ -775,29 +482,43 @@ const HalamanArtikel: React.FC = () => {
               <button
                 onClick={() => handlePageChange(state.currentPage - 1)}
                 disabled={state.currentPage === 1}
-                className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
               >
                 Sebelumnya
               </button>
               
-              {Array.from({ length: state.totalPages }, (_, i) => i + 1).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-4 py-2 border rounded-lg ${
-                    page === state.currentPage
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
+              {/* Page numbers */}
+              {Array.from({ length: Math.min(state.totalPages, 5) }, (_, i) => {
+                let pageNum: number;
+                if (state.totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (state.currentPage <= 3) {
+                  pageNum = i + 1;
+                } else if (state.currentPage >= state.totalPages - 2) {
+                  pageNum = state.totalPages - 4 + i;
+                } else {
+                  pageNum = state.currentPage - 2 + i;
+                }
+                
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => handlePageChange(pageNum)}
+                    className={`px-4 py-2 border rounded-lg transition-colors ${
+                      pageNum === state.currentPage
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
               
               <button
                 onClick={() => handlePageChange(state.currentPage + 1)}
                 disabled={state.currentPage === state.totalPages}
-                className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
               >
                 Selanjutnya
               </button>
