@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Button } from '../components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -15,7 +15,6 @@ import {
   List, 
   MapPin, 
   Calendar, 
-  Fuel, 
   Settings, 
   Heart,
   Eye,
@@ -23,137 +22,123 @@ import {
   CheckCircle,
   Star,
   ArrowUpDown,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Loader2
 } from 'lucide-react';
+import { carService, type CarWithRelations, type CarFilters, type CarQueryOptions } from '../services/carService';
+import { wishlistService } from '../services/wishlistService';
+import { supabase } from '../lib/supabase';
 
 const HalamanKatalog: React.FC = () => {
   const navigate = useNavigate();
+  const [cars, setCars] = useState<CarWithRelations[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalCars, setTotalCars] = useState(0);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [wishlistItems, setWishlistItems] = useState<Set<string>>(new Set());
+
+  // Filter states
   const [searchQuery, setSearchQuery] = useState('');
-  const [filters, setFilters] = useState({
-    brand: '',
-    priceRange: '',
-    year: '',
-    condition: '',
-    transmission: '',
-    fuelType: ''
-  });
-  const [currentPage, setCurrentPage] = useState(1);
+  const [filters, setFilters] = useState<CarFilters>({});
+  const [page, setPage] = useState(1);
+  const [limit] = useState(20);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [sortBy, setSortBy] = useState('newest');
+  const [sortBy, setSortBy] = useState<CarQueryOptions['sort_by']>('newest');
 
-  // Mock data mobil dengan data yang lebih lengkap
-  const cars = [
-    {
-      id: 1,
-      brand: 'Toyota',
-      model: 'Avanza',
-      variant: '1.3 G MT',
-      year: 2023,
-      price: 250000000,
-      originalPrice: 265000000,
-      condition: 'Baru',
-      mileage: 0,
-      transmission: 'Manual',
-      fuelType: 'Bensin',
-      location: 'Jakarta Selatan',
-      image: 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=400&h=300&fit=crop',
-      isVerified: true,
-      dealer: {
-        name: 'Toyota Fatmawati',
-        rating: 4.8,
-        responseTime: '< 1 jam'
-      },
-      features: ['ABS', 'Airbag', 'Power Steering', 'AC'],
-      views: 1250,
-      favorites: 89,
-      discount: 6
-    },
-    {
-      id: 2,
-      brand: 'Honda',
-      model: 'Civic',
-      variant: 'RS Turbo CVT',
-      year: 2022,
-      price: 450000000,
-      condition: 'Bekas',
-      mileage: 15000,
-      transmission: 'CVT',
-      fuelType: 'Bensin',
-      location: 'Bandung',
-      image: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?w=400&h=300&fit=crop',
-      isVerified: true,
-      dealer: {
-        name: 'Honda Dago',
-        rating: 4.6,
-        responseTime: '2 jam'
-      },
-      features: ['Turbo', 'Sunroof', 'Leather Seats', 'Honda Sensing'],
-      views: 890,
-      favorites: 156
-    },
-    {
-      id: 3,
-      brand: 'Mitsubishi',
-      model: 'Xpander',
-      variant: 'Ultimate AT',
-      year: 2021,
-      price: 280000000,
-      condition: 'Bekas',
-      mileage: 25000,
-      transmission: 'Automatic',
-      fuelType: 'Bensin',
-      location: 'Surabaya',
-      image: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=400&h=300&fit=crop',
-      isVerified: false,
-      dealer: {
-        name: 'Mitsubishi Surabaya',
-        rating: 4.3,
-        responseTime: '3 jam'
-      },
-      features: ['7 Seater', 'Touchscreen', 'Rear Camera', 'Keyless'],
-      views: 567,
-      favorites: 43
-    },
-    {
-      id: 4,
-      brand: 'Suzuki',
-      model: 'Ertiga',
-      variant: 'GX AT',
-      year: 2023,
-      price: 220000000,
-      condition: 'Baru',
-      mileage: 0,
-      transmission: 'Automatic',
-      fuelType: 'Bensin',
-      location: 'Jakarta Timur',
-      image: 'https://images.unsplash.com/photo-1494976688153-ca3ce29d8df4?w=400&h=300&fit=crop',
-      isVerified: true,
-      dealer: {
-        name: 'Suzuki Cakung',
-        rating: 4.5,
-        responseTime: '1 jam'
-      },
-      features: ['7 Seater', 'Smart Play', 'ESP', 'Hill Hold'],
-      views: 723,
-      favorites: 67
+  // Dropdown options
+  const [brands, setBrands] = useState<Array<{ id: number; name: string }>>([]);
+  const [categories, setCategories] = useState<Array<{ id: number; name: string; slug: string }>>([]);
+
+  // Fetch user session
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      setCurrentUser(data.user);
+      
+      // Load wishlist if user logged in
+      if (data.user) {
+        loadWishlist(data.user.id);
+      }
+    };
+    fetchUser();
+  }, []);
+
+  // Load wishlist items
+  const loadWishlist = async (userId: string) => {
+    try {
+      const items = await wishlistService.getUserWishlist(userId);
+      const carIds = new Set(items.map(item => item.car_id));
+      setWishlistItems(carIds);
+    } catch (error) {
+      console.error('Error loading wishlist:', error);
     }
-  ];
+  };
 
-  const brandOptions = [
-    { value: 'toyota', label: 'Toyota' },
-    { value: 'honda', label: 'Honda' },
-    { value: 'mitsubishi', label: 'Mitsubishi' },
-    { value: 'suzuki', label: 'Suzuki' },
-    { value: 'daihatsu', label: 'Daihatsu' }
-  ];
+  // Fetch brands and categories for filters
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      const [brandsData, categoriesData] = await Promise.all([
+        carService.getBrands(),
+        carService.getCategories()
+      ]);
+      setBrands(brandsData);
+      setCategories(categoriesData);
+    };
+    fetchFilterOptions();
+  }, []);
 
-  const priceRangeOptions = [
-    { value: '0-100', label: 'Di bawah 100 Juta' },
-    { value: '100-200', label: '100 - 200 Juta' },
-    { value: '200-300', label: '200 - 300 Juta' },
-    { value: '300-500', label: '300 - 500 Juta' },
-    { value: '500+', label: 'Di atas 500 Juta' }
-  ];
+  // Fetch cars
+  useEffect(() => {
+    fetchCars();
+  }, [filters, page, sortBy]);
+
+  const fetchCars = async () => {
+    setLoading(true);
+    try {
+      const response = await carService.getCars(filters, {
+        page,
+        limit,
+        sort_by: sortBy
+      });
+      
+      setCars(response.data);
+      setTotalCars(response.total);
+    } catch (error) {
+      console.error('Error fetching cars:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = () => {
+    setFilters(prev => ({ ...prev, search: searchQuery }));
+    setPage(1);
+  };
+
+  const handleToggleWishlist = async (carId: string) => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+
+    try {
+      const isInWishlist = wishlistItems.has(carId);
+      
+      if (isInWishlist) {
+        await wishlistService.removeFromWishlist(currentUser.id, carId);
+        setWishlistItems(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(carId);
+          return newSet;
+        });
+      } else {
+        await wishlistService.addToWishlist(currentUser.id, carId);
+        setWishlistItems(prev => new Set(prev).add(carId));
+      }
+    } catch (error) {
+      console.error('Error toggling wishlist:', error);
+    }
+  };
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -163,136 +148,152 @@ const HalamanKatalog: React.FC = () => {
     }).format(price);
   };
 
-  const CarCard = ({ car }: { car: any }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      whileHover={{ y: -8 }}
-      className="group"
-    >
-      <Card className="h-full border-0 shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden bg-white">
-        <div className="relative overflow-hidden">
-          <img
-            src={car.image}
-            alt={`${car.brand} ${car.model}`}
-            className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-500"
-          />
-          
-          {/* Overlay with actions */}
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
-            <div className="flex gap-2">
-              <Button size="sm" variant="secondary" className="bg-white/90 hover:bg-white">
-                <Eye className="w-4 h-4" />
-              </Button>
-              <Button size="sm" variant="secondary" className="bg-white/90 hover:bg-white">
-                <Heart className="w-4 h-4" />
-              </Button>
+  const CarCard = ({ car }: { car: CarWithRelations }) => {
+    const isInWishlist = wishlistItems.has(car.id);
+    const primaryImage = car.car_images?.find(img => img.is_primary) || car.car_images?.[0];
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        whileHover={{ y: -8 }}
+        className="group"
+      >
+        <Card className="h-full border-0 shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden bg-white">
+          <div className="relative overflow-hidden">
+            <img
+              src={primaryImage?.image_url || 'https://via.placeholder.com/400x300'}
+              alt={car.title}
+              className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-500"
+            />
+            
+            {/* Overlay with actions */}
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="secondary" 
+                  className="bg-white/90 hover:bg-white"
+                  onClick={() => navigate(`/mobil/${car.id}`)}
+                >
+                  <Eye className="w-4 h-4" />
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="secondary" 
+                  className={`bg-white/90 hover:bg-white ${isInWishlist ? 'text-red-500' : ''}`}
+                  onClick={() => handleToggleWishlist(car.id)}
+                >
+                  <Heart className={`w-4 h-4 ${isInWishlist ? 'fill-current' : ''}`} />
+                </Button>
+              </div>
             </div>
-          </div>
 
-          {/* Badges */}
-          <div className="absolute top-3 left-3 flex flex-col gap-2">
-            {car.isVerified && (
-              <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white">
-                <CheckCircle className="w-3 h-3 mr-1" />
-                Verified
+            {/* Badges */}
+            <div className="absolute top-3 left-3 flex flex-col gap-2">
+              {car.is_verified && (
+                <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white">
+                  <CheckCircle className="w-3 h-3 mr-1" />
+                  Verified
+                </Badge>
+              )}
+              <Badge variant={car.condition === 'new' ? 'default' : 'secondary'}>
+                {car.condition === 'new' ? 'Baru' : 'Bekas'}
               </Badge>
-            )}
-            <Badge variant={car.condition === 'Baru' ? 'default' : 'secondary'}>
-              {car.condition}
-            </Badge>
-          </div>
-
-          {/* Discount badge */}
-          {car.discount && (
-            <div className="absolute top-3 right-3">
-              <Badge className="bg-red-500 hover:bg-red-600 text-white">
-                -{car.discount}%
-              </Badge>
-            </div>
-          )}
-        </div>
-        
-        <CardContent className="p-6">
-          <div className="mb-4">
-            <h3 className="text-xl font-bold text-slate-900 mb-1 group-hover:text-blue-600 transition-colors">
-              {car.brand} {car.model}
-            </h3>
-            <p className="text-slate-600 text-sm">{car.variant} • {car.year}</p>
-          </div>
-
-          <div className="mb-4">
-            <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-2xl font-bold text-blue-600">
-                {formatPrice(car.price)}
-              </span>
-              {car.originalPrice && (
-                <span className="text-sm text-slate-500 line-through">
-                  {formatPrice(car.originalPrice)}
-                </span>
+              {car.is_featured && (
+                <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white">
+                  Featured
+                </Badge>
               )}
             </div>
           </div>
-
-          <div className="space-y-3 mb-6">
-            <div className="flex items-center text-sm text-slate-600">
-              <MapPin className="w-4 h-4 mr-2 text-slate-400" />
-              {car.location}
-            </div>
-            <div className="flex items-center text-sm text-slate-600">
-              <Settings className="w-4 h-4 mr-2 text-slate-400" />
-              {car.transmission} • {car.fuelType}
-            </div>
-            {car.mileage > 0 && (
-              <div className="flex items-center text-sm text-slate-600">
-                <Calendar className="w-4 h-4 mr-2 text-slate-400" />
-                {car.mileage.toLocaleString()} km
-              </div>
-            )}
-          </div>
-
-          {/* Dealer info */}
-          <div className="flex items-center justify-between mb-4 p-3 bg-slate-50 rounded-lg">
-            <div>
-              <p className="text-sm font-medium text-slate-900">{car.dealer.name}</p>
-              <div className="flex items-center gap-1">
-                <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                <span className="text-xs text-slate-600">{car.dealer.rating}</span>
-                <span className="text-xs text-slate-400">• {car.dealer.responseTime}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div className="flex items-center justify-between text-xs text-slate-500 mb-4">
-            <div className="flex items-center gap-1">
-              <Eye className="w-3 h-3" />
-              {car.views}
-            </div>
-            <div className="flex items-center gap-1">
-              <Heart className="w-3 h-3" />
-              {car.favorites}
-            </div>
-          </div>
-
-          <Separator className="mb-4" />
           
-          <div className="flex gap-2">
-            <Button 
-              className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
-              onClick={() => navigate(`/mobil/${car.id}`)}
-            >
-              Lihat Detail
-            </Button>
-            <Button variant="outline" size="sm" className="px-3">
-              <Phone className="w-4 h-4" />
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
+          <CardContent className="p-6">
+            <div className="mb-4">
+              <h3 className="text-xl font-bold text-slate-900 mb-1 group-hover:text-blue-600 transition-colors">
+                {car.car_brands.name} {car.car_models.name}
+              </h3>
+              <p className="text-slate-600 text-sm">{car.title} • {car.year}</p>
+            </div>
+
+            <div className="mb-4">
+              <div className="flex items-baseline gap-2 mb-2">
+                <span className="text-2xl font-bold text-blue-600">
+                  {formatPrice(car.price)}
+                </span>
+                {car.market_price && car.market_price > car.price && (
+                  <span className="text-sm text-slate-500 line-through">
+                    {formatPrice(car.market_price)}
+                  </span>
+                )}
+              </div>
+              {car.is_negotiable && (
+                <Badge variant="outline" className="text-xs">Nego</Badge>
+              )}
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center text-sm text-slate-600">
+                <MapPin className="w-4 h-4 mr-2 text-slate-400" />
+                {car.location_city}
+              </div>
+              <div className="flex items-center text-sm text-slate-600">
+                <Settings className="w-4 h-4 mr-2 text-slate-400" />
+                {car.transmission.toUpperCase()} • {car.fuel_type === 'gasoline' ? 'Bensin' : car.fuel_type}
+              </div>
+              {car.mileage > 0 && (
+                <div className="flex items-center text-sm text-slate-600">
+                  <Calendar className="w-4 h-4 mr-2 text-slate-400" />
+                  {car.mileage.toLocaleString()} km
+                </div>
+              )}
+            </div>
+
+            {/* Dealer info */}
+            <div className="flex items-center justify-between mb-4 p-3 bg-slate-50 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-slate-900">{car.users.full_name}</p>
+                <div className="flex items-center gap-1">
+                  <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                  <span className="text-xs text-slate-600">{car.users.seller_rating?.toFixed(1) || '0.0'}</span>
+                  <span className="text-xs text-slate-400">
+                    • {car.seller_type === 'showroom' ? 'Showroom' : 'Penjual'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="flex items-center justify-between text-xs text-slate-500 mb-4">
+              <div className="flex items-center gap-1">
+                <Eye className="w-3 h-3" />
+                {car.view_count}
+              </div>
+              <div className="flex items-center gap-1">
+                <Heart className="w-3 h-3" />
+                {car.wishlist_count}
+              </div>
+            </div>
+
+            <Separator className="mb-4" />
+            
+            <div className="flex gap-2">
+              <Button 
+                className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                onClick={() => navigate(`/mobil/${car.id}`)}
+              >
+                Lihat Detail
+              </Button>
+              <Button variant="outline" size="sm" className="px-3">
+                <Phone className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30">
@@ -312,7 +313,7 @@ const HalamanKatalog: React.FC = () => {
               <p className="text-slate-600 text-lg">Temukan mobil impian Anda dari ribuan pilihan terpercaya</p>
             </div>
             <Badge variant="secondary" className="px-4 py-2">
-              {cars.length} dari 1,234 mobil
+              {totalCars.toLocaleString()} mobil
             </Badge>
           </div>
         </motion.div>
@@ -333,6 +334,7 @@ const HalamanKatalog: React.FC = () => {
                   placeholder="Cari mobil berdasarkan merek, model, atau lokasi..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                   className="pl-12 h-12 text-lg border-0 focus-visible:ring-2 focus-visible:ring-blue-500 bg-slate-50"
                 />
               </div>
@@ -351,50 +353,73 @@ const HalamanKatalog: React.FC = () => {
 
                 <TabsContent value="filters" className="space-y-4">
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    <Select value={filters.brand} onValueChange={(value) => setFilters(prev => ({ ...prev, brand: value }))}>
+                    <Select 
+                      value={filters.brand_ids?.[0]?.toString() || ''} 
+                      onValueChange={(value) => {
+                        setFilters(prev => ({ ...prev, brand_ids: value ? [parseInt(value)] : undefined }));
+                        setPage(1);
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Merek" />
                       </SelectTrigger>
                       <SelectContent>
-                        {brandOptions.map((brand) => (
-                          <SelectItem key={brand.value} value={brand.value}>
-                            {brand.label}
+                        {brands.map((brand) => (
+                          <SelectItem key={brand.id} value={brand.id.toString()}>
+                            {brand.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
 
-                    <Select value={filters.priceRange} onValueChange={(value) => setFilters(prev => ({ ...prev, priceRange: value }))}>
+                    <Select 
+                      value={filters.category_ids?.[0]?.toString() || ''}
+                      onValueChange={(value) => {
+                        setFilters(prev => ({ ...prev, category_ids: value ? [parseInt(value)] : undefined }));
+                        setPage(1);
+                      }}
+                    >
                       <SelectTrigger>
-                        <SelectValue placeholder="Rentang Harga" />
+                        <SelectValue placeholder="Kategori" />
                       </SelectTrigger>
                       <SelectContent>
-                        {priceRangeOptions.map((price) => (
-                          <SelectItem key={price.value} value={price.value}>
-                            {price.label}
+                        {categories.map((category) => (
+                          <SelectItem key={category.id} value={category.id.toString()}>
+                            {category.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
 
                     <Input
-                      placeholder="Tahun"
-                      value={filters.year}
-                      onChange={(e) => setFilters(prev => ({ ...prev, year: e.target.value }))}
+                      placeholder="Tahun Min"
+                      type="number"
+                      value={filters.min_year || ''}
+                      onChange={(e) => {
+                        setFilters(prev => ({ ...prev, min_year: e.target.value ? parseInt(e.target.value) : undefined }));
+                        setPage(1);
+                      }}
                       className="h-10"
                     />
 
-                    <Select value={filters.condition} onValueChange={(value) => setFilters(prev => ({ ...prev, condition: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Kondisi" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="baru">Baru</SelectItem>
-                        <SelectItem value="bekas">Bekas</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      placeholder="Tahun Max"
+                      type="number"
+                      value={filters.max_year || ''}
+                      onChange={(e) => {
+                        setFilters(prev => ({ ...prev, max_year: e.target.value ? parseInt(e.target.value) : undefined }));
+                        setPage(1);
+                      }}
+                      className="h-10"
+                    />
 
-                    <Select value={filters.transmission} onValueChange={(value) => setFilters(prev => ({ ...prev, transmission: value }))}>
+                    <Select 
+                      value={filters.transmission?.[0] || ''}
+                      onValueChange={(value) => {
+                        setFilters(prev => ({ ...prev, transmission: value ? [value] : undefined }));
+                        setPage(1);
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Transmisi" />
                       </SelectTrigger>
@@ -405,12 +430,18 @@ const HalamanKatalog: React.FC = () => {
                       </SelectContent>
                     </Select>
 
-                    <Select value={filters.fuelType} onValueChange={(value) => setFilters(prev => ({ ...prev, fuelType: value }))}>
+                    <Select 
+                      value={filters.fuel_type?.[0] || ''}
+                      onValueChange={(value) => {
+                        setFilters(prev => ({ ...prev, fuel_type: value ? [value] : undefined }));
+                        setPage(1);
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Bahan Bakar" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="bensin">Bensin</SelectItem>
+                        <SelectItem value="gasoline">Bensin</SelectItem>
                         <SelectItem value="diesel">Diesel</SelectItem>
                         <SelectItem value="hybrid">Hybrid</SelectItem>
                         <SelectItem value="electric">Electric</SelectItem>
@@ -421,16 +452,67 @@ const HalamanKatalog: React.FC = () => {
 
                 <TabsContent value="advanced" className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <Input placeholder="Kilometer maksimal" className="h-10" />
-                    <Input placeholder="Harga minimum" className="h-10" />
-                    <Input placeholder="Harga maksimum" className="h-10" />
-                    <Input placeholder="Lokasi" className="h-10" />
+                    <Input 
+                      placeholder="Harga minimum" 
+                      type="number"
+                      value={filters.min_price || ''}
+                      onChange={(e) => {
+                        setFilters(prev => ({ ...prev, min_price: e.target.value ? parseInt(e.target.value) : undefined }));
+                        setPage(1);
+                      }}
+                      className="h-10" 
+                    />
+                    <Input 
+                      placeholder="Harga maksimum" 
+                      type="number"
+                      value={filters.max_price || ''}
+                      onChange={(e) => {
+                        setFilters(prev => ({ ...prev, max_price: e.target.value ? parseInt(e.target.value) : undefined }));
+                        setPage(1);
+                      }}
+                      className="h-10" 
+                    />
+                    <Select 
+                      value={filters.seller_type || ''}
+                      onValueChange={(value) => {
+                        setFilters(prev => ({ ...prev, seller_type: value as 'showroom' | 'external' | undefined }));
+                        setPage(1);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Tipe Penjual" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="showroom">Showroom</SelectItem>
+                        <SelectItem value="external">Penjual Eksternal</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select 
+                      value={filters.condition?.[0] || ''}
+                      onValueChange={(value) => {
+                        setFilters(prev => ({ ...prev, condition: value ? [value] : undefined }));
+                        setPage(1);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Kondisi" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="new">Baru</SelectItem>
+                        <SelectItem value="excellent">Excellent</SelectItem>
+                        <SelectItem value="good">Good</SelectItem>
+                        <SelectItem value="fair">Fair</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </TabsContent>
               </Tabs>
 
               <div className="flex justify-between items-center mt-6">
-                <Button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700">
+                <Button 
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                  onClick={handleSearch}
+                >
                   <Filter className="w-4 h-4 mr-2" />
                   Terapkan Filter
                 </Button>
@@ -456,17 +538,18 @@ const HalamanKatalog: React.FC = () => {
                       </Button>
                     </div>
                   </div>
-                  <Select value={sortBy} onValueChange={setSortBy}>
+                  <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
                     <SelectTrigger className="w-48">
                       <ArrowUpDown className="w-4 h-4 mr-2" />
                       <SelectValue placeholder="Urutkan" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="newest">Terbaru</SelectItem>
-                      <SelectItem value="price-low">Harga Terendah</SelectItem>
-                      <SelectItem value="price-high">Harga Tertinggi</SelectItem>
-                      <SelectItem value="year-new">Tahun Terbaru</SelectItem>
+                      <SelectItem value="price_asc">Harga Terendah</SelectItem>
+                      <SelectItem value="price_desc">Harga Tertinggi</SelectItem>
+                      <SelectItem value="year_desc">Tahun Terbaru</SelectItem>
                       <SelectItem value="popular">Paling Populer</SelectItem>
+                      <SelectItem value="rating">Rating Tertinggi</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -475,37 +558,70 @@ const HalamanKatalog: React.FC = () => {
           </Card>
         </motion.div>
 
-        {/* Car Grid */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.6, delay: 0.3 }}
-          className={`grid gap-6 mb-8 ${
-            viewMode === 'grid' 
-              ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' 
-              : 'grid-cols-1 lg:grid-cols-2'
-          }`}
-        >
-          {cars.map((car) => (
-            <CarCard key={car.id} car={car} />
-          ))}
-        </motion.div>
+        {/* Loading State */}
+        {loading && (
+          <div className="flex justify-center items-center py-20">
+            <Loader2 className="w-12 h-12 animate-spin text-blue-600" />
+          </div>
+        )}
 
-        {/* Load More */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="flex justify-center"
-        >
-          <Button 
-            variant="outline" 
-            size="lg" 
-            className="px-8 py-3 border-2 hover:bg-blue-50 hover:border-blue-200"
+        {/* Empty State */}
+        {!loading && cars.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center py-20"
           >
-            Muat Lebih Banyak
-          </Button>
-        </motion.div>
+            <p className="text-xl text-slate-600">Tidak ada mobil yang ditemukan</p>
+            <p className="text-slate-500 mt-2">Coba ubah filter pencarian Anda</p>
+          </motion.div>
+        )}
+
+        {/* Car Grid */}
+        {!loading && cars.length > 0 && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.6, delay: 0.3 }}
+              className={`grid gap-6 mb-8 ${
+                viewMode === 'grid' 
+                  ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' 
+                  : 'grid-cols-1 lg:grid-cols-2'
+              }`}
+            >
+              {cars.map((car) => (
+                <CarCard key={car.id} car={car} />
+              ))}
+            </motion.div>
+
+            {/* Pagination */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+              className="flex justify-center gap-4"
+            >
+              <Button 
+                variant="outline" 
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+              >
+                Previous
+              </Button>
+              <span className="flex items-center px-4 text-slate-600">
+                Page {page} of {Math.ceil(totalCars / limit)}
+              </span>
+              <Button 
+                variant="outline"
+                disabled={page >= Math.ceil(totalCars / limit)}
+                onClick={() => setPage(p => p + 1)}
+              >
+                Next
+              </Button>
+            </motion.div>
+          </>
+        )}
       </div>
     </div>
   );
