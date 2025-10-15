@@ -117,6 +117,7 @@ const HalamanKatalog: React.FC = () => {
 
   const handleToggleWishlist = async (carId: string) => {
     if (!currentUser) {
+      alert('Silakan login terlebih dahulu untuk menambahkan ke wishlist');
       navigate('/login');
       return;
     }
@@ -125,18 +126,33 @@ const HalamanKatalog: React.FC = () => {
       const isInWishlist = wishlistItems.has(carId);
       
       if (isInWishlist) {
-        await wishlistService.removeFromWishlist(currentUser.id, carId);
-        setWishlistItems(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(carId);
-          return newSet;
-        });
+        // Remove from wishlist
+        const success = await wishlistService.removeFromWishlist(currentUser.id, carId);
+        if (success) {
+          setWishlistItems(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(carId);
+            return newSet;
+          });
+          // Optional: Show success message
+          console.log('Removed from wishlist');
+        } else {
+          alert('Gagal menghapus dari wishlist');
+        }
       } else {
-        await wishlistService.addToWishlist(currentUser.id, carId);
-        setWishlistItems(prev => new Set(prev).add(carId));
+        // Add to wishlist
+        const success = await wishlistService.addToWishlist(currentUser.id, carId);
+        if (success) {
+          setWishlistItems(prev => new Set(prev).add(carId));
+          // Optional: Show success message
+          console.log('Added to wishlist');
+        } else {
+          alert('Mobil sudah ada dalam wishlist atau gagal menambahkan');
+        }
       }
     } catch (error) {
       console.error('Error toggling wishlist:', error);
+      alert('Terjadi kesalahan saat memproses wishlist');
     }
   };
 

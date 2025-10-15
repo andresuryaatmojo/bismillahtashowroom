@@ -29,57 +29,127 @@ class WishlistService {
   /**
    * Get user's wishlist
    */
-  async getUserWishlist(userId: string): Promise<WishlistItemWithCar[]> {
-    try {
-      const { data, error } = await supabase
-        .from('wishlists')
-        .select(`
-          *,
-          cars (
-            *,
-            car_brands (id, name, logo_url),
-            car_models (id, name),
-            car_categories (id, name, slug),
-            car_images (id, image_url, is_primary, display_order),
-            users (id, username, full_name, seller_rating)
-          )
-        `)
-        .eq('user_id', userId)
-        .eq('is_active', true)
-        .order('added_at', { ascending: false });
+ async getUserWishlist(userId: string): Promise<WishlistItemWithCar[]> {
+   try {
+     console.log('Fetching wishlist for user:', userId);
 
-      if (error) {
-        console.error('Error fetching wishlist:', error);
-        throw error;
-      }
+     // Fetch wishlist items first
+     const { data: wishlistItems, error: wishlistError } = await supabase
+       .from('wishlists')
+       .select('*')
+       .eq('user_id', userId)
+       .eq('is_active', true)
+       .order('added_at', { ascending: false });
 
-      return data || [];
-    } catch (error) {
-      console.error('Error in getUserWishlist:', error);
-      return [];
-    }
-  }
+     if (wishlistError) {
+       console.error('Error fetching wishlist:', wishlistError);
+       throw wishlistError;
+     }
+
+     console.log('Wishlist items:', wishlistItems);
+
+     if (!wishlistItems || wishlistItems.length === 0) {
+       return [];
+     }
+
+     // Fetch car details for each wishlist item SEPARATELY
+     const itemsWithCars = await Promise.all(
+       wishlistItems.map(async (item) => {
+         // Fetch car data
+         const { data: car } = await supabase
+           .from('cars')
+           .select('*')
+           .eq('id', item.car_id)
+           .single();
+
+         if (!car) return null;
+
+         // Fetch related data
+         const [brand, model, category, images] = await Promise.all([
+           supabase.from('car_brands').select('*').eq('id', car.brand_id).single(),
+           supabase.from('car_models').select('*').eq('id', car.model_id).single(),
+           supabase.from('car_categories').select('*').eq('id', car.category_id).single(),
+           supabase.from('car_images').select('*').eq('car_id', car.id).order('display_order')
+         ]);
+
+         return {
+           ...item,
+           cars: {
+             ...car,
+             car_brands: brand.data || { id: 0, name: 'Unknown' },
+             car_models: model.data || { id: 0, name: 'Unknown' },
+             car_categories: category.data || { id: 0, name: 'Unknown' },
+             car_images: images.data || []
+           }
+         };
+       })
+     );
+
+     // Filter out null items
+     const validItems = itemsWithCars.filter(item => item !== null);
+
+     console.log('Items with car details:', validItems);
+
+     return validItems as WishlistItemWithCar[];
+   } catch (error) {
+     console.error('Error in getUserWishlist:', error);
+     return [];
+   }
+ }
 
   /**
    * Add car to wishlist
    */
   async addToWishlist(userId: string, carId: string, notes?: string): Promise<boolean> {
     try {
-      // Check if already in wishlist
+      console.log('Adding to wishlist:', { userId, carId });
+
+      // Check if already exists (termasuk yang inactive)
       const { data: existing } = await supabase
         .from('wishlists')
-        .select('id')
+        .select('id, is_active')
         .eq('user_id', userId)
         .eq('car_id', carId)
-        .eq('is_active', true)
-        .single();
+        .maybeSingle();
 
-      if (existing) {
-        console.log('Car already in wishlist');
+      // Jika sudah ada dan aktif
+      if (existing && existing.is_active) {
+        console.log('Car already in active wishlist');
         return false;
       }
 
-      // Get car price for saved_price
+      // Jika sudah ada tapi INACTIVE, reaktivasi
+      if (existing && !existing.is_active) {
+        console.log('Reactivating existing wishlist item');
+        
+        // Get current car price
+        const { data: car } = await supabase
+          .from('cars')
+          .select('price')
+          .eq('id', carId)
+          .single();
+
+        const { error: updateError } = await supabase
+          .from('wishlists')
+          .update({
+            is_active: true,
+            current_price: car?.price || 0,
+            notes: notes || null,
+            added_at: new Date().toISOString() // Update waktu ditambahkan
+          })
+          .eq('id', existing.id);
+
+        if (updateError) {
+          console.error('Error reactivating wishlist:', updateError);
+          throw updateError;
+        }
+
+        return true;
+      }
+
+      // Jika belum ada sama sekali, INSERT baru
+      console.log('Creating new wishlist item');
+      
       const { data: car } = await supabase
         .from('cars')
         .select('price')
@@ -90,8 +160,7 @@ class WishlistService {
         throw new Error('Car not found');
       }
 
-      // Insert to wishlist
-      const { error } = await supabase
+      const { error: insertError } = await supabase
         .from('wishlists')
         .insert({
           user_id: userId,
@@ -105,9 +174,9 @@ class WishlistService {
           current_price: car.price
         });
 
-      if (error) {
-        console.error('Error adding to wishlist:', error);
-        throw error;
+      if (insertError) {
+        console.error('Error adding to wishlist:', insertError);
+        throw insertError;
       }
 
       return true;
