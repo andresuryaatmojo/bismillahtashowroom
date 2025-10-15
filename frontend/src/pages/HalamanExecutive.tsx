@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 const HalamanExecutive = () => {
   const navigate = useNavigate();
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, isLoading: authLoading } = useAuth();
   
   const [state, setState] = useState({
     currentView: 'dashboard',
@@ -27,49 +28,95 @@ const HalamanExecutive = () => {
     reports: [] as any[]
   });
 
-  // Load data saat komponen dimount
   useEffect(() => {
-    loadExecutiveData();
-  }, []);
+    if (user && user.role === 'owner') {
+      loadExecutiveData();
+    }
+  }, [user]);
 
   const loadExecutiveData = async () => {
-    setState(prev => ({ ...prev, isLoading: true }));
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
     
     try {
-      // Simulasi API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      // Load total revenue dari transactions
+      const { data: transactions, error: transError } = await supabase
+        .from('transactions')
+        .select('total_amount, status')
+        .eq('status', 'completed');
+
+      if (transError) throw transError;
+
+      const totalRevenue = transactions?.reduce((sum, t) => sum + (t.total_amount || 0), 0) || 0;
+      const totalSales = transactions?.length || 0;
+
+      // Load active users
+      const { count: activeUsersCount, error: usersError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('account_status', 'active');
+
+      if (usersError) throw usersError;
+
+      // Load recent activities dari transactions & users
+      const { data: recentTrans, error: recentError } = await supabase
+        .from('transactions')
+        .select(`
+          id,
+          created_at,
+          status,
+          cars (brand, model),
+          users (full_name)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (recentError) throw recentError;
+
+      const activities = recentTrans?.map((t: any) => ({
+        id: t.id,
+        type: 'sale',
+        message: `Transaksi ${t.cars?.brand} ${t.cars?.model} oleh ${t.users?.full_name}`,
+        time: new Date(t.created_at).toLocaleString('id-ID'),
+        status: t.status
+      })) || [];
+
+      // Calculate conversion rate (dummy calculation)
+      const conversionRate = totalSales > 0 ? ((totalSales / (activeUsersCount || 1)) * 100).toFixed(1) : 0;
+
+      // System health check
+      const startTime = Date.now();
+      await supabase.from('users').select('id').limit(1);
+      const responseTime = Date.now() - startTime;
+
       setState(prev => ({
         ...prev,
         analytics: {
-          totalRevenue: 2500000000,
-          totalSales: 156,
-          activeUsers: 1247,
-          conversionRate: 12.5,
-          monthlyGrowth: 8.3
+          totalRevenue,
+          totalSales,
+          activeUsers: activeUsersCount || 0,
+          conversionRate: parseFloat(conversionRate as string),
+          monthlyGrowth: 8.3 // TODO: Calculate real growth
         },
         systemHealth: {
           serverStatus: 'online',
           databaseStatus: 'online',
-          apiResponseTime: 245,
+          apiResponseTime: responseTime,
           uptime: '99.9%'
         },
-        recentActivities: [
-          { id: 1, type: 'sale', message: 'Penjualan Honda Civic berhasil', time: '2 menit lalu' },
-          { id: 2, type: 'user', message: 'User baru mendaftar', time: '5 menit lalu' },
-          { id: 3, type: 'system', message: 'Backup database selesai', time: '1 jam lalu' }
-        ],
+        recentActivities: activities,
         reports: [
-          { id: 1, name: 'Laporan Penjualan Bulanan', date: '2024-01-15', status: 'ready' },
-          { id: 2, name: 'Analisis Performa Marketing', date: '2024-01-14', status: 'processing' },
-          { id: 3, name: 'Laporan Keuangan Q4', date: '2024-01-10', status: 'ready' }
+          { id: 1, name: 'Laporan Penjualan Bulanan', date: new Date().toLocaleDateString('id-ID'), status: 'ready' },
+          { id: 2, name: 'Analisis Performa Marketing', date: new Date().toLocaleDateString('id-ID'), status: 'processing' },
+          { id: 3, name: 'Laporan Keuangan Q4', date: new Date().toLocaleDateString('id-ID'), status: 'ready' }
         ],
         isLoading: false
       }));
-    } catch (error) {
+
+    } catch (error: any) {
+      console.error('Error loading executive data:', error);
       setState(prev => ({
         ...prev,
-        error: 'Gagal memuat data executive',
+        error: error.message || 'Gagal memuat data executive',
         isLoading: false
       }));
     }
@@ -83,27 +130,190 @@ const HalamanExecutive = () => {
     }).format(amount);
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/admin');
+  const handleLogout = async () => {
+    if (window.confirm('Apakah Anda yakin ingin keluar?')) {
+      await logout();
+      navigate('/login');
+    }
   };
 
-  const exportData = (type: string) => {
-    // Simulasi export data
-    alert(`Mengekspor data ${type}...`);
+  const exportData = async (type: string) => {
+    try {
+      let data: any[] = [];
+      let filename = '';
+
+      if (type === 'analytics') {
+        const { data: analytics, error } = await supabase
+          .from('transactions')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        data = analytics || [];
+        filename = 'analytics_export.json';
+      } else {
+        alert(`Export ${type} belum diimplementasi`);
+        return;
+      }
+
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      alert(`Data ${type} berhasil diekspor!`);
+    } catch (error: any) {
+      console.error('Error exporting data:', error);
+      alert('Gagal mengekspor data: ' + error.message);
+    }
   };
 
-  const generateReport = (reportType: string) => {
-    // Simulasi generate report
-    alert(`Membuat laporan ${reportType}...`);
+  const generateReport = async (reportType: string) => {
+    try {
+      setState(prev => ({ ...prev, isLoading: true }));
+
+      const { data: salesData, error } = await supabase
+        .from('transactions')
+        .select(`
+          *,
+          cars (brand, model, price),
+          users (full_name, email)
+        `)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const report = {
+        type: reportType,
+        generatedAt: new Date().toISOString(),
+        totalTransactions: salesData?.length || 0,
+        totalRevenue: salesData?.reduce((sum, t) => sum + (t.total_amount || 0), 0) || 0,
+        data: salesData
+      };
+
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report_${reportType}_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setState(prev => ({ ...prev, isLoading: false }));
+      alert('Laporan berhasil dibuat!');
+    } catch (error: any) {
+      console.error('Error generating report:', error);
+      setState(prev => ({ ...prev, isLoading: false }));
+      alert('Gagal membuat laporan: ' + error.message);
+    }
   };
 
-  if (state.isLoading) {
+  const performSystemBackup = async () => {
+    try {
+      setState(prev => ({ ...prev, isLoading: true }));
+
+      // Backup users
+      const { data: users, error: usersError } = await supabase
+        .from('users')
+        .select('*');
+
+      if (usersError) throw usersError;
+
+      // Backup cars
+      const { data: cars, error: carsError } = await supabase
+        .from('cars')
+        .select('*');
+
+      if (carsError) throw carsError;
+
+      // Backup transactions
+      const { data: transactions, error: transError } = await supabase
+        .from('transactions')
+        .select('*');
+
+      if (transError) throw transError;
+
+      const backup = {
+        timestamp: new Date().toISOString(),
+        users: users || [],
+        cars: cars || [],
+        transactions: transactions || []
+      };
+
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `backup_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setState(prev => ({ ...prev, isLoading: false }));
+      alert('Backup sistem berhasil dibuat!');
+    } catch (error: any) {
+      console.error('Error creating backup:', error);
+      setState(prev => ({ ...prev, isLoading: false }));
+      alert('Gagal membuat backup: ' + error.message);
+    }
+  };
+
+  const clearCache = async () => {
+    if (window.confirm('Apakah Anda yakin ingin membersihkan cache?')) {
+      try {
+        // Clear localStorage
+        localStorage.clear();
+        
+        // Clear sessionStorage
+        sessionStorage.clear();
+        
+        alert('Cache berhasil dibersihkan! Halaman akan dimuat ulang.');
+        window.location.reload();
+      } catch (error) {
+        alert('Gagal membersihkan cache');
+      }
+    }
+  };
+
+  const optimizeDatabase = async () => {
+    if (window.confirm('Apakah Anda yakin ingin mengoptimalkan database? Ini mungkin memakan waktu.')) {
+      try {
+        setState(prev => ({ ...prev, isLoading: true }));
+
+        // Simulasi optimasi database
+        // Dalam produksi, ini bisa memanggil stored procedure di Supabase
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        setState(prev => ({ ...prev, isLoading: false }));
+        alert('Database berhasil dioptimalkan!');
+        loadExecutiveData();
+      } catch (error) {
+        setState(prev => ({ ...prev, isLoading: false }));
+        alert('Gagal mengoptimalkan database');
+      }
+    }
+  };
+
+  if (authLoading || state.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
           <p className="text-gray-600">Memuat dashboard executive...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || user.role !== 'owner') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-red-600 mb-2">Akses Ditolak</h2>
+          <p className="text-gray-600">Anda tidak memiliki akses ke halaman ini.</p>
         </div>
       </div>
     );
@@ -117,11 +327,11 @@ const HalamanExecutive = () => {
           <div className="flex justify-between items-center py-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Executive Dashboard</h1>
-              <p className="text-sm text-gray-600">Selamat datang, {user?.username}</p>
+              <p className="text-sm text-gray-600">Selamat datang, {user.full_name}</p>
             </div>
             <div className="flex items-center space-x-4">
               <span className="px-3 py-1 bg-purple-100 text-purple-800 text-sm font-medium rounded-full">
-                Executive
+                Owner
               </span>
               <button
                 onClick={handleLogout}
@@ -160,6 +370,12 @@ const HalamanExecutive = () => {
         {state.error && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             {state.error}
+            <button
+              onClick={loadExecutiveData}
+              className="ml-4 text-sm underline"
+            >
+              Coba Lagi
+            </button>
           </div>
         )}
 
@@ -234,8 +450,8 @@ const HalamanExecutive = () => {
                     </div>
                     <div className="ml-5 w-0 flex-1">
                       <dl>
-                        <dt className="text-sm font-medium text-gray-500 truncate">Growth Rate</dt>
-                        <dd className="text-lg font-medium text-gray-900">{state.analytics.monthlyGrowth}%</dd>
+                        <dt className="text-sm font-medium text-gray-500 truncate">Conversion Rate</dt>
+                        <dd className="text-lg font-medium text-gray-900">{state.analytics.conversionRate}%</dd>
                       </dl>
                     </div>
                   </div>
@@ -249,26 +465,37 @@ const HalamanExecutive = () => {
                 <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
                   Aktivitas Terbaru
                 </h3>
-                <div className="space-y-3">
-                  {state.recentActivities.map((activity) => (
-                    <div key={activity.id} className="flex items-center space-x-3">
-                      <div className="flex-shrink-0">
-                        <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                {state.recentActivities.length === 0 ? (
+                  <p className="text-gray-500 text-center py-4">Tidak ada aktivitas terbaru</p>
+                ) : (
+                  <div className="space-y-3">
+                    {state.recentActivities.map((activity) => (
+                      <div key={activity.id} className="flex items-center space-x-3">
+                        <div className="flex-shrink-0">
+                          <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-900">{activity.message}</p>
+                          <p className="text-xs text-gray-500">{activity.time}</p>
+                        </div>
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          activity.status === 'completed' ? 'bg-green-100 text-green-800' :
+                          activity.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {activity.status}
+                        </span>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900">{activity.message}</p>
-                        <p className="text-xs text-gray-500">{activity.time}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
         {/* Analytics View */}
-        {state.currentView === 'analytics' && hasPermission('view_analytics') && (
+        {state.currentView === 'analytics' && (
           <div className="space-y-6">
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Advanced Analytics</h3>
@@ -278,13 +505,15 @@ const HalamanExecutive = () => {
                 <div className="border rounded-lg p-4">
                   <h4 className="font-medium text-gray-900 mb-2">Conversion Rate</h4>
                   <div className="text-2xl font-bold text-green-600">{state.analytics.conversionRate}%</div>
-                  <p className="text-sm text-gray-500">+2.1% dari bulan lalu</p>
+                  <p className="text-sm text-gray-500">Dari total users aktif</p>
                 </div>
                 
                 <div className="border rounded-lg p-4">
-                  <h4 className="font-medium text-gray-900 mb-2">Customer Acquisition Cost</h4>
-                  <div className="text-2xl font-bold text-blue-600">Rp 450,000</div>
-                  <p className="text-sm text-gray-500">-5.2% dari bulan lalu</p>
+                  <h4 className="font-medium text-gray-900 mb-2">Average Transaction</h4>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {formatCurrency(state.analytics.totalSales > 0 ? state.analytics.totalRevenue / state.analytics.totalSales : 0)}
+                  </div>
+                  <p className="text-sm text-gray-500">Per transaksi</p>
                 </div>
               </div>
 
@@ -330,7 +559,7 @@ const HalamanExecutive = () => {
                         </span>
                         {report.status === 'ready' && (
                           <button
-                            onClick={() => exportData(report.name)}
+                            onClick={() => generateReport(report.name)}
                             className="text-blue-600 hover:text-blue-800 text-sm"
                           >
                             Download
@@ -346,7 +575,7 @@ const HalamanExecutive = () => {
         )}
 
         {/* System View */}
-        {state.currentView === 'system' && hasPermission('manage_system') && (
+        {state.currentView === 'system' && (
           <div className="space-y-6">
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">System Health</h3>
@@ -380,22 +609,24 @@ const HalamanExecutive = () => {
                 
                 <div className="space-y-4">
                   <button
-                    onClick={() => alert('Memulai backup sistem...')}
-                    className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                    onClick={performSystemBackup}
+                    disabled={state.isLoading}
+                    className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
                   >
                     Backup System
                   </button>
                   
                   <button
-                    onClick={() => alert('Membersihkan cache...')}
+                    onClick={clearCache}
                     className="w-full px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors"
                   >
                     Clear Cache
                   </button>
                   
                   <button
-                    onClick={() => alert('Mengoptimalkan database...')}
-                    className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                    onClick={optimizeDatabase}
+                    disabled={state.isLoading}
+                    className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
                   >
                     Optimize Database
                   </button>

@@ -10,7 +10,6 @@ import { motion } from 'framer-motion';
 import { Eye, EyeOff, User, Lock, LogIn, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
-// Custom Google Icon Component
 const GoogleIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor">
     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -20,7 +19,6 @@ const GoogleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-// Custom Facebook Icon Component
 const FacebookIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor">
     <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" fill="#1877F2"/>
@@ -32,26 +30,32 @@ const Login: React.FC = () => {
   const { login, isAuthenticated, user, isLoading } = useAuth();
   
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     rememberMe: false
   });
-  
   const [errors, setErrors] = useState({
     email: '',
     password: ''
   });
-  
   const [generalError, setGeneralError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // ===== REDIRECT IF ALREADY LOGGED IN =====
   useEffect(() => {
     if (!isLoading && isAuthenticated && user) {
-      console.log('✅ User already authenticated, redirecting to dashboard...');
-      navigate('/dashboard', { replace: true });
+      console.log('✅ User authenticated, redirecting based on role:', user.role);
+      
+      switch(user.role) {
+        case 'admin':
+          navigate('/admin', { replace: true });
+          break;
+        case 'owner':
+          navigate('/executive', { replace: true });
+          break;
+        default:
+          navigate('/dashboard', { replace: true });
+      }
     }
   }, [isAuthenticated, user, isLoading, navigate]);
 
@@ -59,7 +63,6 @@ const Login: React.FC = () => {
     const newErrors = { email: '', password: '' };
     let isValid = true;
 
-    // Validasi email
     if (!formData.email.trim()) {
       newErrors.email = 'Email harus diisi';
       isValid = false;
@@ -68,7 +71,6 @@ const Login: React.FC = () => {
       isValid = false;
     }
 
-    // Validasi password
     if (!formData.password) {
       newErrors.password = 'Password harus diisi';
       isValid = false;
@@ -88,112 +90,48 @@ const Login: React.FC = () => {
       [name]: type === 'checkbox' ? checked : value
     }));
     
-    // Clear errors when user starts typing
     if (errors[name as keyof typeof errors]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
     }
-    
-    // Clear general error
     if (generalError) {
       setGeneralError('');
     }
   };
 
-  // ===== FIXED: handleSubmit dengan Database Integration =====
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validasi form
-    if (!validateForm()) {
-      console.log('⚠️ Form validation failed');
-      return;
-    }
+    if (!validateForm()) return;
     
-    console.log('=== LOGIN START ===');
-    
-    // Reset error state
     setGeneralError('');
-    
-    // Start loading
     setIsSubmitting(true);
-    console.log('🔐 Starting login process...');
     
     try {
-      console.log('📤 Calling login function with email:', formData.email);
-      
-      // Call login function dari AuthContext
       const result = await login(formData.email, formData.password);
       
-      console.log('📥 Login result:', result);
-      
       if (result.success) {
-        console.log('✅ Login successful!');
-        
-        // Clear form
-        setFormData({
-          email: '',
-          password: '',
-          rememberMe: false
-        });
+        setFormData({ email: '', password: '', rememberMe: false });
         setErrors({ email: '', password: '' });
-        
-        // Show success notification
-        alert('🎉 Login Berhasil!\n\nSelamat datang kembali!');
-        
-        // Redirect ke dashboard
-        console.log('🔀 Redirecting to dashboard...');
-        setTimeout(() => {
-          navigate('/dashboard', { replace: true });
-        }, 500);
-        
       } else {
-        // Handle login error
-        console.error('❌ Login failed:', result.error);
+        let errorMessage = result.error || 'Login gagal';
         
-        let errorMessage = result.error || 'Login gagal. Silakan coba lagi.';
-        
-        // Customize error messages
         if (errorMessage.includes('Invalid login credentials')) {
-          errorMessage = 'Email atau password salah. Silakan coba lagi.';
+          errorMessage = 'Email atau password salah';
         } else if (errorMessage.includes('Email not confirmed')) {
-          errorMessage = 'Email Anda belum diverifikasi. Silakan cek inbox email Anda.';
-        } else if (errorMessage.includes('Account not found')) {
-          errorMessage = 'Akun tidak ditemukan. Silakan daftar terlebih dahulu.';
+          errorMessage = 'Email belum diverifikasi';
         }
         
         setGeneralError(errorMessage);
-        
-        // Scroll ke atas untuk melihat error
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
-      
     } catch (error: any) {
-      // Handle unexpected error
-      console.error('❌ Unexpected login error:', error);
-      
-      const errorMessage = error?.message || 'Terjadi kesalahan. Silakan coba lagi.';
-      setGeneralError(errorMessage);
-      
-      // Scroll ke atas untuk melihat error
+      setGeneralError(error?.message || 'Terjadi kesalahan');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      
     } finally {
-      // PENTING: Selalu set isSubmitting ke false untuk stop loading
-      console.log('✋ Stopping loading state...');
       setIsSubmitting(false);
-      console.log('=== LOGIN END ===');
     }
   };
 
-  const handleGoogleLogin = () => {
-    alert('🚧 Fitur login dengan Google akan segera tersedia!');
-  };
-
-  const handleFacebookLogin = () => {
-    alert('🚧 Fitur login dengan Facebook akan segera tersedia!');
-  };
-
-  // Show loading state while checking authentication
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center">
@@ -215,11 +153,7 @@ const Login: React.FC = () => {
       >
         <Card className="shadow-2xl border-0 bg-white/95 backdrop-blur-sm">
           <CardHeader className="text-center pb-6 pt-8">
-            <motion.div
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1 }}
-              transition={{ duration: 0.3 }}
-            >
+            <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={{ duration: 0.3 }}>
               <h1 className="text-3xl font-bold text-blue-600 mb-2">Mobilindo</h1>
               <CardTitle className="text-xl font-semibold text-gray-800 mb-2">
                 Masuk ke Akun Anda
@@ -259,9 +193,7 @@ const Login: React.FC = () => {
                   disabled={isSubmitting}
                   autoComplete="email"
                 />
-                {errors.email && (
-                  <p className="text-red-500 text-xs mt-1">{errors.email}</p>
-                )}
+                {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
               </div>
 
               <div className="space-y-2">
@@ -290,16 +222,13 @@ const Login: React.FC = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                {errors.password && (
-                  <p className="text-red-500 text-xs mt-1">{errors.password}</p>
-                )}
+                {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
               </div>
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="rememberMe"
-                    name="rememberMe"
                     checked={formData.rememberMe}
                     onCheckedChange={(checked) => 
                       setFormData(prev => ({ ...prev, rememberMe: checked as boolean }))
@@ -310,10 +239,7 @@ const Login: React.FC = () => {
                     Ingat saya
                   </Label>
                 </div>
-                <RouterLink 
-                  to="/forgot-password" 
-                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                >
+                <RouterLink to="/forgot-password" className="text-sm text-blue-600 hover:text-blue-800 hover:underline">
                   Lupa password?
                 </RouterLink>
               </div>
@@ -352,7 +278,7 @@ const Login: React.FC = () => {
                   type="button"
                   variant="outline"
                   className="w-full h-12 border-gray-300 hover:bg-gray-50 flex items-center justify-center gap-3"
-                  onClick={handleGoogleLogin}
+                  onClick={() => alert('🚧 Fitur login dengan Google akan segera tersedia!')}
                   disabled={isSubmitting}
                 >
                   <GoogleIcon className="w-5 h-5" />
@@ -363,7 +289,7 @@ const Login: React.FC = () => {
                   type="button"
                   variant="outline"
                   className="w-full h-12 border-gray-300 hover:bg-gray-50 flex items-center justify-center gap-3"
-                  onClick={handleFacebookLogin}
+                  onClick={() => alert('🚧 Fitur login dengan Facebook akan segera tersedia!')}
                   disabled={isSubmitting}
                 >
                   <FacebookIcon className="w-5 h-5" />
