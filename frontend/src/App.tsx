@@ -52,18 +52,29 @@ const AppContent: React.FC = () => {
     '/', 
     '/katalog', 
     '/artikel', 
+    '/tentang',
     '/kemitraan', 
     '/simulasi', 
     '/perbandingan', 
     '/test-drive', 
-    '/trade-in'
+    '/trade-in',
+    '/wishlist',
+    '/chat',
+    '/riwayat',
+    '/profil',
+    '/dashboard',
+    '/iklan',
+    '/kelola-iklan',
+    '/pembelian',
+    '/transaksi'
   ];
   
   const isAuthPage = authPages.includes(location.pathname);
   
   // Check if current path is guest page or artikel detail page
   const isGuestPage = guestPages.includes(location.pathname) || 
-                      location.pathname.startsWith('/artikel/');
+                      location.pathname.startsWith('/artikel/') ||
+                      location.pathname.startsWith('/mobil/');
   
   const isAuthenticatedPage = !isAuthPage && !isGuestPage;
 

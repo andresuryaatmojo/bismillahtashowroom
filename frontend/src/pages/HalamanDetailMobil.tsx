@@ -218,15 +218,17 @@ const HalamanDetailMobil: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Back Button */}
-        <Button 
-          variant="ghost" 
-          className="mb-4"
-          onClick={() => navigate('/katalog')}
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Kembali ke Katalog
-        </Button>
+        {/* Back Button - Positioned to the left */}
+        <div className="flex justify-start mb-4">
+          <Button 
+            variant="ghost" 
+            className="flex items-center gap-2 hover:bg-gray-100"
+            onClick={() => navigate('/katalog')}
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Kembali ke Katalog
+          </Button>
+        </div>
 
         {/* Header */}
         <motion.div 

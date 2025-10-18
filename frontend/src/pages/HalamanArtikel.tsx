@@ -216,19 +216,33 @@ const HalamanArtikel: React.FC = () => {
 
   // Render article detail view
   if (state.selectedArticle) {
+    const handleBackToArticles = () => {
+      // Reset selected article state
+      setState(prev => ({ 
+        ...prev, 
+        selectedArticle: null,
+        loading: false 
+      }));
+      
+      // Navigate back to articles list
+      navigate('/artikel', { replace: true });
+    };
+
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-4xl mx-auto px-4 py-8">
           {/* Back button */}
-          <button
-            onClick={() => navigate('/artikel')}
-            className="mb-6 flex items-center text-blue-600 hover:text-blue-700 transition-colors"
-          >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Kembali ke Artikel
-          </button>
+          <div className="flex justify-start mb-6">
+            <button
+              onClick={handleBackToArticles}
+              className="flex items-center gap-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Kembali ke Artikel
+            </button>
+          </div>
 
           {/* Article header */}
           <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-8">
