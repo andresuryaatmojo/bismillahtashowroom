@@ -16,7 +16,9 @@ import {
   Heart,
   Settings,
   LogOut,
-  Edit
+  Edit,
+  Receipt,
+  FileText
 } from 'lucide-react';
 
 const GuestNavigation: React.FC = () => {
@@ -124,6 +126,20 @@ const GuestNavigation: React.FC = () => {
                       Wishlist
                     </Link>
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/riwayat" className="flex items-center gap-2 w-full">
+                      <Receipt className="w-4 h-4" />
+                      Transaksi
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/iklan" className="flex items-center gap-2 w-full">
+                      <FileText className="w-4 h-4" />
+                      Iklan Saya
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
                     <Link to="/settings" className="flex items-center gap-2 w-full">
                       <Settings className="w-4 h-4" />

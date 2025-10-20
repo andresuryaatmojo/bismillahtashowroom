@@ -7,6 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 // NAVIGATION COMPONENTS
 import Navigation from './components/Navigation';
 import GuestNavigation from './components/GuestNavigation';
+import AdminNavigation from './components/AdminNavigation';
 
 // AUTH PAGES
 import Login from './pages/Login';
@@ -44,6 +45,7 @@ import NotFound from './pages/NotFound';
 
 import './App.css';
 
+// Komponen: AppContent
 const AppContent: React.FC = () => {
   const location = useLocation();
   
@@ -77,148 +79,151 @@ const AppContent: React.FC = () => {
                       location.pathname.startsWith('/mobil/');
   
   const isAuthenticatedPage = !isAuthPage && !isGuestPage;
+  const isAdminPage = location.pathname.startsWith('/admin');
 
   return (
     <div className="App">
       {isGuestPage && <GuestNavigation />}
-      {isAuthenticatedPage && <Navigation />}
-      
-      <Routes>
-        {/* PUBLIC ROUTES */}
-        <Route path="/" element={<HalamanBeranda />} />
-        <Route path="/katalog" element={<HalamanKatalog />} />
-        
-        {/* ARTIKEL ROUTES */}
-        <Route path="/artikel" element={<HalamanArtikel />} />
-        <Route path="/artikel/:slug" element={<HalamanArtikel />} />
-        
-        <Route path="/kemitraan" element={<HalamanKemitraan />} />
-        <Route path="/simulasi" element={<HalamanSimulasi />} />
-        <Route path="/perbandingan" element={<HalamanPerbandingan />} />
-        <Route path="/test-drive" element={<HalamanTestDrive />} />
-        <Route path="/trade-in" element={<HalamanTradeIn />} />
-        <Route path="/mobil/:id" element={<HalamanDetailMobil />} />
-        
-        {/* AUTH ROUTES */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/admin/login" element={<LoginForm />} />
-        
-        {/* PROTECTED USER ROUTES */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <HalamanDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/profil"
-          element={
-            <ProtectedRoute>
-              <HalamanProfil />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/chat"
-          element={
-            <ProtectedRoute>
-              <HalamanChat />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/wishlist"
-          element={
-            <ProtectedRoute>
-              <HalamanWishlist />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/riwayat"
-          element={
-            <ProtectedRoute>
-              <HalamanRiwayat />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/pembelian"
-          element={
-            <ProtectedRoute>
-              <HalamanPembelian />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/transaksi"
-          element={
-            <ProtectedRoute>
-              <HalamanTransaksi />
-            </ProtectedRoute>
-          }
-        />
-        
-        {/* PROTECTED SELLER ROUTES */}
-        <Route
-          path="/iklan"
-          element={
-            <ProtectedRoute requiredPermission="create_listings">
-              <HalamanIklan />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/kelola-iklan"
-          element={
-            <ProtectedRoute requiredPermission="create_listings">
-              <HalamanKelolaIklan />
-            </ProtectedRoute>
-          }
-        />
-        
-        {/* PROTECTED ADMIN ROUTES */}
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute requiredRole="admin">
-              <HalamanAdmin />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/konten"
-          element={
-            <ProtectedRoute requiredPermission="manage_content">
-              <HalamanKonten />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/laporan"
-          element={
-            <ProtectedRoute requiredPermission="view_reports">
-              <HalamanLaporan />
-            </ProtectedRoute>
-          }
-        />
-        
-        {/* PROTECTED OWNER ROUTES */}
-        <Route
-          path="/executive"
-          element={
-            <ProtectedRoute requiredRole="owner">
-              <HalamanExecutive />
-            </ProtectedRoute>
-          }
-        />
-        
-        {/* 404 */}
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      {isAuthenticatedPage && (isAdminPage ? <AdminNavigation /> : <Navigation />)}
+      <div className={isAdminPage ? 'ml-64' : ''}>
+        <Routes>
+          {/* PUBLIC ROUTES */}
+          <Route path="/" element={<HalamanBeranda />} />
+          <Route path="/katalog" element={<HalamanKatalog />} />
+          
+          {/* ARTIKEL ROUTES */}
+          <Route path="/artikel" element={<HalamanArtikel />} />
+          <Route path="/artikel/:slug" element={<HalamanArtikel />} />
+          
+          <Route path="/kemitraan" element={<HalamanKemitraan />} />
+          <Route path="/simulasi" element={<HalamanSimulasi />} />
+          <Route path="/perbandingan" element={<HalamanPerbandingan />} />
+          <Route path="/test-drive" element={<HalamanTestDrive />} />
+          <Route path="/trade-in" element={<HalamanTradeIn />} />
+          <Route path="/mobil/:id" element={<HalamanDetailMobil />} />
+          
+          {/* AUTH ROUTES */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/admin/login" element={<LoginForm />} />
+          
+          {/* PROTECTED USER ROUTES */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <HalamanDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profil"
+            element={
+              <ProtectedRoute>
+                <HalamanProfil />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <ProtectedRoute>
+                <HalamanChat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/wishlist"
+            element={
+              <ProtectedRoute>
+                <HalamanWishlist />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/riwayat"
+            element={
+              <ProtectedRoute>
+                <HalamanRiwayat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pembelian"
+            element={
+              <ProtectedRoute>
+                <HalamanPembelian />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/transaksi"
+            element={
+              <ProtectedRoute>
+                <HalamanTransaksi />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* PROTECTED SELLER ROUTES */}
+          <Route
+            path="/iklan"
+            element={
+              <ProtectedRoute requiredPermission="create_listings">
+                <HalamanIklan />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kelola-iklan"
+            element={
+              <ProtectedRoute requiredPermission="create_listings">
+                <HalamanKelolaIklan />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* PROTECTED ADMIN ROUTES */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanAdmin />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/laporan"
+            element={
+              <ProtectedRoute requiredPermission="view_reports">
+                <HalamanLaporan />
+              </ProtectedRoute>
+            }
+          />
+          {/* Alias admin untuk konsistensi sidebar */}
+          <Route
+            path="/admin/laporan"
+            element={
+              <ProtectedRoute requiredPermission="view_reports">
+                <HalamanLaporan />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* PROTECTED OWNER ROUTES */}
+          <Route
+            path="/executive"
+            element={
+              <ProtectedRoute requiredRole="owner">
+                <HalamanExecutive />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* 404 */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </div>
     </div>
   );
 };
