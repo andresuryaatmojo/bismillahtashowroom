@@ -9,6 +9,7 @@ import Navigation from './components/Navigation';
 import GuestNavigation from './components/GuestNavigation';
 import AdminNavigation from './components/AdminNavigation';
 import ExecutiveNavigation from './components/ExecutiveNavigation';
+import HalamanPersetujuan from './components/HalamanPersetujuan';
 
 // AUTH PAGES
 import Login from './pages/Login';
@@ -22,7 +23,6 @@ import HalamanKatalog from './pages/HalamanKatalog';
 import HalamanArtikel from './pages/HalamanArtikel';
 import HalamanChat from './pages/HalamanChat';
 import HalamanDetailMobil from './pages/HalamanDetailMobil';
-import HalamanIklan from './pages/HalamanIklan';
 import HalamanKelolaIklan from './pages/HalamanKelolaIklan';
 import HalamanKemitraan from './pages/HalamanKemitraan';
 import HalamanKonten from './pages/HalamanKonten';
@@ -43,7 +43,6 @@ import HalamanExecutive from './pages/HalamanExecutive';
 // OTHER COMPONENTS
 import LoginForm from './components/LoginForm';
 import NotFound from './pages/NotFound';
-
 import './App.css';
 
 // Komponen: AppContent
@@ -85,6 +84,7 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="App">
+      {/* navigation bars */}
       {isGuestPage && <GuestNavigation />}
       {isAuthenticatedPage && (isAdminPage ? <AdminNavigation /> : (isExecutivePage ? <ExecutiveNavigation /> : <Navigation />))}
       <div className={isAdminPage || isExecutivePage ? 'ml-64' : ''}>
@@ -172,7 +172,7 @@ const AppContent: React.FC = () => {
             path="/iklan"
             element={
               <ProtectedRoute requiredPermission="create_listings">
-                <HalamanIklan />
+                <HalamanKelolaIklan />
               </ProtectedRoute>
             }
           />
@@ -221,7 +221,14 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
-          
+          <Route
+            path="/executive/persetujuan"
+            element={
+              <ProtectedRoute requiredRole="owner">
+                <HalamanPersetujuan />
+              </ProtectedRoute>
+            }
+          />
           {/* 404 */}
           <Route path="*" element={<NotFound />} />
         </Routes>
