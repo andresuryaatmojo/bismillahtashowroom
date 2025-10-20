@@ -8,6 +8,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Navigation from './components/Navigation';
 import GuestNavigation from './components/GuestNavigation';
 import AdminNavigation from './components/AdminNavigation';
+import ExecutiveNavigation from './components/ExecutiveNavigation';
 
 // AUTH PAGES
 import Login from './pages/Login';
@@ -80,12 +81,13 @@ const AppContent: React.FC = () => {
   
   const isAuthenticatedPage = !isAuthPage && !isGuestPage;
   const isAdminPage = location.pathname.startsWith('/admin');
+  const isExecutivePage = location.pathname.startsWith('/executive');
 
   return (
     <div className="App">
       {isGuestPage && <GuestNavigation />}
-      {isAuthenticatedPage && (isAdminPage ? <AdminNavigation /> : <Navigation />)}
-      <div className={isAdminPage ? 'ml-64' : ''}>
+      {isAuthenticatedPage && (isAdminPage ? <AdminNavigation /> : (isExecutivePage ? <ExecutiveNavigation /> : <Navigation />))}
+      <div className={isAdminPage || isExecutivePage ? 'ml-64' : ''}>
         <Routes>
           {/* PUBLIC ROUTES */}
           <Route path="/" element={<HalamanBeranda />} />

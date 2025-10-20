@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
 const HalamanExecutive = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout, hasPermission, isLoading: authLoading } = useAuth();
   
   const [state, setState] = useState({
@@ -33,6 +34,15 @@ const HalamanExecutive = () => {
       loadExecutiveData();
     }
   }, [user]);
+
+  // Sinkronkan konten dengan query param ?view=
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const view = params.get('view');
+    if (view && ['dashboard','analytics','reports','system'].includes(view)) {
+      setState(prev => ({ ...prev, currentView: view }));
+    }
+  }, [location.search]);
 
   const loadExecutiveData = async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -343,27 +353,6 @@ const HalamanExecutive = () => {
           </div>
         </div>
       </header>
-
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
-            {['dashboard', 'analytics', 'reports', 'system'].map((view) => (
-              <button
-                key={view}
-                onClick={() => setState(prev => ({ ...prev, currentView: view }))}
-                className={`py-4 px-2 border-b-2 font-medium text-sm capitalize ${
-                  state.currentView === view
-                    ? 'border-purple-500 text-purple-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                {view}
-              </button>
-            ))}
-          </div>
-        </div>
-      </nav>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
