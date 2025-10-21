@@ -697,7 +697,14 @@ class CarService {
 
       let query = supabase
         .from('cars')
-        .select('*', { count: 'exact' })
+        .select(`
+          *,
+          car_brands (id, name, logo_url),
+          car_models (id, name),
+          car_categories (id, name, slug),
+          car_images (id, image_url, is_primary, display_order),
+          users (id, username, full_name, seller_rating, seller_type)
+        `, { count: 'exact' })
         .order('created_at', { ascending: false });
 
       // Apply filters
@@ -721,6 +728,10 @@ class CarService {
       }
       if (filters.price_max) {
         query = query.lte('price', parseFloat(filters.price_max));
+      }
+      // PENTING: Filter berdasarkan seller_type
+      if (filters.seller_type) {
+        query = query.eq('seller_type', filters.seller_type);
       }
 
       // Pagination

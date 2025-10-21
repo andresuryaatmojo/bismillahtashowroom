@@ -141,14 +141,20 @@ const HalamanKelolaMobil: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const result = await carService.getAllCarsAdmin(filters, currentPage, itemsPerPage);
+      // TAMBAHKAN ini: force seller_type = 'showroom'
+      const filterParams = {
+        ...filters,
+        seller_type: 'showroom'  // ← TAMBAHAN INI
+      };
+
+      const result = await carService.getAllCarsAdmin(filterParams, currentPage, itemsPerPage);
       
       setCars(result.data);
       setTotalCars(result.total);
       setTotalPages(result.total_pages);
 
       // Calculate statistics from all data
-      const statsResult = await carService.getAllCarsAdmin({}, 1, 10000);
+      const statsResult = await carService.getAllCarsAdmin({ seller_type: 'showroom' }, 1, 10000); // ← TAMBAHAN seller_type
       const allCars = statsResult.data;
       
       const stats = {
@@ -651,8 +657,21 @@ const HalamanKelolaMobil: React.FC = () => {
                         >
                           <td className="py-4 px-4">
                             <div className="flex items-center space-x-3">
-                              <div className="w-12 h-12 bg-gray-200 rounded-lg flex items-center justify-center">
-                                <Car className="w-6 h-6 text-gray-500" />
+                              <div className="w-12 h-12 bg-gray-200 rounded-lg flex items-center justify-center overflow-hidden">
+                                {car.car_images && car.car_images.length > 0 ? (
+                                  <img
+                                    src={car.car_images.find((img: any) => img.is_primary)?.image_url || car.car_images[0]?.image_url}
+                                    alt={car.title}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                      e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                    }}
+                                  />
+                                ) : null}
+                                <div className={`flex items-center justify-center w-full h-full ${car.car_images && car.car_images.length > 0 ? 'hidden' : ''}`}>
+                                  <Car className="w-6 h-6 text-gray-500" />
+                                </div>
                               </div>
                               <div>
                                 <p className="font-medium text-gray-900">{car.title}</p>

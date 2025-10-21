@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 
-// Interface untuk data artikel
+// ==================== INTERFACES ====================
+
 export interface DataArtikel {
   id: string;
   judul: string;
@@ -19,9 +20,13 @@ export interface DataArtikel {
   readingTime: number;
   featured: boolean;
   trending: boolean;
+  visibility: 'public' | 'private' | 'members_only';
+  isPinned: boolean;
+  metaTitle: string;
+  metaDescription: string;
+  seoKeywords: string;
 }
 
-// Interface untuk kategori artikel
 export interface KategoriArtikel {
   id: string;
   nama: string;
@@ -33,7 +38,6 @@ export interface KategoriArtikel {
   jumlahArtikel: number;
 }
 
-// Interface untuk penulis artikel
 export interface PenulisArtikel {
   id: string;
   nama: string;
@@ -51,7 +55,6 @@ export interface PenulisArtikel {
   rating: number;
 }
 
-// Interface untuk filter artikel
 export interface FilterArtikel {
   kategori?: string[];
   tags?: string[];
@@ -68,7 +71,6 @@ export interface FilterArtikel {
   search?: string;
 }
 
-// Interface untuk statistik artikel
 export interface StatistikArtikel {
   totalArtikel: number;
   artikelPublished: number;
@@ -85,14 +87,8 @@ export interface StatistikArtikel {
     penulis: string;
     jumlah: number;
   }[];
-  trendBulanan: {
-    bulan: string;
-    views: number;
-    artikel: number;
-  }[];
 }
 
-// Interface untuk halaman artikel
 export interface HalamanArtikel {
   artikel: DataArtikel[];
   total: number;
@@ -106,7 +102,6 @@ export interface HalamanArtikel {
   trendingArticles: DataArtikel[];
 }
 
-// Interface untuk opsi sort
 export interface SortOption {
   value: string;
   label: string;
@@ -114,19 +109,45 @@ export interface SortOption {
   direction: 'asc' | 'desc';
 }
 
+export interface InputArtikel {
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  category_id: number;
+  author_id: string;
+  featured_image: string;
+  featured_image_alt: string;
+  gallery_images: string[];
+  meta_title: string;
+  meta_description: string;
+  seo_keywords: string;
+  status: 'draft' | 'published' | 'archived' | 'scheduled';
+  is_featured: boolean;
+  is_pinned: boolean;
+  visibility: 'public' | 'private' | 'members_only';
+  reading_time_minutes: number;
+  published_at?: string | null;
+}
+
+export interface ResponseArtikel<T = any> {
+  success: boolean;
+  data?: T;
+  message: string;
+  errors?: string[];
+}
+
+// ==================== MAIN CONTROLLER CLASS ====================
+
 export class KontrollerArtikel {
   private cache: Map<string, any> = new Map();
   private cacheExpiry: Map<string, number> = new Map();
   private readonly CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 
+  // ==================== READ OPERATIONS ====================
+
   /**
    * Memuat halaman artikel dengan data lengkap
-   * @param page - Halaman (default: 1)
-   * @param limit - Jumlah per halaman (default: 12)
-   * @param filter - Filter pencarian
-   * @param sortBy - Urutan ('terbaru' | 'terlama' | 'terpopuler' | 'trending' | 'alfabetis')
-   * @param search - Kata kunci pencarian
-   * @returns Promise<HalamanArtikel>
    */
   public async muatHalamanArtikel(
     page: number = 1,
@@ -155,14 +176,31 @@ export class KontrollerArtikel {
         .from('articles')
         .select(selectClause, { count: 'exact' });
 
-      // Default: hanya yang published (sesuai RLS)
-      if (!filter?.status || filter.status.length === 0) {
-        query = query.eq('status', 'published');
-      } else {
+      // Filter status - ADMIN BISA LIHAT SEMUA
+      if (filter?.status && filter.status.length > 0) {
         query = query.in('status', filter.status);
       }
+      // Jika tidak ada filter status, cek role user
+      else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .single();
+          
+          // Jika bukan admin/owner, hanya tampilkan published
+          if (userData?.role !== 'admin' && userData?.role !== 'owner') {
+            query = query.eq('status', 'published');
+          }
+          // Admin/owner bisa lihat semua status (tidak perlu filter)
+        } else {
+          query = query.eq('status', 'published');
+        }
+      }
 
-      // Pencarian sederhana
+      // Pencarian
       if (search && search.trim() !== '') {
         const term = `%${search.trim()}%`;
         query = query.or(`title.ilike.${term},excerpt.ilike.${term},content.ilike.${term},seo_keywords.ilike.${term}`);
@@ -173,10 +211,10 @@ export class KontrollerArtikel {
         query = query.eq('is_featured', filter.featured);
       }
       if (typeof filter?.trending === 'boolean' && filter.trending) {
-        query = query.gte('view_count', 100); // Artikel trending minimal 100 views
+        query = query.gte('view_count', 100);
       }
 
-      // Kategori: ID atau slug
+      // Kategori
       if (kategoriFilter.length > 0) {
         const ids = kategoriFilter.filter(k => /^\d+$/.test(k)).map(Number);
         if (ids.length > 0) {
@@ -218,7 +256,7 @@ export class KontrollerArtikel {
       const articles = (data || []).map(row => this.mapSupabaseArticle(row));
       const total = count || 0;
 
-      // Derivasi kategori unik dari hasil join
+      // Derivasi kategori
       const kategoriMap = new Map<string, KategoriArtikel>();
       (data || []).forEach(row => {
         const cat = (row as any).article_categories;
@@ -237,7 +275,7 @@ export class KontrollerArtikel {
       });
       const kategori = Array.from(kategoriMap.values());
 
-      // Derivasi penulis unik dari join users
+      // Derivasi penulis
       const authorsMap = new Map<string, PenulisArtikel>();
       (data || []).forEach(row => {
         const u = (row as any).users;
@@ -257,7 +295,7 @@ export class KontrollerArtikel {
       });
       const penulis = Array.from(authorsMap.values());
 
-      // Derivasi tags dari seo_keywords
+      // Derivasi tags
       const tags = Array.from(
         new Set(
           (data || [])
@@ -275,7 +313,7 @@ export class KontrollerArtikel {
         .sort((a, b) => (b.views || 0) - (a.views || 0))
         .slice(0, Math.min(articles.length, 5));
 
-      // Statistik sederhana dari halaman ini
+      // Statistik
       const statistik: StatistikArtikel = {
         totalArtikel: total,
         artikelPublished: articles.filter(a => a.status === 'published').length,
@@ -285,8 +323,7 @@ export class KontrollerArtikel {
         rataRataViews: articles.length ? Math.round(articles.reduce((s, a) => s + (a.views || 0), 0) / articles.length) : 0,
         rataRataReadingTime: articles.length ? Math.round(articles.reduce((s, a) => s + (a.readingTime || 0), 0) / articles.length) : 0,
         kategoriTerpopuler: [],
-        penulisTeraktif: [],
-        trendBulanan: []
+        penulisTeraktif: []
       };
 
       const halamanData: HalamanArtikel = {
@@ -306,7 +343,7 @@ export class KontrollerArtikel {
       return halamanData;
 
     } catch (error) {
-      console.error('Error loading article page (Supabase):', error);
+      console.error('Error loading article page:', error);
       return {
         artikel: [],
         total: 0,
@@ -324,9 +361,6 @@ export class KontrollerArtikel {
 
   /**
    * Memuat detail artikel berdasarkan ID atau slug
-   * @param identifier - ID atau slug artikel
-   * @param incrementView - Apakah menambah view count (default: true)
-   * @returns Promise<DataArtikel | null>
    */
   public async muatDetailArtikel(
     identifier: string,
@@ -352,8 +386,6 @@ export class KontrollerArtikel {
         .limit(1);
 
       query = isUuid ? query.eq('id', identifier) : query.eq('slug', identifier);
-
-      // Hanya artikel published
       query = query.eq('status', 'published');
 
       const { data, error } = await query;
@@ -372,7 +404,6 @@ export class KontrollerArtikel {
           .update({ view_count: currentViews + 1 })
           .eq('id', artikel.id);
         
-        // Update local state
         artikel.views = currentViews + 1;
       }
 
@@ -380,8 +411,350 @@ export class KontrollerArtikel {
       return artikel;
 
     } catch (error) {
-      console.error('Error loading article detail (Supabase):', error);
+      console.error('Error loading article detail:', error);
       return null;
+    }
+  }
+
+  // ==================== CREATE OPERATION ====================
+
+  /**
+   * Membuat artikel baru
+   */
+  public async buatArtikel(input: InputArtikel): Promise<ResponseArtikel<DataArtikel>> {
+    try {
+      // Validasi input
+      const validationResult = this.validateArtikelInput(input);
+      if (!validationResult.valid) {
+        return {
+          success: false,
+          message: 'Data artikel tidak valid',
+          errors: validationResult.errors
+        };
+      }
+
+      // Check slug uniqueness
+      const slugExists = await this.checkSlugExists(input.slug);
+      if (slugExists) {
+        return {
+          success: false,
+          message: 'Slug sudah digunakan',
+          errors: ['Slug artikel sudah ada, gunakan slug yang berbeda']
+        };
+      }
+
+      // Insert artikel
+      const { data, error } = await supabase
+        .from('articles')
+        .insert([{
+          title: input.title,
+          slug: input.slug,
+          excerpt: input.excerpt,
+          content: input.content,
+          category_id: input.category_id,
+          author_id: input.author_id,
+          featured_image: input.featured_image,
+          featured_image_alt: input.featured_image_alt,
+          gallery_images: input.gallery_images,
+          meta_title: input.meta_title,
+          meta_description: input.meta_description,
+          seo_keywords: input.seo_keywords,
+          status: input.status,
+          is_featured: input.is_featured,
+          is_pinned: input.is_pinned,
+          visibility: input.visibility,
+          reading_time_minutes: input.reading_time_minutes,
+          published_at: input.status === 'published' ? (input.published_at || new Date().toISOString()) : null,
+          view_count: 0
+        }])
+        .select(`
+          *,
+          article_categories:category_id ( id, name, slug, description ),
+          users:author_id ( id, full_name, username, email, profile_picture, role )
+        `)
+        .single();
+
+      if (error) throw error;
+
+      // Clear cache
+      this.clearCache();
+
+      const artikel = this.mapSupabaseArticle(data);
+
+      return {
+        success: true,
+        data: artikel,
+        message: 'Artikel berhasil dibuat'
+      };
+
+    } catch (error) {
+      console.error('Error creating article:', error);
+      return {
+        success: false,
+        message: 'Gagal membuat artikel',
+        errors: [error instanceof Error ? error.message : 'Unknown error']
+      };
+    }
+  }
+
+  // ==================== UPDATE OPERATION ====================
+
+  /**
+   * Memperbarui artikel
+   */
+  public async perbaruiArtikel(id: string, input: Partial<InputArtikel>): Promise<ResponseArtikel<DataArtikel>> {
+    try {
+      // Check if article exists
+      const existing = await this.getArticleByIdRaw(id);
+      if (!existing) {
+        return {
+          success: false,
+          message: 'Artikel tidak ditemukan',
+          errors: ['Article not found']
+        };
+      }
+
+      // Validate input if provided
+      if (input.title || input.slug || input.content) {
+        const validationResult = this.validateArtikelInput(input as InputArtikel, true);
+        if (!validationResult.valid) {
+          return {
+            success: false,
+            message: 'Data artikel tidak valid',
+            errors: validationResult.errors
+          };
+        }
+      }
+
+      // Check slug uniqueness if slug is being updated
+      if (input.slug && input.slug !== existing.slug) {
+        const slugExists = await this.checkSlugExists(input.slug, id);
+        if (slugExists) {
+          return {
+            success: false,
+            message: 'Slug sudah digunakan',
+            errors: ['Slug artikel sudah ada, gunakan slug yang berbeda']
+          };
+        }
+      }
+
+      // Prepare update data
+      const updateData: any = {
+        ...input,
+        updated_at: new Date().toISOString()
+      };
+
+      // Set published_at if status changes to published
+      if (input.status === 'published' && existing.status !== 'published') {
+        updateData.published_at = input.published_at || new Date().toISOString();
+      }
+
+      // Update artikel
+      const { data, error } = await supabase
+        .from('articles')
+        .update(updateData)
+        .eq('id', id)
+        .select(`
+          *,
+          article_categories:category_id ( id, name, slug, description ),
+          users:author_id ( id, full_name, username, email, profile_picture, role )
+        `)
+        .single();
+
+      if (error) throw error;
+
+      // Clear cache
+      this.clearCache();
+
+      const artikel = this.mapSupabaseArticle(data);
+
+      return {
+        success: true,
+        data: artikel,
+        message: 'Artikel berhasil diperbarui'
+      };
+
+    } catch (error) {
+      console.error('Error updating article:', error);
+      return {
+        success: false,
+        message: 'Gagal memperbarui artikel',
+        errors: [error instanceof Error ? error.message : 'Unknown error']
+      };
+    }
+  }
+
+  // ==================== DELETE OPERATION ====================
+
+  /**
+   * Menghapus artikel
+   */
+  public async hapusArtikel(id: string): Promise<ResponseArtikel<void>> {
+    try {
+      // Check if article exists
+      const existing = await this.getArticleByIdRaw(id);
+      if (!existing) {
+        return {
+          success: false,
+          message: 'Artikel tidak ditemukan',
+          errors: ['Article not found']
+        };
+      }
+
+      // Delete artikel
+      const { error } = await supabase
+        .from('articles')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Clear cache
+      this.clearCache();
+
+      return {
+        success: true,
+        message: 'Artikel berhasil dihapus'
+      };
+
+    } catch (error) {
+      console.error('Error deleting article:', error);
+      return {
+        success: false,
+        message: 'Gagal menghapus artikel',
+        errors: [error instanceof Error ? error.message : 'Unknown error']
+      };
+    }
+  }
+
+  // ==================== HELPER METHODS ====================
+
+  /**
+   * Validasi input artikel
+   */
+  private validateArtikelInput(input: Partial<InputArtikel>, isUpdate: boolean = false): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    if (!isUpdate) {
+      if (!input.title || input.title.trim().length === 0) {
+        errors.push('Judul artikel wajib diisi');
+      }
+      if (!input.slug || input.slug.trim().length === 0) {
+        errors.push('Slug artikel wajib diisi');
+      }
+      if (!input.content || input.content.trim().length === 0) {
+        errors.push('Konten artikel wajib diisi');
+      }
+      if (!input.excerpt || input.excerpt.trim().length === 0) {
+        errors.push('Ringkasan artikel wajib diisi');
+      }
+      if (!input.category_id || input.category_id <= 0) {
+        errors.push('Kategori artikel wajib dipilih');
+      }
+      if (!input.author_id || input.author_id.trim().length === 0) {
+        errors.push('Penulis artikel wajib diisi');
+      }
+    }
+
+    // Validate title length
+    if (input.title && input.title.length > 200) {
+      errors.push('Judul artikel maksimal 200 karakter');
+    }
+
+    // Validate slug format
+    if (input.slug) {
+      const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+      if (!slugRegex.test(input.slug)) {
+        errors.push('Slug harus lowercase, angka, dan dash saja (contoh: artikel-saya)');
+      }
+    }
+
+    // Validate excerpt length
+    if (input.excerpt && input.excerpt.length > 500) {
+      errors.push('Ringkasan artikel maksimal 500 karakter');
+    }
+
+    // Validate content length
+    if (input.content && input.content.length < 100) {
+      errors.push('Konten artikel minimal 100 karakter');
+    }
+
+    // Validate reading time
+    if (input.reading_time_minutes !== undefined && input.reading_time_minutes < 0) {
+      errors.push('Waktu baca tidak boleh negatif');
+    }
+
+    // Validate URLs
+    if (input.featured_image && !this.isValidUrl(input.featured_image)) {
+      errors.push('URL gambar utama tidak valid');
+    }
+
+    if (input.gallery_images) {
+      for (const url of input.gallery_images) {
+        if (!this.isValidUrl(url)) {
+          errors.push(`URL gambar galeri tidak valid: ${url}`);
+          break;
+        }
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  /**
+   * Check if slug exists
+   */
+  private async checkSlugExists(slug: string, excludeId?: string): Promise<boolean> {
+    try {
+      let query = supabase
+        .from('articles')
+        .select('id')
+        .eq('slug', slug)
+        .limit(1);
+
+      if (excludeId) {
+        query = query.neq('id', excludeId);
+      }
+
+      const { data } = await query;
+      return (data && data.length > 0) || false;
+    } catch (error) {
+      console.error('Error checking slug:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get article by ID (raw data)
+   */
+  private async getArticleByIdRaw(id: string): Promise<any | null> {
+    try {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error getting article:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Validate URL
+   */
+  private isValidUrl(url: string): boolean {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -466,7 +839,12 @@ export class KontrollerArtikel {
       views: row.view_count || 0,
       readingTime: row.reading_time_minutes || 0,
       featured: !!row.is_featured,
-      trending: (row.view_count || 0) >= 100
+      trending: (row.view_count || 0) >= 100,
+      visibility: row.visibility || 'public',
+      isPinned: !!row.is_pinned,
+      metaTitle: row.meta_title || row.title,
+      metaDescription: row.meta_description || row.excerpt || '',
+      seoKeywords: row.seo_keywords || ''
     };
   }
 
@@ -491,6 +869,27 @@ export class KontrollerArtikel {
   }
 
   /**
+   * Generate slug from title
+   */
+  public generateSlug(title: string): string {
+    return title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .trim();
+  }
+
+  /**
+   * Calculate reading time
+   */
+  public calculateReadingTime(content: string): number {
+    const wordsPerMinute = 200;
+    const wordCount = content.split(/\s+/).length;
+    return Math.ceil(wordCount / wordsPerMinute);
+  }
+
+  /**
    * Get default statistik
    */
   private getDefaultStatistik(): StatistikArtikel {
@@ -503,8 +902,7 @@ export class KontrollerArtikel {
       rataRataViews: 0,
       rataRataReadingTime: 0,
       kategoriTerpopuler: [],
-      penulisTeraktif: [],
-      trendBulanan: []
+      penulisTeraktif: []
     };
   }
 

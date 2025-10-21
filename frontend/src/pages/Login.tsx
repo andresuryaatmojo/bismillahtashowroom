@@ -54,7 +54,7 @@ const Login: React.FC = () => {
           navigate('/executive', { replace: true });
           break;
         default:
-          navigate('/dashboard', { replace: true });
+          navigate('/', { replace: true });
       }
     }
   }, [isAuthenticated, user, isLoading, navigate]);

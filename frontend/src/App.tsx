@@ -42,6 +42,7 @@ import HalamanKelolaUser from './pages/HalamanKelolaUser';
 import HalamanKelolaMobil from './pages/HalamanKelolaMobil';
 import HalamanKelolaArtikel from './pages/HalamanKelolaArtikel';
 import HalamanJadwalTestDrive from './pages/HalamanJadwalTestDrive';
+import HalamanModerasiIklan from './pages/HalamanModerasiIklan';
 import HalamanExecutive from './pages/HalamanExecutive';
 
 // OTHER COMPONENTS
@@ -227,6 +228,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="admin">
                 <HalamanKelolaArtikel />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/kelola-iklan"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanModerasiIklan />
               </ProtectedRoute>
             }
           />

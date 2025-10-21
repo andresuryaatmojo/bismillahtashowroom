@@ -54,14 +54,14 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     } else if (user.role === 'owner') {
       return <Navigate to="/owner" replace />;
     } else {
-      return <Navigate to="/dashboard" replace />;
+      return <Navigate to="/" replace />;
     }
   }
 
   // Check permission requirement
   if (requiredPermission && !user.permissions?.includes(requiredPermission)) {
     console.log(`❌ Missing permission: ${requiredPermission}`);
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/" replace />;
   }
 
   // If all checks pass, render children

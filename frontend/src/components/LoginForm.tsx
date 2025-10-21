@@ -32,8 +32,8 @@ const LoginForm = () => {
       const success = await login(formData.username, formData.password);
       
       if (success) {
-        // Redirect ke dashboard umum, biarkan routing menentukan berdasarkan role
-        navigate('/dashboard');
+        // Redirect ke halaman beranda (hero) setelah login berhasil
+        navigate('/');
       } else {
         setError('Username atau password salah');
       }
