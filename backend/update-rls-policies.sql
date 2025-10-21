@@ -24,6 +24,24 @@ CREATE POLICY "Admin can view all users" ON users FOR SELECT USING (
     )
 );
 
+-- Admin dapat memperbarui semua users
+CREATE POLICY "Admin can update all users" ON users FOR UPDATE USING (
+    EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.id::text = auth.uid()::text
+        AND u.role = 'admin'
+    )
+);
+
+-- Admin dapat menghapus semua users
+CREATE POLICY "Admin can delete all users" ON users FOR DELETE USING (
+    EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.id::text = auth.uid()::text
+        AND u.role = 'admin'
+    )
+);
+
 -- Untuk development: sementara disable RLS pada users table
 -- Uncomment baris berikut jika ingin disable RLS untuk testing
 -- ALTER TABLE users DISABLE ROW LEVEL SECURITY;

@@ -312,6 +312,37 @@ export interface Database {
           updated_at?: string;
         };
       };
+      test_drive_requests: {
+        Row: {
+          id: string;
+          user_id: string;
+          car_id: string;
+          scheduled_date: string;
+          scheduled_time: string;
+          status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          user_notes?: string;
+          admin_notes?: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          car_id: string;
+          scheduled_date: string;
+          scheduled_time: string;
+          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          user_notes?: string;
+          admin_notes?: string;
+        };
+        Update: {
+          scheduled_date?: string;
+          scheduled_time?: string;
+          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          user_notes?: string;
+          admin_notes?: string;
+          updated_at?: string;
+        };
+      };
     };
   };
 }

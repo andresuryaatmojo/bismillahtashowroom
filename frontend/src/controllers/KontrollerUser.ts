@@ -177,57 +177,7 @@ export interface FilterUser {
   };
 }
 
-// Interface untuk data halaman kelola user
-export interface HalamanKelolaUser {
-  users: DataUser[];
-  total: number;
-  statistik: StatistikKelolaUser;
-  filter: FilterUser;
-  sortOptions: SortOption[];
-  bulkActions: BulkAction[];
-}
 
-// Interface untuk statistik kelola user
-export interface StatistikKelolaUser {
-  totalUser: number;
-  userAktif: number;
-  userTidakAktif: number;
-  userSuspended: number;
-  userPending: number;
-  userBaru: {
-    hariIni: number;
-    mingguIni: number;
-    bulanIni: number;
-  };
-  verifikasi: {
-    emailTerverifikasi: number;
-    teleponTerverifikasi: number;
-    identitasTerverifikasi: number;
-  };
-  distribusiRole: {
-    [key: string]: number;
-  };
-  distribusiLevel: {
-    [key: string]: number;
-  };
-}
-
-// Interface untuk opsi sort
-export interface SortOption {
-  value: string;
-  label: string;
-  field: string;
-  direction: 'asc' | 'desc';
-}
-
-// Interface untuk bulk action
-export interface BulkAction {
-  value: string;
-  label: string;
-  icon: string;
-  color: string;
-  requiresConfirmation: boolean;
-}
 
 // Interface untuk form edit user
 export interface FormEditUser {
@@ -262,102 +212,7 @@ export class KontrollerUser {
     this.token = localStorage.getItem('authToken');
   }
 
-  /**
-   * Memuat halaman kelola user dengan data lengkap
-   * @param page - Halaman (default: 1)
-   * @param limit - Jumlah per halaman (default: 20)
-   * @param filter - Filter pencarian
-   * @param sortBy - Urutan ('terbaru' | 'terlama' | 'nama_az' | 'nama_za' | 'email_az' | 'email_za')
-   * @param search - Kata kunci pencarian
-   * @returns Promise<HalamanKelolaUser>
-   */
-  public async muatHalamanKelolaUser(
-    page: number = 1,
-    limit: number = 20,
-    filter?: FilterUser,
-    sortBy: string = 'terbaru',
-    search?: string
-  ): Promise<HalamanKelolaUser> {
-    try {
-      // Check cache first
-      const cacheKey = `kelola_user_${page}_${limit}_${JSON.stringify(filter)}_${sortBy}_${search || ''}`;
-      const cachedData = this.getFromCache(cacheKey);
-      if (cachedData) {
-        return cachedData;
-      }
 
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: limit.toString(),
-        sortBy
-      });
-
-      if (search) {
-        params.append('search', search);
-      }
-
-      // Add filter parameters
-      if (filter) {
-        if (filter.role) params.append('role', filter.role.join(','));
-        if (filter.status) params.append('status', filter.status.join(','));
-        if (filter.tanggalDaftarMulai) params.append('tanggalDaftarMulai', filter.tanggalDaftarMulai);
-        if (filter.tanggalDaftarSelesai) params.append('tanggalDaftarSelesai', filter.tanggalDaftarSelesai);
-        if (filter.verifikasiEmail !== undefined) params.append('verifikasiEmail', filter.verifikasiEmail.toString());
-        if (filter.verifikasiTelepon !== undefined) params.append('verifikasiTelepon', filter.verifikasiTelepon.toString());
-        if (filter.verifikasiIdentitas !== undefined) params.append('verifikasiIdentitas', filter.verifikasiIdentitas.toString());
-        if (filter.levelMember) params.append('levelMember', filter.levelMember.join(','));
-        if (filter.kota) params.append('kota', filter.kota.join(','));
-        if (filter.provinsi) params.append('provinsi', filter.provinsi.join(','));
-        if (filter.rentangUsia) {
-          params.append('usiaMin', filter.rentangUsia.min.toString());
-          params.append('usiaMax', filter.rentangUsia.max.toString());
-        }
-        if (filter.rentangTransaksi) {
-          params.append('transaksiMin', filter.rentangTransaksi.min.toString());
-          params.append('transaksiMax', filter.rentangTransaksi.max.toString());
-        }
-      }
-
-      const response = await fetch(`${API_BASE_URL}/admin/users?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` })
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      const halamanData: HalamanKelolaUser = {
-        users: result.data.users || [],
-        total: result.data.total || 0,
-        statistik: result.data.statistik || this.getDefaultStatistik(),
-        filter: filter || {},
-        sortOptions: this.getSortOptions(),
-        bulkActions: this.getBulkActions()
-      };
-
-      // Cache the result
-      this.setToCache(cacheKey, halamanData);
-
-      return halamanData;
-
-    } catch (error) {
-      console.error('Error loading user management page:', error);
-      return {
-        users: [],
-        total: 0,
-        statistik: this.getDefaultStatistik(),
-        filter: filter || {},
-        sortOptions: this.getSortOptions(),
-        bulkActions: this.getBulkActions()
-      };
-    }
-  }
 
   /**
    * Edit data user
@@ -805,62 +660,7 @@ export class KontrollerUser {
     return window.confirm(message);
   }
 
-  /**
-   * Get default statistik
-   */
-  private getDefaultStatistik(): StatistikKelolaUser {
-    return {
-      totalUser: 0,
-      userAktif: 0,
-      userTidakAktif: 0,
-      userSuspended: 0,
-      userPending: 0,
-      userBaru: {
-        hariIni: 0,
-        mingguIni: 0,
-        bulanIni: 0
-      },
-      verifikasi: {
-        emailTerverifikasi: 0,
-        teleponTerverifikasi: 0,
-        identitasTerverifikasi: 0
-      },
-      distribusiRole: {},
-      distribusiLevel: {}
-    };
-  }
 
-  /**
-   * Get sort options
-   */
-  private getSortOptions(): SortOption[] {
-    return [
-      { value: 'terbaru', label: 'Terbaru', field: 'tanggalDaftar', direction: 'desc' },
-      { value: 'terlama', label: 'Terlama', field: 'tanggalDaftar', direction: 'asc' },
-      { value: 'nama_az', label: 'Nama A-Z', field: 'namaLengkap', direction: 'asc' },
-      { value: 'nama_za', label: 'Nama Z-A', field: 'namaLengkap', direction: 'desc' },
-      { value: 'email_az', label: 'Email A-Z', field: 'email', direction: 'asc' },
-      { value: 'email_za', label: 'Email Z-A', field: 'email', direction: 'desc' },
-      { value: 'login_terbaru', label: 'Login Terbaru', field: 'terakhirLogin', direction: 'desc' },
-      { value: 'transaksi_terbanyak', label: 'Transaksi Terbanyak', field: 'statistik.totalTransaksi', direction: 'desc' }
-    ];
-  }
-
-  /**
-   * Get bulk actions
-   */
-  private getBulkActions(): BulkAction[] {
-    return [
-      { value: 'activate', label: 'Aktifkan', icon: 'check', color: 'green', requiresConfirmation: false },
-      { value: 'deactivate', label: 'Nonaktifkan', icon: 'x', color: 'orange', requiresConfirmation: true },
-      { value: 'suspend', label: 'Suspend', icon: 'ban', color: 'red', requiresConfirmation: true },
-      { value: 'verify_email', label: 'Verifikasi Email', icon: 'mail', color: 'blue', requiresConfirmation: false },
-      { value: 'verify_phone', label: 'Verifikasi Telepon', icon: 'phone', color: 'blue', requiresConfirmation: false },
-      { value: 'reset_password', label: 'Reset Password', icon: 'key', color: 'yellow', requiresConfirmation: true },
-      { value: 'export', label: 'Export Data', icon: 'download', color: 'gray', requiresConfirmation: false },
-      { value: 'delete', label: 'Hapus', icon: 'trash', color: 'red', requiresConfirmation: true }
-    ];
-  }
 
   /**
    * Cache management methods

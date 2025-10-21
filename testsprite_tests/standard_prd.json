@@ -265,7 +265,6 @@
         "name": "User Management System",
         "description": "Admin tools for managing users, roles, and permissions",
         "files": [
-          "frontend/src/components/HalamanKelolaUser.tsx",
           "frontend/src/controllers/KontrollerUser.ts",
           "frontend/src/services/LayananUser.ts"
         ]

@@ -38,6 +38,10 @@ import HalamanWishlist from './pages/HalamanWishlist';
 
 // ADMIN PAGES
 import HalamanAdmin from './pages/HalamanAdmin';
+import HalamanKelolaUser from './pages/HalamanKelolaUser';
+import HalamanKelolaMobil from './pages/HalamanKelolaMobil';
+import HalamanKelolaArtikel from './pages/HalamanKelolaArtikel';
+import HalamanJadwalTestDrive from './pages/HalamanJadwalTestDrive';
 import HalamanExecutive from './pages/HalamanExecutive';
 
 // OTHER COMPONENTS
@@ -191,6 +195,38 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="admin">
                 <HalamanAdmin />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanKelolaUser />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/mobil-showroom"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanKelolaMobil />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/test-drive"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanJadwalTestDrive />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/artikel"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanKelolaArtikel />
               </ProtectedRoute>
             }
           />
