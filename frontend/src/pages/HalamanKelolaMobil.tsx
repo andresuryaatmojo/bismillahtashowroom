@@ -811,7 +811,7 @@ const HalamanKelolaMobil: React.FC = () => {
                           ...prev, 
                           model_id: parseInt(value) 
                         }))}
-                        disabled={!formData.brand_id || models.length === 0}
+                        disabled={!formData.brand_id}
                       >
                         <SelectTrigger id="model_id">
                           <SelectValue placeholder="Pilih model" />
@@ -1093,7 +1093,7 @@ const HalamanKelolaMobil: React.FC = () => {
                 <TabsContent value="settings" className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="status">Status *</Label>
+                      <Label htmlFor="status">Status * (Admin Only)</Label>
                       <Select 
                         value={formData.status} 
                         onValueChange={(value: any) => setFormData(prev => ({ ...prev, status: value }))}
@@ -1102,13 +1102,16 @@ const HalamanKelolaMobil: React.FC = () => {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="available">Tersedia</SelectItem>
-                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="pending">Pending (Menunggu Review)</SelectItem>
+                          <SelectItem value="available">Available (Approved)</SelectItem>
                           <SelectItem value="sold">Terjual</SelectItem>
                           <SelectItem value="reserved">Reserved</SelectItem>
                           <SelectItem value="rejected">Ditolak</SelectItem>
                         </SelectContent>
                       </Select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Ubah ke "Available" untuk menyetujui iklan
+                      </p>
                     </div>
 
                     <div>
@@ -1170,6 +1173,18 @@ const HalamanKelolaMobil: React.FC = () => {
                       </Label>
                     </div>
                   </div>
+
+                  {isEditMode && selectedCar?.status === 'pending' && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
+                      <div className="flex items-start">
+                        <AlertCircle className="w-5 h-5 text-yellow-600 mr-2 flex-shrink-0 mt-0.5" />
+                        <div className="text-sm text-yellow-800">
+                          <p className="font-medium mb-1">Iklan Menunggu Approval</p>
+                          <p>Ubah status menjadi "Available" untuk menyetujui dan menampilkan iklan ini di katalog.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
               </Tabs>
 
