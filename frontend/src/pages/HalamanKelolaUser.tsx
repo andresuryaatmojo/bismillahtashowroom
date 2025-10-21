@@ -7,26 +7,17 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Separator } from '../components/ui/separator';
 import { motion } from 'framer-motion';
 import { 
   Users, 
   Search, 
   Filter, 
-  Plus, 
   Edit, 
   Trash2, 
   Eye, 
-  Shield, 
   CheckCircle, 
-  XCircle, 
-  Clock, 
-  AlertTriangle,
-  Download,
-  Upload,
-  MoreHorizontal,
   UserCheck,
   UserX,
   Mail,
@@ -34,10 +25,12 @@ import {
   MapPin,
   Calendar,
   Activity,
-  Settings
+  Settings,
+  AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { adminService } from '../lib/adminService';
 import { useNavigate } from 'react-router-dom';
 
 // Interface untuk data user
@@ -55,8 +48,7 @@ interface UserData {
   current_mode: 'buyer' | 'seller';
   profile_picture?: string;
   is_verified: boolean;
-  account_status?: 'active' | 'inactive' | 'suspended';
-  is_active?: boolean;
+  account_status: 'active' | 'inactive' | 'suspended';
   last_login?: string;
   registered_at?: string;
   created_at: string;
@@ -106,7 +98,7 @@ const HalamanKelolaUser: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
   const [showUserDetail, setShowUserDetail] = useState(false);
   const [showEditUser, setShowEditUser] = useState(false);
-  const [showAddUser, setShowAddUser] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
   // Filter state
   const [filter, setFilter] = useState<UserFilter>({
@@ -118,7 +110,7 @@ const HalamanKelolaUser: React.FC = () => {
     dateTo: '',
   });
 
-  // Form state untuk edit/add user
+  // Form state untuk edit user
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -131,7 +123,7 @@ const HalamanKelolaUser: React.FC = () => {
     role: 'user' as 'user' | 'admin' | 'owner',
     current_mode: 'buyer' as 'buyer' | 'seller',
     is_verified: false,
-    is_active: true,
+    account_status: 'active' as 'active' | 'inactive' | 'suspended',
   });
 
   const [formErrors, setFormErrors] = useState<{[key: string]: string}>({});
@@ -149,7 +141,7 @@ const HalamanKelolaUser: React.FC = () => {
     loadUsers();
   }, []);
 
-  // Realtime subscription ke tabel users
+  // Realtime subscription
   useEffect(() => {
     const channel = supabase
       .channel('users-changes')
@@ -171,21 +163,23 @@ const HalamanKelolaUser: React.FC = () => {
   const loadUsers = async () => {
     try {
       setLoading(true);
+      console.log('📥 Loading users...');
 
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const { data, error } = await adminService.getAllUsers();
 
       if (error) {
-        console.error('Error loading users:', error);
+        console.error('❌ Error loading users:', error);
+        setErrorMessage('Gagal memuat data user: ' + error.message);
         return;
       }
 
+      console.log('✅ Loaded users:', data?.length || 0);
       setUsers(data || []);
       calculateStats(data || []);
-    } catch (error) {
-      console.error('Error loading users:', error);
+      setErrorMessage('');
+    } catch (error: any) {
+      console.error('❌ Error loading users:', error);
+      setErrorMessage('Terjadi kesalahan saat memuat data');
     } finally {
       setLoading(false);
     }
@@ -194,16 +188,13 @@ const HalamanKelolaUser: React.FC = () => {
   const calculateStats = (userData: UserData[]) => {
     const today = new Date().toDateString();
 
-    const isActive = (u: UserData) =>
-      u.account_status ? u.account_status === 'active' : !!u.is_active;
-
-    const regAt = (u: UserData) => u.registered_at || u.created_at;
-
     const newStats: UserStats = {
       totalUsers: userData.length,
-      activeUsers: userData.filter(isActive).length,
+      activeUsers: userData.filter(u => u.account_status === 'active').length,
       verifiedUsers: userData.filter(u => u.is_verified).length,
-      newUsersToday: userData.filter(u => new Date(regAt(u)).toDateString() === today).length,
+      newUsersToday: userData.filter(u => 
+        new Date(u.registered_at || u.created_at).toDateString() === today
+      ).length,
       adminUsers: userData.filter(u => u.role === 'admin' || u.role === 'owner').length,
       sellerUsers: userData.filter(u => u.current_mode === 'seller').length,
       buyerUsers: userData.filter(u => u.current_mode === 'buyer').length,
@@ -226,7 +217,7 @@ const HalamanKelolaUser: React.FC = () => {
       );
     }
 
-    // Role: admin/owner/user via role, seller/buyer via current_mode
+    // Role filter
     if (filter.role !== 'all') {
       if (filter.role === 'seller') {
         filtered = filtered.filter(u => u.current_mode === 'seller');
@@ -241,68 +232,90 @@ const HalamanKelolaUser: React.FC = () => {
       }
     }
 
-    // Status: gunakan account_status, fallback ke is_active
+    // Status filter
     if (filter.status !== 'all') {
-      if (filter.status === 'active') {
-        filtered = filtered.filter(u =>
-          u.account_status ? u.account_status === 'active' : !!u.is_active
-        );
-      } else if (filter.status === 'inactive') {
-        filtered = filtered.filter(u =>
-          u.account_status ? u.account_status === 'inactive' : u.is_active === false
-        );
-      }
+      filtered = filtered.filter(u => u.account_status === filter.status);
     }
 
-    // Verified
+    // Verified filter
     if (filter.verified !== 'all') {
       filtered = filtered.filter(u =>
         filter.verified === 'verified' ? u.is_verified : !u.is_verified
       );
     }
 
-    // Date range: pakai registered_at bila ada
-    const getDate = (u: UserData) => new Date(u.registered_at || u.created_at);
-    if (filter.dateFrom) filtered = filtered.filter(u => getDate(u) >= new Date(filter.dateFrom));
-    if (filter.dateTo)   filtered = filtered.filter(u => getDate(u) <= new Date(filter.dateTo));
+    // Date range
+    if (filter.dateFrom) {
+      filtered = filtered.filter(u => 
+        new Date(u.registered_at || u.created_at) >= new Date(filter.dateFrom)
+      );
+    }
+    if (filter.dateTo) {
+      filtered = filtered.filter(u => 
+        new Date(u.registered_at || u.created_at) <= new Date(filter.dateTo)
+      );
+    }
 
     setFilteredUsers(filtered);
   };
 
-  const handleUserAction = async (userId: string, action: 'activate' | 'deactivate' | 'verify' | 'unverify' | 'delete') => {
+  const handleUserAction = async (
+    userId: string, 
+    action: 'activate' | 'deactivate' | 'suspend' | 'verify' | 'unverify' | 'delete'
+  ) => {
     try {
       setActionLoading(userId);
+      console.log(`🔄 Performing action: ${action} on user: ${userId}`);
 
-      let updateData: any = {};
+      let result;
 
       switch (action) {
         case 'activate':
-          updateData = { account_status: 'active', is_active: true };
+          result = await adminService.updateUserStatus(userId, 'active');
           break;
         case 'deactivate':
-          updateData = { account_status: 'inactive', is_active: false };
+          result = await adminService.updateUserStatus(userId, 'inactive');
+          break;
+        case 'suspend':
+          result = await adminService.updateUserStatus(userId, 'suspended');
           break;
         case 'verify':
-          updateData = { is_verified: true };
+          result = await adminService.updateUserVerification(userId, true);
           break;
         case 'unverify':
-          updateData = { is_verified: false };
+          result = await adminService.updateUserVerification(userId, false);
           break;
         case 'delete':
-          const confirmed = window.confirm('Yakin ingin menghapus user ini? Tindakan ini tidak dapat dibatalkan.');
-          if (!confirmed) { setActionLoading(null); return; }
-          const { error: deleteError } = await supabase.from('users').delete().eq('id', userId);
-          if (deleteError) { console.error('Error deleting user:', deleteError); return; }
-          await loadUsers();
-          return;
+          const confirmed = window.confirm(
+            '⚠️ PERINGATAN: Apakah Anda yakin ingin menghapus user ini?\n\n' +
+            'Tindakan ini akan:\n' +
+            '• Menghapus user secara PERMANEN dari database\n' +
+            '• Menghapus semua data terkait user\n' +
+            '• TIDAK DAPAT dibatalkan\n\n' +
+            'Ketik "HAPUS" untuk konfirmasi.'
+          );
+          
+          if (!confirmed) {
+            setActionLoading(null);
+            return;
+          }
+
+          result = await adminService.deleteUser(userId);
+          break;
       }
 
-      const { error } = await supabase.from('users').update(updateData).eq('id', userId);
-      if (error) { console.error('Error updating user:', error); return; }
+      if (result.error) {
+        console.error(`❌ Action ${action} failed:`, result.error);
+        alert(`Gagal melakukan ${action}: ${result.error.message}`);
+        return;
+      }
 
+      console.log(`✅ Action ${action} successful`);
       await loadUsers();
-    } catch (error) {
-      console.error('Error performing user action:', error);
+      
+    } catch (error: any) {
+      console.error('❌ Error performing action:', error);
+      alert('Terjadi kesalahan: ' + error.message);
     } finally {
       setActionLoading(null);
     }
@@ -322,7 +335,7 @@ const HalamanKelolaUser: React.FC = () => {
       role: user.role,
       current_mode: user.current_mode,
       is_verified: user.is_verified,
-      is_active: user.account_status ? user.account_status === 'active' : !!user.is_active,
+      account_status: user.account_status,
     });
     setFormErrors({});
     setShowEditUser(true);
@@ -342,6 +355,13 @@ const HalamanKelolaUser: React.FC = () => {
         return;
       }
 
+      if (!selectedUser) {
+        alert('User tidak ditemukan');
+        return;
+      }
+
+      console.log('💾 Saving user changes...');
+
       const updateData = {
         username: formData.username.trim(),
         email: formData.email.trim(),
@@ -351,50 +371,28 @@ const HalamanKelolaUser: React.FC = () => {
         city: formData.city.trim() || null,
         province: formData.province.trim() || null,
         postal_code: formData.postal_code.trim() || null,
-        // Petakan role UI -> role DB
-        role: formData.role === 'admin' ? 'admin' : 'user',
-        // Simpan mode buyer/seller di current_mode
+        role: formData.role,
         current_mode: formData.current_mode,
         is_verified: formData.is_verified,
-        // Simpan status aktif pada account_status dan juga is_active (kompatibilitas)
-        account_status: formData.is_active ? 'active' : 'inactive',
-        is_active: formData.is_active,
-        updated_at: new Date().toISOString(),
+        account_status: formData.account_status,
       };
 
-      if (selectedUser) {
-        // Update existing user
-        const { error } = await supabase
-          .from('users')
-          .update(updateData)
-          .eq('id', selectedUser.id);
+      const { error } = await adminService.updateUser(selectedUser.id, updateData);
 
-        if (error) {
-          console.error('Error updating user:', error);
-          return;
-        }
-      } else {
-        // Add new user (would need password handling in real implementation)
-        const { error } = await supabase
-          .from('users')
-          .insert({
-            ...updateData,
-            password: 'temp_password_123', // In real app, generate secure password
-            created_at: new Date().toISOString(),
-          });
-
-        if (error) {
-          console.error('Error creating user:', error);
-          return;
-        }
+      if (error) {
+        console.error('❌ Update failed:', error);
+        alert('Gagal menyimpan perubahan: ' + error.message);
+        return;
       }
 
+      console.log('✅ User updated successfully');
       await loadUsers();
       setShowEditUser(false);
-      setShowAddUser(false);
       setSelectedUser(null);
-    } catch (error) {
-      console.error('Error saving user:', error);
+      
+    } catch (error: any) {
+      console.error('❌ Error saving user:', error);
+      alert('Terjadi kesalahan: ' + error.message);
     }
   };
 
@@ -408,11 +406,17 @@ const HalamanKelolaUser: React.FC = () => {
   };
 
   const getStatusBadgeColor = (user: UserData) => {
-    const isActive = user.account_status === 'active' || user.is_active;
     if (user.account_status === 'suspended') return 'bg-orange-100 text-orange-800';
-    if (!isActive) return 'bg-red-100 text-red-800';
+    if (user.account_status === 'inactive') return 'bg-red-100 text-red-800';
     if (user.is_verified) return 'bg-green-100 text-green-800';
     return 'bg-yellow-100 text-yellow-800';
+  };
+
+  const getStatusText = (user: UserData) => {
+    if (user.account_status === 'suspended') return 'Suspended';
+    if (user.account_status === 'inactive') return 'Tidak Aktif';
+    if (user.is_verified) return 'Terverifikasi';
+    return 'Belum Verifikasi';
   };
 
   const formatDate = (dateString: string) => {
@@ -435,16 +439,20 @@ const HalamanKelolaUser: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 pt-12 md:pt-16 pb-8">
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-800">
+          <AlertCircle className="h-5 w-5" />
+          {errorMessage}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center mb-10">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Kelola User</h1>
-          <p className="text-gray-600 mt-2">Manajemen pengguna sistem</p>
+          <p className="text-gray-600 mt-2">Manajemen pengguna sistem (Read, Update, Delete)</p>
         </div>
-        <Button onClick={() => setShowAddUser(true)} className="flex items-center gap-2">
-          <Plus className="h-4 w-4" />
-          Tambah User
-        </Button>
       </div>
 
       {/* Statistics Cards */}
@@ -549,6 +557,7 @@ const HalamanKelolaUser: React.FC = () => {
                   <SelectItem value="all">Semua Status</SelectItem>
                   <SelectItem value="active">Aktif</SelectItem>
                   <SelectItem value="inactive">Tidak Aktif</SelectItem>
+                  <SelectItem value="suspended">Suspended</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -585,12 +594,6 @@ const HalamanKelolaUser: React.FC = () => {
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle>Daftar User ({filteredUsers.length})</CardTitle>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -634,13 +637,9 @@ const HalamanKelolaUser: React.FC = () => {
                       </Badge>
                     </td>
                     <td className="p-4">
-                      <div className="flex flex-col gap-1">
-                        <Badge className={getStatusBadgeColor(user)}>
-                        {user.account_status === 'suspended' ? 'Suspended' : 
-                         !(user.account_status === 'active' || user.is_active) ? 'Tidak Aktif' : 
-                         user.is_verified ? 'Terverifikasi' : 'Belum Verifikasi'}
+                      <Badge className={getStatusBadgeColor(user)}>
+                        {getStatusText(user)}
                       </Badge>
-                      </div>
                     </td>
                     <td className="p-4">
                       <div className="text-sm">
@@ -668,6 +667,7 @@ const HalamanKelolaUser: React.FC = () => {
                     </td>
                     <td className="p-4">
                       <div className="flex items-center gap-2">
+                        {/* View Detail */}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -675,23 +675,29 @@ const HalamanKelolaUser: React.FC = () => {
                             setSelectedUser(user);
                             setShowUserDetail(true);
                           }}
+                          title="Lihat Detail"
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
+
+                        {/* Edit User */}
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleEditUser(user)}
+                          title="Edit User"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
                         
-                        {(user.account_status === 'active' || user.is_active) ? (
+                        {/* Activate/Deactivate */}
+                        {user.account_status === 'active' ? (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleUserAction(user.id, 'deactivate')}
                             disabled={actionLoading === user.id}
+                            title="Nonaktifkan User"
                           >
                             <UserX className="h-4 w-4 text-red-600" />
                           </Button>
@@ -701,28 +707,33 @@ const HalamanKelolaUser: React.FC = () => {
                             size="sm"
                             onClick={() => handleUserAction(user.id, 'activate')}
                             disabled={actionLoading === user.id}
+                            title="Aktifkan User"
                           >
                             <UserCheck className="h-4 w-4 text-green-600" />
                           </Button>
                         )}
 
+                        {/* Verify/Unverify */}
                         {!user.is_verified && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleUserAction(user.id, 'verify')}
                             disabled={actionLoading === user.id}
+                            title="Verifikasi User"
                           >
                             <CheckCircle className="h-4 w-4 text-blue-600" />
                           </Button>
                         )}
 
+                        {/* Delete User */}
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleUserAction(user.id, 'delete')}
                           disabled={actionLoading === user.id}
                           className="text-red-600 hover:text-red-700"
+                          title="Hapus User"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -765,9 +776,7 @@ const HalamanKelolaUser: React.FC = () => {
                       {selectedUser.role.toUpperCase()}
                     </Badge>
                     <Badge className={getStatusBadgeColor(selectedUser)}>
-                      {selectedUser.account_status === 'suspended' ? 'Suspended' : 
-                       !(selectedUser.account_status === 'active' || selectedUser.is_active) ? 'Tidak Aktif' : 
-                       selectedUser.is_verified ? 'Terverifikasi' : 'Belum Verifikasi'}
+                      {getStatusText(selectedUser)}
                     </Badge>
                   </div>
                 </div>
@@ -829,7 +838,7 @@ const HalamanKelolaUser: React.FC = () => {
 
       {/* Edit User Dialog */}
       <Dialog open={showEditUser} onOpenChange={setShowEditUser}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit User</DialogTitle>
           </DialogHeader>
@@ -877,7 +886,12 @@ const HalamanKelolaUser: React.FC = () => {
               </div>
               <div>
                 <Label htmlFor="edit-role">Role</Label>
-                <Select value={formData.role} onValueChange={(value: 'user' | 'admin' | 'owner') => setFormData(prev => ({ ...prev, role: value }))}>
+                <Select 
+                  value={formData.role} 
+                  onValueChange={(value: 'user' | 'admin' | 'owner') => 
+                    setFormData(prev => ({ ...prev, role: value }))
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -926,123 +940,71 @@ const HalamanKelolaUser: React.FC = () => {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="edit-mode">Mode</Label>
+                <Select 
+                  value={formData.current_mode} 
+                  onValueChange={(value: 'buyer' | 'seller') => 
+                    setFormData(prev => ({ ...prev, current_mode: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="buyer">Buyer</SelectItem>
+                    <SelectItem value="seller">Seller</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="edit-status">Status Akun</Label>
+                <Select 
+                  value={formData.account_status} 
+                  onValueChange={(value: 'active' | 'inactive' | 'suspended') => 
+                    setFormData(prev => ({ ...prev, account_status: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={formData.is_verified}
                   onChange={(e) => setFormData(prev => ({ ...prev, is_verified: e.target.checked }))}
+                  className="w-4 h-4"
                 />
-                Terverifikasi
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={formData.is_active}
-                  onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
-                />
-                Aktif
+                <span>Terverifikasi</span>
               </label>
             </div>
 
+            <Separator />
+
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowEditUser(false)}>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowEditUser(false);
+                  setSelectedUser(null);
+                  setFormErrors({});
+                }}
+              >
                 Batal
               </Button>
               <Button onClick={handleSaveUser}>
-                Simpan
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add User Dialog */}
-      <Dialog open={showAddUser} onOpenChange={setShowAddUser}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Tambah User Baru</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="add-username">Username</Label>
-                <Input
-                  id="add-username"
-                  value={formData.username}
-                  onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
-                />
-                {formErrors.username && <p className="text-sm text-red-600">{formErrors.username}</p>}
-              </div>
-              <div>
-                <Label htmlFor="add-email">Email</Label>
-                <Input
-                  id="add-email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                />
-                {formErrors.email && <p className="text-sm text-red-600">{formErrors.email}</p>}
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="add-fullname">Nama Lengkap</Label>
-              <Input
-                id="add-fullname"
-                value={formData.full_name}
-                onChange={(e) => setFormData(prev => ({ ...prev, full_name: e.target.value }))}
-              />
-              {formErrors.full_name && <p className="text-sm text-red-600">{formErrors.full_name}</p>}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="add-phone">Nomor Telepon</Label>
-                <Input
-                  id="add-phone"
-                  value={formData.phone_number}
-                  onChange={(e) => setFormData(prev => ({ ...prev, phone_number: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label htmlFor="add-role">Role</Label>
-                <Select value={formData.role} onValueChange={(value: 'user' | 'admin' | 'owner') => setFormData(prev => ({ ...prev, role: value }))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="owner">Owner</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => {
-                setShowAddUser(false);
-                setFormData({
-                  username: '',
-                  email: '',
-                  full_name: '',
-                  phone_number: '',
-                  address: '',
-                  city: '',
-                  province: '',
-                  postal_code: '',
-                  role: 'user',
-                  current_mode: 'buyer',
-                  is_verified: false,
-                  is_active: true,
-                });
-                setFormErrors({});
-              }}>
-                Batal
-              </Button>
-              <Button onClick={handleSaveUser}>
-                Tambah User
+                Simpan Perubahan
               </Button>
             </div>
           </div>
