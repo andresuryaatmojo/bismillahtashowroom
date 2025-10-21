@@ -80,6 +80,25 @@ const HalamanKelolaUser: React.FC = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
 
+  // Helper functions untuk permission checking
+  const canEditUser = (targetUser: UserData): boolean => {
+    if (!profile) return false;
+    
+    // Owner bisa edit semua
+    if (profile.role === 'owner') return true;
+    
+    // Admin hanya bisa edit user biasa
+    if (profile.role === 'admin') {
+      return targetUser.role === 'user';
+    }
+    
+    return false;
+  };
+
+  const canDeleteUser = (targetUser: UserData): boolean => {
+    return canEditUser(targetUser);
+  };
+
   // State management
   const [users, setUsers] = useState<UserData[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<UserData[]>([]);
@@ -685,7 +704,8 @@ const HalamanKelolaUser: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleEditUser(user)}
-                          title="Edit User"
+                          disabled={!canEditUser(user)}
+                          title={canEditUser(user) ? "Edit User" : "Tidak ada akses"}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -731,9 +751,9 @@ const HalamanKelolaUser: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleUserAction(user.id, 'delete')}
-                          disabled={actionLoading === user.id}
+                          disabled={actionLoading === user.id || !canDeleteUser(user)}
                           className="text-red-600 hover:text-red-700"
-                          title="Hapus User"
+                          title={canDeleteUser(user) ? "Hapus User" : "Tidak ada akses"}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

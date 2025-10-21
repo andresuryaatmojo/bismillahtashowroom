@@ -72,17 +72,18 @@ export const adminService = {
         .from('users')
         .update({
           account_status: status,
-          is_active: status === 'active',
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId)
-        .select()
-        .single();
+        .select();  // ← HAPUS .single()
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Status update error:', error);
+        throw error;
+      }
 
       console.log('✅ Status updated successfully');
-      return { data, error: null };
+      return { data: data?.[0] || null, error: null };  // ← Ambil index 0
     } catch (error: any) {
       console.error('❌ Status update failed:', error);
       return { data: null, error };
@@ -103,13 +104,15 @@ export const adminService = {
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId)
-        .select()
-        .single();
+        .select();  // ← HAPUS .single()
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Verification update error:', error);
+        throw error;
+      }
 
       console.log('✅ Verification updated successfully');
-      return { data, error: null };
+      return { data: data?.[0] || null, error: null };  // ← Ambil index 0
     } catch (error: any) {
       console.error('❌ Verification update failed:', error);
       return { data: null, error };

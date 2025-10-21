@@ -1,5 +1,5 @@
 // src/pages/HalamanProfil.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -7,10 +7,12 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, MapPin, Shield, Settings, Key, Bell, Trash2, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Shield, Settings, Key, Bell, Trash2, CheckCircle, Loader2, AlertCircle, X, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { useNavigate } from 'react-router-dom';
 
 interface FormErrors {
@@ -23,14 +25,62 @@ interface FormErrors {
   province: string;
 }
 
+interface NotificationPreferences {
+  emailNewsletter: boolean;
+  emailPromotion: boolean;
+  emailTransaction: boolean;
+  pushNewCar: boolean;
+  pushPriceUpdate: boolean;
+  pushMessage: boolean;
+}
+
 const HalamanProfil: React.FC = () => {
-  const { profile, refreshProfile } = useAuth();
+  const { profile, refreshProfile, logout } = useAuth();
   const navigate = useNavigate();
+
+  // Dialog close timeout ref
+  const dialogCloseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
+
+  // Dialog states
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [showNotificationDialog, setShowNotificationDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  // Password change states
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordErrors, setPasswordErrors] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // Notification preferences
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>({
+    emailNewsletter: false,
+    emailPromotion: false,
+    emailTransaction: true,
+    pushNewCar: false,
+    pushPriceUpdate: false,
+    pushMessage: true,
+  });
+  const [notificationLoading, setNotificationLoading] = useState(false);
+
+  // Delete account states
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -54,7 +104,7 @@ const HalamanProfil: React.FC = () => {
     province: '',
   });
 
-  // Load profile data saat component mount atau profile berubah
+  // Load profile data
   useEffect(() => {
     if (profile) {
       setFormData({
@@ -68,8 +118,24 @@ const HalamanProfil: React.FC = () => {
         postalCode: profile.postal_code || '',
         currentMode: profile.current_mode || 'buyer',
       });
+
+      // Load notification preferences from profile.preferences
+      if (profile.preferences?.notifications) {
+        setNotificationPrefs(profile.preferences.notifications);
+      }
     }
   }, [profile]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (dialogCloseTimeoutRef.current) {
+        clearTimeout(dialogCloseTimeoutRef.current);
+      }
+    };
+  }, []);
+
+
 
   // Validasi form
   const validateForm = (): boolean => {
@@ -83,34 +149,26 @@ const HalamanProfil: React.FC = () => {
       province: '',
     };
 
-    // Validasi nama lengkap
     if (!formData.fullName.trim()) {
       newErrors.fullName = 'Nama lengkap wajib diisi';
     } else if (formData.fullName.trim().length < 2) {
       newErrors.fullName = 'Nama lengkap minimal 2 karakter';
-    } else if (formData.fullName.trim().length > 255) {
-      newErrors.fullName = 'Nama lengkap maksimal 255 karakter';
     }
 
-    // Validasi username
     if (!formData.username.trim()) {
       newErrors.username = 'Username wajib diisi';
     } else if (formData.username.trim().length < 3) {
       newErrors.username = 'Username minimal 3 karakter';
-    } else if (formData.username.trim().length > 50) {
-      newErrors.username = 'Username maksimal 50 karakter';
     } else if (!/^[a-zA-Z0-9_.-]+$/.test(formData.username.trim())) {
       newErrors.username = 'Username hanya boleh huruf, angka, underscore, titik, dan dash';
     }
 
-    // Validasi email
     if (!formData.email.trim()) {
       newErrors.email = 'Email wajib diisi';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
       newErrors.email = 'Format email tidak valid';
     }
 
-    // Validasi nomor telepon (optional tapi jika diisi harus valid)
     if (formData.phoneNumber.trim()) {
       const cleanPhone = formData.phoneNumber.replace(/[\s\-\+\(\)]/g, '');
       if (!/^(62|0)[0-9]{8,13}$/.test(cleanPhone)) {
@@ -118,7 +176,6 @@ const HalamanProfil: React.FC = () => {
       }
     }
 
-    // Validasi alamat (optional)
     if (formData.address.trim() && formData.address.trim().length < 10) {
       newErrors.address = 'Alamat minimal 10 karakter';
     }
@@ -128,20 +185,10 @@ const HalamanProfil: React.FC = () => {
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-
-    // Clear error saat user mengetik
+    setFormData(prev => ({ ...prev, [field]: value }));
     if (errors[field as keyof FormErrors]) {
-      setErrors(prev => ({
-        ...prev,
-        [field]: ''
-      }));
+      setErrors(prev => ({ ...prev, [field]: '' }));
     }
-
-    // Clear save messages
     setSaveSuccess(false);
     setSaveError('');
   };
@@ -164,7 +211,6 @@ const HalamanProfil: React.FC = () => {
     try {
       console.log('🔄 Updating profile for user:', profile.id);
 
-      // Update ke database
       const { data, error } = await supabase
         .from('users')
         .update({
@@ -186,7 +232,6 @@ const HalamanProfil: React.FC = () => {
       if (error) {
         console.error('❌ Update error:', error);
         
-        // Handle specific errors
         if (error.code === '23505') {
           if (error.message.includes('username')) {
             setSaveError('Username sudah digunakan');
@@ -202,18 +247,11 @@ const HalamanProfil: React.FC = () => {
       }
 
       console.log('✅ Profile updated:', data);
-
-      // Refresh profile di AuthContext
       await refreshProfile();
-
-      // Success feedback
       setSaveSuccess(true);
       setIsEditing(false);
 
-      // Auto-hide success message
-      setTimeout(() => {
-        setSaveSuccess(false);
-      }, 3000);
+      setTimeout(() => setSaveSuccess(false), 3000);
 
     } catch (err: any) {
       console.error('❌ Save profile error:', err);
@@ -224,7 +262,6 @@ const HalamanProfil: React.FC = () => {
   };
 
   const handleCancel = () => {
-    // Reset form ke data profil asli
     if (profile) {
       setFormData({
         fullName: profile.full_name || '',
@@ -254,7 +291,211 @@ const HalamanProfil: React.FC = () => {
     setIsEditing(false);
   };
 
-  // Redirect jika tidak ada profile
+  // ===== PASSWORD CHANGE HANDLERS =====
+  const validatePasswordForm = (): boolean => {
+    const errors = {
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    };
+
+    if (!passwordData.currentPassword) {
+      errors.currentPassword = 'Password lama wajib diisi';
+    }
+
+    if (!passwordData.newPassword) {
+      errors.newPassword = 'Password baru wajib diisi';
+    } else if (passwordData.newPassword.length < 6) {
+      errors.newPassword = 'Password minimal 6 karakter';
+    } else if (passwordData.newPassword === passwordData.currentPassword) {
+      errors.newPassword = 'Password baru harus berbeda dengan password lama';
+    }
+
+    if (!passwordData.confirmPassword) {
+      errors.confirmPassword = 'Konfirmasi password wajib diisi';
+    } else if (passwordData.confirmPassword !== passwordData.newPassword) {
+      errors.confirmPassword = 'Konfirmasi password tidak cocok';
+    }
+
+    setPasswordErrors(errors);
+    return Object.values(errors).every(err => err === '');
+  };
+
+  const handleChangePassword = async () => {
+    if (!validatePasswordForm()) return;
+
+    setPasswordLoading(true);
+
+    try {
+      console.log('🔄 Changing password...');
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: passwordData.newPassword,
+      });
+
+      if (updateError) {
+        console.error('❌ Password update error:', updateError);
+        
+        if (updateError.message.includes('New password should be different')) {
+          setPasswordErrors(prev => ({
+            ...prev,
+            newPassword: 'Password baru harus berbeda dari password lama',
+          }));
+        } else {
+          alert('Gagal mengubah password: ' + updateError.message);
+        }
+        setPasswordLoading(false);
+        return;
+      }
+
+      console.log('✅ Password changed successfully');
+      
+      // CRITICAL: Set loading false BEFORE closing dialog
+      setPasswordLoading(false);
+      
+      // Clear any existing timeout
+      if (dialogCloseTimeoutRef.current) {
+        clearTimeout(dialogCloseTimeoutRef.current);
+      }
+      
+      // Force close dialog dengan batch state update
+      // Gunakan callback untuk memastikan urutan eksekusi
+      Promise.resolve().then(() => {
+        setShowPasswordDialog(false);
+        setPasswordData({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: '',
+        });
+        setPasswordErrors({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: '',
+        });
+        setShowCurrentPassword(false);
+        setShowNewPassword(false);
+        setShowConfirmPassword(false);
+      }).then(() => {
+        // Alert setelah semua state di-reset
+        dialogCloseTimeoutRef.current = setTimeout(() => {
+          alert('Password berhasil diubah!');
+        }, 200);
+      });
+
+    } catch (error: any) {
+      console.error('❌ Error changing password:', error);
+      setPasswordLoading(false);
+      alert('Terjadi kesalahan: ' + error.message);
+    }
+  };
+
+  // ===== NOTIFICATION HANDLERS =====
+  const handleSaveNotifications = async () => {
+    if (!profile?.id) return;
+
+    setNotificationLoading(true);
+
+    try {
+      console.log('🔄 Saving notification preferences...');
+
+      const updatedPreferences = {
+        ...(profile.preferences || {}),
+        notifications: notificationPrefs,
+      };
+
+      const { error } = await supabase
+        .from('users')
+        .update({
+          preferences: updatedPreferences,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', profile.id);
+
+      if (error) {
+        console.error('❌ Error saving preferences:', error);
+        alert('Gagal menyimpan preferensi: ' + error.message);
+        return;
+      }
+
+      console.log('✅ Notification preferences saved');
+      await refreshProfile();
+      alert('Preferensi notifikasi berhasil disimpan!');
+      setShowNotificationDialog(false);
+
+    } catch (error: any) {
+      console.error('❌ Error:', error);
+      alert('Terjadi kesalahan: ' + error.message);
+    } finally {
+      setNotificationLoading(false);
+    }
+  };
+
+  // ===== DELETE ACCOUNT HANDLER =====
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'HAPUS') {
+      alert('Ketik "HAPUS" untuk konfirmasi');
+      return;
+    }
+
+    if (!profile?.id || !profile?.auth_user_id) {
+      alert('User ID tidak ditemukan');
+      return;
+    }
+
+    setDeleteLoading(true);
+
+    try {
+      console.log('🗑️ [DELETE] Starting delete process...');
+      console.log('📋 User ID:', profile.id);
+      console.log('📋 Auth User ID:', profile.auth_user_id);
+
+      // Method 1: Hapus dari auth.users dulu (menggunakan admin client)
+      console.log('🗑️ [DELETE] Deleting from auth.users...');
+      const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(
+        profile.auth_user_id
+      );
+
+      if (authError) {
+        console.error('❌ [ERROR] Auth delete failed:', authError);
+        alert('Gagal menghapus akun auth: ' + authError.message);
+        setDeleteLoading(false);
+        return;
+      }
+
+      console.log('✅ [SUCCESS] Deleted from auth.users');
+
+      // Method 2: Hapus dari public.users (menggunakan admin client untuk bypass RLS)
+      console.log('🗑️ [DELETE] Deleting from public.users...');
+      const { error: publicError } = await supabaseAdmin
+        .from('users')
+        .delete()
+        .eq('id', profile.id);
+
+      if (publicError) {
+        console.error('❌ [ERROR] Public delete failed:', publicError);
+        // Continue anyway karena auth sudah terhapus
+      } else {
+        console.log('✅ [SUCCESS] Deleted from public.users');
+      }
+
+      // Tutup dialog
+      setShowDeleteDialog(false);
+      setDeleteLoading(false);
+
+      alert('Akun berhasil dihapus! Anda akan dialihkan ke halaman login.');
+
+      // Logout dan redirect
+      console.log('👋 [LOGOUT] Logging out...');
+      await logout();
+      navigate('/login');
+
+    } catch (error: any) {
+      console.error('❌ [EXCEPTION] Error:', error);
+      alert('Terjadi kesalahan: ' + error.message);
+      setDeleteLoading(false);
+    }
+  };
+
   if (!profile) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -611,7 +852,12 @@ const HalamanProfil: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Button variant="outline" className="h-16 flex items-center justify-start gap-3 p-4">
+                {/* Ubah Password */}
+                <Button 
+                  variant="outline" 
+                  className="h-16 flex items-center justify-start gap-3 p-4"
+                  onClick={() => setShowPasswordDialog(true)}
+                >
                   <Key className="w-5 h-5 text-orange-500" />
                   <div className="text-left">
                     <p className="font-semibold">Ubah Password</p>
@@ -619,17 +865,27 @@ const HalamanProfil: React.FC = () => {
                   </div>
                 </Button>
                 
-                <Button variant="outline" className="h-16 flex items-center justify-start gap-3 p-4">
+                {/* Verifikasi Akun - DISABLED */}
+                <Button 
+                  variant="outline" 
+                  className="h-16 flex items-center justify-start gap-3 p-4 opacity-50 cursor-not-allowed"
+                  disabled
+                >
                   <Shield className="w-5 h-5 text-blue-500" />
                   <div className="text-left">
                     <p className="font-semibold">Verifikasi Akun</p>
                     <p className="text-xs text-gray-500">
-                      {profile.is_verified ? 'Akun sudah terverifikasi' : 'Tingkatkan keamanan akun'}
+                      {profile.is_verified ? 'Akun sudah terverifikasi' : 'Fitur dalam pengembangan'}
                     </p>
                   </div>
                 </Button>
                 
-                <Button variant="outline" className="h-16 flex items-center justify-start gap-3 p-4">
+                {/* Notifikasi */}
+                <Button 
+                  variant="outline" 
+                  className="h-16 flex items-center justify-start gap-3 p-4"
+                  onClick={() => setShowNotificationDialog(true)}
+                >
                   <Bell className="w-5 h-5 text-purple-500" />
                   <div className="text-left">
                     <p className="font-semibold">Notifikasi</p>
@@ -637,14 +893,11 @@ const HalamanProfil: React.FC = () => {
                   </div>
                 </Button>
                 
+                {/* Hapus Akun */}
                 <Button 
                   variant="outline" 
                   className="h-16 flex items-center justify-start gap-3 p-4 border-red-200 hover:bg-red-50"
-                  onClick={() => {
-                    if (window.confirm('Apakah Anda yakin ingin menghapus akun? Tindakan ini tidak dapat dibatalkan.')) {
-                      console.log('Delete account requested');
-                    }
-                  }}
+                  onClick={() => setShowDeleteDialog(true)}
                 >
                   <Trash2 className="w-5 h-5 text-red-500" />
                   <div className="text-left">
@@ -657,6 +910,380 @@ const HalamanProfil: React.FC = () => {
           </Card>
         </motion.div>
       </div>
+
+      {/* ===== DIALOG: CHANGE PASSWORD ===== */}
+      <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="w-5 h-5" />
+              Ubah Password
+            </DialogTitle>
+            <DialogDescription>
+              Masukkan password lama dan password baru Anda
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Password Lama */}
+            <div className="space-y-2">
+              <Label htmlFor="currentPassword">Password Lama *</Label>
+              <div className="relative">
+                <Input
+                  id="currentPassword"
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={passwordData.currentPassword}
+                  onChange={(e) => {
+                    setPasswordData(prev => ({ ...prev, currentPassword: e.target.value }));
+                    setPasswordErrors(prev => ({ ...prev, currentPassword: '' }));
+                  }}
+                  className={passwordErrors.currentPassword ? "border-red-500" : ""}
+                  placeholder="Masukkan password lama"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                  className="absolute right-3 top-3 text-gray-500"
+                >
+                  {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {passwordErrors.currentPassword && (
+                <p className="text-sm text-red-500">{passwordErrors.currentPassword}</p>
+              )}
+            </div>
+
+            {/* Password Baru */}
+            <div className="space-y-2">
+              <Label htmlFor="newPassword">Password Baru *</Label>
+              <div className="relative">
+                <Input
+                  id="newPassword"
+                  type={showNewPassword ? "text" : "password"}
+                  value={passwordData.newPassword}
+                  onChange={(e) => {
+                    setPasswordData(prev => ({ ...prev, newPassword: e.target.value }));
+                    setPasswordErrors(prev => ({ ...prev, newPassword: '' }));
+                  }}
+                  className={passwordErrors.newPassword ? "border-red-500" : ""}
+                  placeholder="Minimal 6 karakter"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute right-3 top-3 text-gray-500"
+                >
+                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {passwordErrors.newPassword && (
+                <p className="text-sm text-red-500">{passwordErrors.newPassword}</p>
+              )}
+            </div>
+
+            {/* Konfirmasi Password */}
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">Konfirmasi Password Baru *</Label>
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={passwordData.confirmPassword}
+                  onChange={(e) => {
+                    setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }));
+                    setPasswordErrors(prev => ({ ...prev, confirmPassword: '' }));
+                  }}
+                  className={passwordErrors.confirmPassword ? "border-red-500" : ""}
+                  placeholder="Ulangi password baru"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-3 text-gray-500"
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {passwordErrors.confirmPassword && (
+                <p className="text-sm text-red-500">{passwordErrors.confirmPassword}</p>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setShowPasswordDialog(false);
+                  setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+                  setPasswordErrors({ currentPassword: '', newPassword: '', confirmPassword: '' });
+                }}
+                disabled={passwordLoading}
+              >
+                Batal
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleChangePassword}
+                disabled={passwordLoading}
+              >
+                {passwordLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Mengubah...
+                  </>
+                ) : (
+                  'Ubah Password'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== DIALOG: NOTIFICATION PREFERENCES ===== */}
+      <Dialog open={showNotificationDialog} onOpenChange={setShowNotificationDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="w-5 h-5" />
+              Pengaturan Notifikasi
+            </DialogTitle>
+            <DialogDescription>
+              Pilih jenis notifikasi yang ingin Anda terima
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Email Notifications */}
+            <div className="space-y-3">
+              <h4 className="font-semibold text-sm">Notifikasi Email</h4>
+              
+              <label className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <Mail className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <p className="font-medium text-sm">Newsletter</p>
+                    <p className="text-xs text-gray-500">Berita dan artikel terbaru</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={notificationPrefs.emailNewsletter}
+                  onChange={(e) => setNotificationPrefs(prev => ({ 
+                    ...prev, 
+                    emailNewsletter: e.target.checked 
+                  }))}
+                  className="w-4 h-4"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <Mail className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <p className="font-medium text-sm">Promosi</p>
+                    <p className="text-xs text-gray-500">Penawaran dan diskon spesial</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={notificationPrefs.emailPromotion}
+                  onChange={(e) => setNotificationPrefs(prev => ({ 
+                    ...prev, 
+                    emailPromotion: e.target.checked 
+                  }))}
+                  className="w-4 h-4"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <Mail className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <p className="font-medium text-sm">Transaksi</p>
+                    <p className="text-xs text-gray-500">Update status transaksi</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={notificationPrefs.emailTransaction}
+                  onChange={(e) => setNotificationPrefs(prev => ({ 
+                    ...prev, 
+                    emailTransaction: e.target.checked 
+                  }))}
+                  className="w-4 h-4"
+                />
+              </label>
+            </div>
+
+            {/* Push Notifications */}
+            <div className="space-y-3">
+              <h4 className="font-semibold text-sm">Notifikasi Push</h4>
+              
+              <label className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <Bell className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <p className="font-medium text-sm">Mobil Baru</p>
+                    <p className="text-xs text-gray-500">Notifikasi mobil baru tersedia</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={notificationPrefs.pushNewCar}
+                  onChange={(e) => setNotificationPrefs(prev => ({ 
+                    ...prev, 
+                    pushNewCar: e.target.checked 
+                  }))}
+                  className="w-4 h-4"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <Bell className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <p className="font-medium text-sm">Update Harga</p>
+                    <p className="text-xs text-gray-500">Perubahan harga mobil favorit</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={notificationPrefs.pushPriceUpdate}
+                  onChange={(e) => setNotificationPrefs(prev => ({ 
+                    ...prev, 
+                    pushPriceUpdate: e.target.checked 
+                  }))}
+                  className="w-4 h-4"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <Bell className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <p className="font-medium text-sm">Pesan</p>
+                    <p className="text-xs text-gray-500">Pesan baru dari penjual/pembeli</p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={notificationPrefs.pushMessage}
+                  onChange={(e) => setNotificationPrefs(prev => ({ 
+                    ...prev, 
+                    pushMessage: e.target.checked 
+                  }))}
+                  className="w-4 h-4"
+                />
+              </label>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setShowNotificationDialog(false);
+                  // Reset to original preferences
+                  if (profile?.preferences?.notifications) {
+                    setNotificationPrefs(profile.preferences.notifications);
+                  }
+                }}
+                disabled={notificationLoading}
+              >
+                Batal
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleSaveNotifications}
+                disabled={notificationLoading}
+              >
+                {notificationLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Menyimpan...
+                  </>
+                ) : (
+                  'Simpan Preferensi'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== DIALOG: DELETE ACCOUNT ===== */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="w-5 h-5" />
+              Hapus Akun Permanen
+            </DialogTitle>
+            <DialogDescription className="text-red-600">
+              ⚠️ PERINGATAN: Tindakan ini tidak dapat dibatalkan!
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
+              <p className="font-semibold text-sm text-red-800">Dengan menghapus akun, Anda akan:</p>
+              <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
+                <li>Kehilangan semua data profil</li>
+                <li>Kehilangan riwayat transaksi</li>
+                <li>Kehilangan daftar favorit</li>
+                <li>Tidak dapat login lagi dengan akun ini</li>
+                <li>Email tidak dapat digunakan untuk registrasi ulang</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deleteConfirm">
+                Ketik <strong>"HAPUS"</strong> untuk konfirmasi
+              </Label>
+              <Input
+                id="deleteConfirm"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="Ketik HAPUS"
+                className="uppercase"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setShowDeleteDialog(false);
+                  setDeleteConfirmText('');
+                }}
+                disabled={deleteLoading}
+              >
+                Batal
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={handleDeleteAccount}
+                disabled={deleteLoading || deleteConfirmText !== 'HAPUS'}
+              >
+                {deleteLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Menghapus...
+                  </>
+                ) : (
+                  'Hapus Akun'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
