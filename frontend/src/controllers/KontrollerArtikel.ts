@@ -256,24 +256,23 @@ export class KontrollerArtikel {
       const articles = (data || []).map(row => this.mapSupabaseArticle(row));
       const total = count || 0;
 
-      // Derivasi kategori
-      const kategoriMap = new Map<string, KategoriArtikel>();
-      (data || []).forEach(row => {
-        const cat = (row as any).article_categories;
-        if (cat) {
-          kategoriMap.set(String(cat.id), {
-            id: String(cat.id),
-            nama: cat.name || 'Kategori',
-            slug: cat.slug || '',
-            deskripsi: cat.description || '',
-            warna: '#3B82F6',
-            icon: 'folder',
-            parentId: undefined,
-            jumlahArtikel: 0
-          });
-        }
-      });
-      const kategori = Array.from(kategoriMap.values());
+      // Ambil SEMUA kategori dari tabel article_categories (bukan dari join)
+      const { data: allCategories } = await supabase
+        .from('article_categories')
+        .select('id, name, slug, description')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      const kategori: KategoriArtikel[] = (allCategories || []).map(cat => ({
+        id: String(cat.id),
+        nama: cat.name,
+        slug: cat.slug,
+        deskripsi: cat.description || '',
+        warna: '#3B82F6',
+        icon: 'folder',
+        parentId: undefined,
+        jumlahArtikel: 0
+      }));
 
       // Derivasi penulis
       const authorsMap = new Map<string, PenulisArtikel>();

@@ -519,12 +519,12 @@ const HalamanKelolaArtikel: React.FC = () => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">Artikel</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Kategori</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/8">Status</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/12">Views</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/8">Tanggal</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Aksi</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">Artikel</th>
+                    <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Kategori</th>
+                    <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/8">Status</th>
+                    <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/12">Views</th>
+                    <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/8">Tanggal</th>
+                    <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -540,7 +540,7 @@ const HalamanKelolaArtikel: React.FC = () => {
                   ) : (
                     state.articles.map((article) => (
                       <tr key={article.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-4">
+                        <td className="px-3 py-4">
                           <div className="flex items-center">
                             {article.gambarUtama && (
                               <img
@@ -553,35 +553,41 @@ const HalamanKelolaArtikel: React.FC = () => {
                               <div className="text-sm font-medium text-gray-900 truncate max-w-xs">
                                 {article.judul}
                                 {article.featured && (
-                                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                                     Featured
                                   </span>
                                 )}
                               </div>
-                              <div className="text-xs text-gray-500 truncate max-w-xs">{article.ringkasan.substring(0, 80)}...</div>
+                              <div className="text-xs text-gray-500 truncate max-w-xs">{article.ringkasan.substring(0, 60)}...</div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 py-4 whitespace-nowrap">
+                        <td className="px-2 py-4 whitespace-nowrap">
                           <span
                             className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium truncate max-w-20"
                             style={{ backgroundColor: article.kategori.warna + '20', color: article.kategori.warna }}
+                            title={article.kategori.nama}
                           >
-                            {article.kategori.nama}
+                            {article.kategori.nama.length > 8 ? article.kategori.nama.substring(0, 8) + '...' : article.kategori.nama}
                           </span>
                         </td>
-                        <td className="px-3 py-4 whitespace-nowrap">
+                        <td className="px-2 py-4 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(article.status)}`}>
                             {article.status}
                           </span>
                         </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">{article.views}</td>
-                        <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{formatDate(article.tanggalPublish)}</td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
+                        <td className="px-2 py-4 whitespace-nowrap text-xs text-gray-900">{article.views > 999 ? (article.views / 1000).toFixed(1) + 'k' : article.views}</td>
+                        <td className="px-2 py-4 whitespace-nowrap text-xs text-gray-500">
+                          {new Date(article.tanggalPublish).toLocaleDateString('id-ID', { 
+                            day: '2-digit', 
+                            month: 'short' 
+                          })}
+                        </td>
+                        <td className="px-2 py-4 whitespace-nowrap text-xs font-medium">
                           <div className="flex flex-col space-y-1">
-                            <button onClick={() => openModal('view', article)} className="text-blue-600 hover:text-blue-900 text-xs">Lihat</button>
-                            <button onClick={() => openModal('edit', article)} className="text-indigo-600 hover:text-indigo-900 text-xs">Edit</button>
-                            <button onClick={() => openModal('delete', article)} className="text-red-600 hover:text-red-900 text-xs">Hapus</button>
+                            <button onClick={() => openModal('view', article)} className="text-blue-600 hover:text-blue-900 text-left">Lihat</button>
+                            <button onClick={() => openModal('edit', article)} className="text-indigo-600 hover:text-indigo-900 text-left">Edit</button>
+                            <button onClick={() => openModal('delete', article)} className="text-red-600 hover:text-red-900 text-left">Hapus</button>
                           </div>
                         </td>
                       </tr>
