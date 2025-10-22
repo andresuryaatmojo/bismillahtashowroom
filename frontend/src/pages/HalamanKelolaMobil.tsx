@@ -71,6 +71,7 @@ interface CarFormData {
 const HalamanKelolaMobil: React.FC = () => {
   const navigate = useNavigate();
   const { user, isLoading: authLoading } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner';
   
   const [cars, setCars] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +85,14 @@ const HalamanKelolaMobil: React.FC = () => {
   const [brands, setBrands] = useState<any[]>([]);
   const [models, setModels] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  
+  // Tambahan state untuk quick-add
+  const [showAddBrand, setShowAddBrand] = useState(false);
+  const [newBrandName, setNewBrandName] = useState('');
+  const [showAddModel, setShowAddModel] = useState(false);
+  const [newModelName, setNewModelName] = useState('');
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   
   // Image upload
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
@@ -151,6 +160,17 @@ const HalamanKelolaMobil: React.FC = () => {
     }
   });
 
+  // Management states for brands, models, categories
+  const [managementMode, setManagementMode] = useState<{
+    brand: { show: boolean; editId?: number; newName: string; targetId?: number };
+    model: { show: boolean; editId?: number; newName: string; targetId?: number };
+    category: { show: boolean; editId?: number; newName: string; targetId?: number };
+  }>({
+    brand: { show: false, newName: '' },
+    model: { show: false, newName: '' },
+    category: { show: false, newName: '' }
+  });
+
   // Statistics
   const [statistics, setStatistics] = useState({
     total: 0,
@@ -164,27 +184,29 @@ const HalamanKelolaMobil: React.FC = () => {
   useEffect(() => {
     const loadMasterData = async () => {
       const [brandsData, categoriesData] = await Promise.all([
-        carService.getBrands(),
-        carService.getCategories()
+        isAdmin ? carService.getBrands() : carService.getActiveBrands(),
+        isAdmin ? carService.getCategories() : carService.getActiveCategories()
       ]);
       setBrands(brandsData);
       setCategories(categoriesData);
     };
     loadMasterData();
-  }, []);
+  }, [isAdmin]);
 
   // Load models when brand selected
   useEffect(() => {
     const loadModels = async () => {
       if (formData.brand_id) {
-        const modelsData = await carService.getModelsByBrand(formData.brand_id);
+        const modelsData = isAdmin 
+          ? await carService.getModelsByBrand(formData.brand_id)
+          : await carService.getActiveModelsByBrand(formData.brand_id);
         setModels(modelsData);
       } else {
         setModels([]);
       }
     };
     loadModels();
-  }, [formData.brand_id]);
+  }, [formData.brand_id, isAdmin]);
 
   // Load cars
   const loadCars = async () => {
@@ -251,6 +273,262 @@ const HalamanKelolaMobil: React.FC = () => {
     
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
     setImagePreviewUrls(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Handle quick-add functions
+  const handleAddBrand = async () => {
+    if (!newBrandName.trim()) return;
+    const id = await carService.findOrCreateBrand(newBrandName.trim());
+    if (!id) {
+      alert('Gagal menyimpan merek. Cek console: kemungkinan RLS Supabase menolak INSERT.');
+      return;
+    }
+    const brandsData = await carService.getBrands();
+    setBrands(brandsData);
+    setFormData(prev => ({ ...prev, brand_id: id, model_id: undefined }));
+    setNewBrandName('');
+    setShowAddBrand(false);
+  };
+
+  const handleAddModel = async () => {
+    if (!formData.brand_id || !newModelName.trim()) return;
+    const id = await carService.findOrCreateModel(newModelName.trim(), formData.brand_id, formData.category_id);
+    if (!id) {
+      alert('Gagal menyimpan model. Cek console untuk detail.');
+      return;
+    }
+    const modelsData = await carService.getModelsByBrand(formData.brand_id);
+    setModels(modelsData);
+    setFormData(prev => ({ ...prev, model_id: id }));
+    setNewModelName('');
+    setShowAddModel(false);
+  };
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return;
+    const id = await carService.findOrCreateCategory(newCategoryName.trim());
+    if (id) {
+      const categoriesData = await carService.getCategories();
+      setCategories(categoriesData);
+      setFormData(prev => ({ ...prev, category_id: id }));
+      setNewCategoryName('');
+      setShowAddCategory(false);
+    }
+  };
+
+  // Management handlers for brands
+  const handleUpdateBrand = async (id: number, newName: string) => {
+    try {
+      const success = await carService.updateBrandName(id, newName);
+      if (success) {
+        const brandsData = isAdmin ? await carService.getBrands() : await carService.getActiveBrands();
+        setBrands(brandsData);
+        setManagementMode(prev => ({ ...prev, brand: { show: true, newName: '', editId: undefined } }));
+        alert('Nama merek berhasil diubah');
+      } else {
+        alert('Gagal mengubah nama merek');
+      }
+    } catch (error) {
+      console.error('Error updating brand:', error);
+      alert('Gagal mengubah nama merek');
+    }
+  };
+
+  const handleDeactivateBrand = async (id: number) => {
+    if (!window.confirm('Yakin ingin menonaktifkan merek ini? Mobil dengan merek ini akan tetap ada.')) return;
+    try {
+      const success = await carService.deactivateBrand(id);
+      if (success) {
+        const brandsData = isAdmin ? await carService.getBrands() : await carService.getActiveBrands();
+        setBrands(brandsData);
+        alert('Merek berhasil dinonaktifkan');
+      } else {
+        alert('Gagal menonaktifkan merek');
+      }
+    } catch (error) {
+      console.error('Error deactivating brand:', error);
+      alert('Gagal menonaktifkan merek');
+    }
+  };
+
+  const handleReassignBrand = async (fromId: number, toId: number) => {
+    if (!window.confirm('Yakin ingin menggabungkan merek ini? Semua mobil akan dipindah ke merek tujuan.')) return;
+    try {
+      const success = await carService.reassignCarsBrand(fromId, toId);
+      if (success) {
+        const brandsData = isAdmin ? await carService.getBrands() : await carService.getActiveBrands();
+        setBrands(brandsData);
+        alert('Merek berhasil digabungkan');
+      } else {
+        alert('Gagal menggabungkan merek');
+      }
+    } catch (error) {
+      console.error('Error reassigning brand:', error);
+      alert('Gagal menggabungkan merek');
+    }
+  };
+
+  // Management handlers for models
+  const handleUpdateModel = async (id: number, newName: string) => {
+    try {
+      const success = await carService.updateModelName(id, newName);
+      if (success && formData.brand_id) {
+        const modelsData = isAdmin 
+          ? await carService.getModelsByBrand(formData.brand_id)
+          : await carService.getActiveModelsByBrand(formData.brand_id);
+        setModels(modelsData);
+        setManagementMode(prev => ({ ...prev, model: { show: true, newName: '', editId: undefined } }));
+        alert('Nama model berhasil diubah');
+      } else {
+        alert('Gagal mengubah nama model');
+      }
+    } catch (error) {
+      console.error('Error updating model:', error);
+      alert('Gagal mengubah nama model');
+    }
+  };
+
+  const handleDeactivateModel = async (id: number) => {
+    if (!window.confirm('Yakin ingin menonaktifkan model ini? Mobil dengan model ini akan tetap ada.')) return;
+    try {
+      const success = await carService.deactivateModel(id);
+      if (success && formData.brand_id) {
+        const modelsData = isAdmin 
+          ? await carService.getModelsByBrand(formData.brand_id)
+          : await carService.getActiveModelsByBrand(formData.brand_id);
+        setModels(modelsData);
+        alert('Model berhasil dinonaktifkan');
+      } else {
+        alert('Gagal menonaktifkan model');
+      }
+    } catch (error) {
+      console.error('Error deactivating model:', error);
+      alert('Gagal menonaktifkan model');
+    }
+  };
+
+  const handleReassignModel = async (fromId: number, toId: number) => {
+    if (!window.confirm('Yakin ingin menggabungkan model ini? Semua mobil akan dipindah ke model tujuan.')) return;
+    try {
+      const success = await carService.reassignCarsModel(fromId, toId);
+      if (success && formData.brand_id) {
+        const modelsData = isAdmin 
+          ? await carService.getModelsByBrand(formData.brand_id)
+          : await carService.getActiveModelsByBrand(formData.brand_id);
+        setModels(modelsData);
+        alert('Model berhasil digabungkan');
+      } else {
+        alert('Gagal menggabungkan model');
+      }
+    } catch (error) {
+      console.error('Error reassigning model:', error);
+      alert('Gagal menggabungkan model');
+    }
+  };
+
+  // Management handlers for categories
+  const handleUpdateCategory = async (id: number, newName: string) => {
+    try {
+      const success = await carService.updateCategoryName(id, newName);
+      if (success) {
+        const categoriesData = isAdmin ? await carService.getCategories() : await carService.getActiveCategories();
+        setCategories(categoriesData);
+        setManagementMode(prev => ({ ...prev, category: { show: true, newName: '', editId: undefined } }));
+        alert('Nama kategori berhasil diubah');
+      } else {
+        alert('Gagal mengubah nama kategori');
+      }
+    } catch (error) {
+      console.error('Error updating category:', error);
+      alert('Gagal mengubah nama kategori');
+    }
+  };
+
+  const handleDeactivateCategory = async (id: number) => {
+    if (!window.confirm('Yakin ingin menonaktifkan kategori ini? Mobil dengan kategori ini akan tetap ada.')) return;
+    try {
+      const success = await carService.deactivateCategory(id);
+      if (success) {
+        const categoriesData = isAdmin ? await carService.getCategories() : await carService.getActiveCategories();
+        setCategories(categoriesData);
+        alert('Kategori berhasil dinonaktifkan');
+      } else {
+        alert('Gagal menonaktifkan kategori');
+      }
+    } catch (error) {
+      console.error('Error deactivating category:', error);
+      alert('Gagal menonaktifkan kategori');
+    }
+  };
+
+  const handleReassignCategory = async (fromId: number, toId: number) => {
+    if (!window.confirm('Yakin ingin menggabungkan kategori ini? Semua mobil akan dipindah ke kategori tujuan.')) return;
+    try {
+      const success = await carService.reassignCarsCategory(fromId, toId);
+      if (success) {
+        const categoriesData = isAdmin ? await carService.getCategories() : await carService.getActiveCategories();
+        setCategories(categoriesData);
+        alert('Kategori berhasil digabungkan');
+      } else {
+        alert('Gagal menggabungkan kategori');
+      }
+    } catch (error) {
+      console.error('Error reassigning category:', error);
+      alert('Gagal menggabungkan kategori');
+    }
+  };
+
+  const handleReactivateBrand = async (id: number) => {
+    if (!window.confirm('Yakin ingin mengaktifkan kembali merek ini?')) return;
+    try {
+      const success = await carService.reactivateBrand(id);
+      if (success) {
+        const brandsData = isAdmin ? await carService.getBrands() : await carService.getActiveBrands();
+        setBrands(brandsData);
+        alert('Merek berhasil diaktifkan kembali');
+      } else {
+        alert('Gagal mengaktifkan merek');
+      }
+    } catch (error) {
+      console.error('Error reactivating brand:', error);
+      alert('Gagal mengaktifkan merek');
+    }
+  };
+
+  const handleReactivateModel = async (id: number) => {
+    if (!window.confirm('Yakin ingin mengaktifkan kembali model ini?')) return;
+    try {
+      const success = await carService.reactivateModel(id);
+      if (success && formData.brand_id) {
+        const modelsData = isAdmin 
+          ? await carService.getModelsByBrand(formData.brand_id)
+          : await carService.getActiveModelsByBrand(formData.brand_id);
+        setModels(modelsData);
+        alert('Model berhasil diaktifkan kembali');
+      } else {
+        alert('Gagal mengaktifkan model');
+      }
+    } catch (error) {
+      console.error('Error reactivating model:', error);
+      alert('Gagal mengaktifkan model');
+    }
+  };
+
+  const handleReactivateCategory = async (id: number) => {
+    if (!window.confirm('Yakin ingin mengaktifkan kembali kategori ini?')) return;
+    try {
+      const success = await carService.reactivateCategory(id);
+      if (success) {
+        const categoriesData = isAdmin ? await carService.getCategories() : await carService.getActiveCategories();
+        setCategories(categoriesData);
+        alert('Kategori berhasil diaktifkan kembali');
+      } else {
+        alert('Gagal mengaktifkan kategori');
+      }
+    } catch (error) {
+      console.error('Error reactivating category:', error);
+      alert('Gagal mengaktifkan kategori');
+    }
   };
 
   // Upload images
@@ -914,67 +1192,520 @@ const HalamanKelolaMobil: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="brand_id">Merek *</Label>
-                      <Select 
-                        value={formData.brand_id?.toString()} 
-                        onValueChange={(value) => setFormData(prev => ({ 
-                          ...prev, 
-                          brand_id: parseInt(value), 
-                          model_id: undefined 
-                        }))}
-                      >
-                        <SelectTrigger id="brand_id">
-                          <SelectValue placeholder="Pilih merek" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {brands.map(b => (
-                            <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-start gap-2">
+                        <Select 
+                          value={formData.brand_id?.toString()} 
+                          onValueChange={(value) => setFormData(prev => ({ 
+                            ...prev, 
+                            brand_id: parseInt(value), 
+                            model_id: undefined 
+                          }))}
+                        >
+                          <SelectTrigger id="brand_id">
+                            <SelectValue placeholder="Pilih merek" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {brands.filter(b => b.is_active).map(b => (
+                              <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {isAdmin && (
+                          <div className="flex gap-1">
+                            <Button variant="outline" size="sm" onClick={() => setShowAddBrand(s => !s)} title="Tambah Merek">
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => setManagementMode(prev => ({ 
+                                ...prev, 
+                                brand: { show: !prev.brand.show, newName: '' } 
+                              }))}
+                              title="Kelola Merek"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      {isAdmin && showAddBrand && (
+                        <div className="mt-2 flex gap-2">
+                          <Input 
+                            value={newBrandName} 
+                            onChange={(e) => setNewBrandName(e.target.value)} 
+                            placeholder="Nama merek baru"
+                          />
+                          <Button size="sm" onClick={handleAddBrand}>Simpan</Button>
+                        </div>
+                      )}
+                      {isAdmin && managementMode.brand.show && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                            <div className="p-4 border-b sticky top-0 bg-white">
+                              <div className="flex justify-between items-center">
+                                <h4 className="text-lg font-medium">Kelola Merek</h4>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => setManagementMode(prev => ({ ...prev, brand: { show: false, newName: '' } }))}
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="p-4">
+                              <div className="space-y-3">
+                                {brands.map(brand => (
+                                  <div key={brand.id} className={`flex items-center gap-3 p-3 border rounded-lg ${!brand.is_active ? 'bg-gray-50 border-gray-300' : ''}`}>
+                                    <div className="flex-1 flex items-center gap-2">
+                                      <span className={`font-medium ${!brand.is_active ? 'text-gray-500' : ''}`}>
+                                        {brand.name}
+                                      </span>
+                                      {!brand.is_active && (
+                                        <Badge variant="secondary" className="text-xs">
+                                          Nonaktif
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      {brand.is_active ? (
+                                        <>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => setManagementMode(prev => ({
+                                              ...prev,
+                                              brand: { 
+                                                show: true, 
+                                                editId: brand.id, 
+                                                newName: brand.name 
+                                              }
+                                            }))}
+                                            title="Ubah Nama"
+                                          >
+                                            <Edit className="w-4 h-4" />
+                                          </Button>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleDeactivateBrand(brand.id)}
+                                            title="Nonaktifkan"
+                                            className="text-red-600 hover:text-red-700"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                          <Select 
+                                            onValueChange={(value) => handleReassignBrand(brand.id, parseInt(value))}
+                                          >
+                                            <SelectTrigger className="w-32">
+                                              <SelectValue placeholder="Gabung ke..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {brands.filter(b => b.id !== brand.id && b.is_active).map(b => (
+                                                <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </>
+                                      ) : (
+                                        <Button 
+                                          size="sm" 
+                                          variant="outline"
+                                          onClick={() => handleReactivateBrand(brand.id)}
+                                          title="Aktifkan Kembali"
+                                          className="text-green-600 hover:text-green-700"
+                                        >
+                                          <CheckCircle className="w-4 h-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              {managementMode.brand.editId && (
+                                <div className="mt-4 p-4 border rounded-lg bg-blue-50">
+                                  <h5 className="text-sm font-medium mb-2">Edit Nama Merek</h5>
+                                  <div className="flex gap-2">
+                                    <Input 
+                                      value={managementMode.brand.newName}
+                                      onChange={(e) => setManagementMode(prev => ({
+                                        ...prev,
+                                        brand: { ...prev.brand, newName: e.target.value }
+                                      }))}
+                                      placeholder="Nama baru"
+                                      className="flex-1"
+                                    />
+                                    <Button 
+                                      size="sm" 
+                                      onClick={() => handleUpdateBrand(managementMode.brand.editId!, managementMode.brand.newName)}
+                                    >
+                                      Simpan
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => setManagementMode(prev => ({
+                                        ...prev,
+                                        brand: { show: true, newName: '' }
+                                      }))}
+                                    >
+                                      Batal
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div>
                       <Label htmlFor="model_id">Model *</Label>
-                      <Select 
-                        value={formData.model_id?.toString()} 
-                        onValueChange={(value) => setFormData(prev => ({ 
-                          ...prev, 
-                          model_id: parseInt(value) 
-                        }))}
-                        disabled={!formData.brand_id}
-                      >
-                        <SelectTrigger id="model_id">
-                          <SelectValue placeholder="Pilih model" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {models.map(m => (
-                            <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-start gap-2">
+                        <Select 
+                          value={formData.model_id?.toString()} 
+                          onValueChange={(value) => setFormData(prev => ({ 
+                            ...prev, 
+                            model_id: parseInt(value) 
+                          }))}
+                          disabled={!formData.brand_id}
+                        >
+                          <SelectTrigger id="model_id">
+                            <SelectValue placeholder="Pilih model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {models.filter(m => m.is_active).map(m => (
+                              <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {isAdmin && (
+                          <div className="flex gap-1">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => setShowAddModel(s => !s)} 
+                              disabled={!formData.brand_id}
+                              title="Tambah Model"
+                            >
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => setManagementMode(prev => ({ 
+                                ...prev, 
+                                model: { show: !prev.model.show, newName: '' } 
+                              }))}
+                              disabled={!formData.brand_id}
+                              title="Kelola Model"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                       {!formData.brand_id && (
                         <p className="text-xs text-gray-500 mt-1">Pilih merek terlebih dahulu</p>
+                      )}
+                      {isAdmin && showAddModel && (
+                        <div className="mt-2 flex gap-2">
+                          <Input 
+                            value={newModelName} 
+                            onChange={(e) => setNewModelName(e.target.value)} 
+                            placeholder="Nama model baru"
+                          />
+                          <Button size="sm" onClick={handleAddModel} disabled={!formData.brand_id}>Simpan</Button>
+                        </div>
+                      )}
+                      {isAdmin && managementMode.model.show && formData.brand_id && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                            <div className="p-4 border-b sticky top-0 bg-white">
+                              <div className="flex justify-between items-center">
+                                <h4 className="text-lg font-medium">Kelola Model</h4>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => setManagementMode(prev => ({ ...prev, model: { show: false, newName: '' } }))}
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="p-4">
+                              <div className="space-y-3">
+                                {models.map(model => (
+                                  <div key={model.id} className={`flex items-center gap-3 p-3 border rounded-lg ${!model.is_active ? 'bg-gray-50 opacity-75' : ''}`}>
+                                    <div className="flex-1 flex items-center gap-2">
+                                      <span className={`font-medium ${!model.is_active ? 'text-gray-500 line-through' : ''}`}>
+                                        {model.name}
+                                      </span>
+                                      {!model.is_active && (
+                                        <Badge variant="secondary" className="text-xs">Nonaktif</Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      {model.is_active ? (
+                                        <>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => setManagementMode(prev => ({
+                                              ...prev,
+                                              model: { 
+                                                show: true, 
+                                                editId: model.id, 
+                                                newName: model.name 
+                                              }
+                                            }))}
+                                            title="Ubah Nama"
+                                          >
+                                            <Edit className="w-4 h-4" />
+                                          </Button>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleDeactivateModel(model.id)}
+                                            title="Nonaktifkan"
+                                            className="text-red-600 hover:text-red-700"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                          <Select 
+                                            onValueChange={(value) => handleReassignModel(model.id, parseInt(value))}
+                                          >
+                                            <SelectTrigger className="w-32">
+                                              <SelectValue placeholder="Gabung ke..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {models.filter(m => m.id !== model.id && m.is_active).map(m => (
+                                                <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </>
+                                      ) : (
+                                        <Button 
+                                          size="sm" 
+                                          variant="outline"
+                                          onClick={() => handleReactivateModel(model.id)}
+                                          title="Aktifkan Kembali"
+                                          className="text-green-600 hover:text-green-700"
+                                        >
+                                          <CheckCircle className="w-4 h-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              {managementMode.model.editId && (
+                                <div className="mt-4 p-4 border rounded-lg bg-blue-50">
+                                  <h5 className="text-sm font-medium mb-2">Edit Nama Model</h5>
+                                  <div className="flex gap-2">
+                                    <Input 
+                                      value={managementMode.model.newName}
+                                      onChange={(e) => setManagementMode(prev => ({
+                                        ...prev,
+                                        model: { ...prev.model, newName: e.target.value }
+                                      }))}
+                                      placeholder="Nama baru"
+                                      className="flex-1"
+                                    />
+                                    <Button 
+                                      size="sm" 
+                                      onClick={() => handleUpdateModel(managementMode.model.editId!, managementMode.model.newName)}
+                                    >
+                                      Simpan
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => setManagementMode(prev => ({
+                                        ...prev,
+                                        model: { show: true, newName: '' }
+                                      }))}
+                                    >
+                                      Batal
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
 
                     <div>
                       <Label htmlFor="category_id">Kategori *</Label>
-                      <Select 
-                        value={formData.category_id?.toString()} 
-                        onValueChange={(value) => setFormData(prev => ({ 
-                          ...prev, 
-                          category_id: parseInt(value) 
-                        }))}
-                      >
-                        <SelectTrigger id="category_id">
-                          <SelectValue placeholder="Pilih kategori" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.map(c => (
-                            <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-start gap-2">
+                        <Select 
+                          value={formData.category_id?.toString()} 
+                          onValueChange={(value) => setFormData(prev => ({ 
+                            ...prev, 
+                            category_id: parseInt(value) 
+                          }))}
+                        >
+                          <SelectTrigger id="category_id">
+                            <SelectValue placeholder="Pilih kategori" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories.filter(c => c.is_active).map(c => (
+                              <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {isAdmin && (
+                          <div className="flex gap-1">
+                            <Button variant="outline" size="sm" onClick={() => setShowAddCategory(s => !s)} title="Tambah Kategori">
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => setManagementMode(prev => ({ 
+                                ...prev, 
+                                category: { show: !prev.category.show, newName: '' } 
+                              }))}
+                              title="Kelola Kategori"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      {isAdmin && showAddCategory && (
+                        <div className="mt-2 flex gap-2">
+                          <Input 
+                            value={newCategoryName} 
+                            onChange={(e) => setNewCategoryName(e.target.value)} 
+                            placeholder="Nama kategori baru"
+                          />
+                          <Button size="sm" onClick={handleAddCategory}>Simpan</Button>
+                        </div>
+                      )}
+                      {isAdmin && managementMode.category.show && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                            <div className="p-4 border-b sticky top-0 bg-white">
+                              <div className="flex justify-between items-center">
+                                <h4 className="text-lg font-medium">Kelola Kategori</h4>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => setManagementMode(prev => ({ ...prev, category: { show: false, newName: '' } }))}
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="p-4">
+                              <div className="space-y-3">
+                                {categories.map(category => (
+                                  <div key={category.id} className={`flex items-center gap-3 p-3 border rounded-lg ${!category.is_active ? 'bg-gray-50 opacity-75' : ''}`}>
+                                    <div className="flex-1 flex items-center gap-2">
+                                      <span className={`font-medium ${!category.is_active ? 'text-gray-500 line-through' : ''}`}>
+                                        {category.name}
+                                      </span>
+                                      {!category.is_active && (
+                                        <Badge variant="secondary" className="text-xs">Nonaktif</Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      {category.is_active ? (
+                                        <>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => setManagementMode(prev => ({
+                                              ...prev,
+                                              category: { 
+                                                show: true, 
+                                                editId: category.id, 
+                                                newName: category.name 
+                                              }
+                                            }))}
+                                            title="Ubah Nama"
+                                          >
+                                            <Edit className="w-4 h-4" />
+                                          </Button>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleDeactivateCategory(category.id)}
+                                            title="Nonaktifkan"
+                                            className="text-red-600 hover:text-red-700"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                          <Select 
+                                            onValueChange={(value) => handleReassignCategory(category.id, parseInt(value))}
+                                          >
+                                            <SelectTrigger className="w-32">
+                                              <SelectValue placeholder="Gabung ke..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {categories.filter(c => c.id !== category.id && c.is_active).map(c => (
+                                                <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </>
+                                      ) : (
+                                        <Button 
+                                          size="sm" 
+                                          variant="outline"
+                                          onClick={() => handleReactivateCategory(category.id)}
+                                          title="Aktifkan Kembali"
+                                          className="text-green-600 hover:text-green-700"
+                                        >
+                                          <CheckCircle className="w-4 h-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              {managementMode.category.editId && (
+                                <div className="mt-4 p-4 border rounded-lg bg-blue-50">
+                                  <h5 className="text-sm font-medium mb-2">Edit Nama Kategori</h5>
+                                  <div className="flex gap-2">
+                                    <Input 
+                                      value={managementMode.category.newName}
+                                      onChange={(e) => setManagementMode(prev => ({
+                                        ...prev,
+                                        category: { ...prev.category, newName: e.target.value }
+                                      }))}
+                                      placeholder="Nama baru"
+                                      className="flex-1"
+                                    />
+                                    <Button 
+                                      size="sm" 
+                                      onClick={() => handleUpdateCategory(managementMode.category.editId!, managementMode.category.newName)}
+                                    >
+                                      Simpan
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => setManagementMode(prev => ({
+                                        ...prev,
+                                        category: { show: true, newName: '' }
+                                      }))}
+                                    >
+                                      Batal
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div>

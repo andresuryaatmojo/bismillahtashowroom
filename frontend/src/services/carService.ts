@@ -2,7 +2,7 @@
 // Service untuk operasi CRUD mobil dengan Supabase
 import { supabase } from '../lib/supabase';
 
-// ==================== INTERFACES ====================
+// ==================== INTERACES ====================
 export interface Car {
   id: string;
   seller_id: string;
@@ -397,7 +397,6 @@ class CarService {
       const { data, error } = await supabase
         .from('car_brands')
         .select('*')
-        .eq('is_active', true)
         .order('name');
 
       if (error) {
@@ -413,7 +412,30 @@ class CarService {
   }
 
   /**
-   * Get models by brand
+   * Get active brands only (for regular users)
+   */
+  async getActiveBrands(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('car_brands')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching active brands:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getActiveBrands:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get models by brand (all models including inactive)
    */
   async getModelsByBrand(brandId: number): Promise<any[]> {
     try {
@@ -421,7 +443,6 @@ class CarService {
         .from('car_models')
         .select('*')
         .eq('brand_id', brandId)
-        .eq('is_active', true)
         .order('name');
 
       if (error) {
@@ -437,6 +458,30 @@ class CarService {
   }
 
   /**
+   * Get active models by brand (for regular users)
+   */
+  async getActiveModelsByBrand(brandId: number): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('car_models')
+        .select('*')
+        .eq('brand_id', brandId)
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching active models:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getActiveModelsByBrand:', error);
+      return [];
+    }
+  }
+
+  /**
    * Get categories
    */
   async getCategories(): Promise<any[]> {
@@ -444,7 +489,6 @@ class CarService {
       const { data, error } = await supabase
         .from('car_categories')
         .select('*')
-        .eq('is_active', true)
         .order('name');
 
       if (error) {
@@ -455,6 +499,29 @@ class CarService {
       return data || [];
     } catch (error) {
       console.error('Error in getCategories:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get active categories only (for regular users)
+   */
+  async getActiveCategories(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('car_categories')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching active categories:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getActiveCategories:', error);
       return [];
     }
   }
@@ -871,77 +938,343 @@ class CarService {
   /**
    * Find or create brand by name
    */
-  async findOrCreateBrand(brandName: string): Promise<number | null> {
-    try {
-      // Check if brand exists
-      const { data: existing } = await supabase
-        .from('car_brands')
-        .select('id')
-        .ilike('name', brandName)
-        .single();
-
-      if (existing) {
-        return existing.id;
+  async findOrCreateBrand(brandName: string, isAdmin: boolean = false): Promise<number | null> {
+      try {
+          const name = brandName.trim();
+          if (!name) return null;
+  
+          // Cek brand yang sudah ada (aktif dan nonaktif)
+          const { data: existing } = await supabase
+              .from('car_brands')
+              .select('id, is_active')
+              .ilike('name', name)
+              .maybeSingle();
+  
+          if (existing?.id) {
+              // Jika brand ada dan aktif, return ID
+              if (existing.is_active) {
+                  return existing.id;
+              }
+              
+              // Jika brand ada tapi nonaktif, hanya admin yang bisa reaktivasi
+              if (isAdmin) {
+                  const { error: updateError } = await supabase
+                      .from('car_brands')
+                      .update({ is_active: true })
+                      .eq('id', existing.id);
+                  
+                  if (updateError) {
+                      console.error('Error reactivating brand:', updateError);
+                      return null;
+                  }
+              }
+              return existing.id;
+          }
+  
+          // Create new brand - admin membuat dengan is_active=true, user biasa dengan is_active=false
+          const { data: newBrand, error } = await supabase
+              .from('car_brands')
+              .insert([{ name, is_active: isAdmin }])
+              .select('id')
+              .single();
+  
+          if (error) {
+              console.error('Error creating brand:', error);
+              return null;
+          }
+  
+          return newBrand?.id ?? null;
+      } catch (error) {
+          console.error('Error in findOrCreateBrand:', error);
+          return null;
       }
+  }
 
-      // Create new brand
-      const { data: newBrand, error } = await supabase
-        .from('car_brands')
-        .insert([{ name: brandName, is_active: true }])
-        .select('id')
-        .single();
+  /**
+   * Make slug from string
+   */
+  private makeSlug(input: string): string {
+    return input
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 60);
+  }
 
-      if (error) {
-        console.error('Error creating brand:', error);
-        return null;
+  /**
+   * Find or create category by name
+   */
+  async findOrCreateCategory(categoryName: string, isAdmin: boolean = false): Promise<number | null> {
+      try {
+          const name = categoryName.trim();
+          if (!name) return null;
+
+          // Cek kategori yang sudah ada (aktif dan nonaktif)
+          const { data: existing } = await supabase
+              .from('car_categories')
+              .select('id, is_active')
+              .ilike('name', name)
+              .maybeSingle();
+
+          if (existing?.id) {
+              // Jika kategori ada dan aktif, return ID
+              if (existing.is_active) {
+                  return existing.id;
+              }
+              
+              // Jika kategori ada tapi nonaktif, hanya admin yang bisa reaktivasi
+              if (isAdmin) {
+                  const { error: updateError } = await supabase
+                      .from('car_categories')
+                      .update({ is_active: true })
+                      .eq('id', existing.id);
+                  
+                  if (updateError) {
+                      console.error('Error reactivating category:', updateError);
+                      return null;
+                  }
+              }
+              return existing.id;
+          }
+
+          // Buat slug dari nama kategori
+          const slug = this.makeSlug(name);
+
+          // Create new category - admin membuat dengan is_active=true, user biasa dengan is_active=false
+          const { data: newCategory, error } = await supabase
+              .from('car_categories')
+              .insert([{ name, slug, is_active: isAdmin }])
+              .select('id')
+              .single();
+
+          if (error) {
+              console.error('Error creating category:', error);
+              return null;
+          }
+
+          return newCategory?.id ?? null;
+      } catch (error) {
+          console.error('Error in findOrCreateCategory:', error);
+          return null;
       }
-
-      return newBrand.id;
-    } catch (error) {
-      console.error('Error in findOrCreateBrand:', error);
-      return null;
-    }
   }
 
   /**
    * Find or create model by name and brand
    */
-  async findOrCreateModel(modelName: string, brandId: number, categoryId?: number): Promise<number | null> {
+  async findOrCreateModel(modelName: string, brandId: number, categoryId?: number, isAdmin: boolean = false): Promise<number | null> {
+      try {
+          const name = modelName.trim();
+          if (!name || !brandId) return null;
+  
+          // Cek model yang sudah ada (aktif dan nonaktif)
+          const { data: existing } = await supabase
+              .from('car_models')
+              .select('id, is_active')
+              .eq('brand_id', brandId)
+              .ilike('name', name)
+              .maybeSingle();
+  
+          if (existing?.id) {
+              // Jika model ada dan aktif, return ID
+              if (existing.is_active) {
+                  return existing.id;
+              }
+              
+              // Jika model ada tapi nonaktif, hanya admin yang bisa reaktivasi
+              if (isAdmin) {
+                  const { error: updateError } = await supabase
+                      .from('car_models')
+                      .update({ is_active: true })
+                      .eq('id', existing.id);
+                  
+                  if (updateError) {
+                      console.error('Error reactivating model:', updateError);
+                      return null;
+                  }
+              }
+              return existing.id;
+          }
+  
+          // Create new model - admin membuat dengan is_active=true, user biasa dengan is_active=false
+          const { data: newModel, error } = await supabase
+              .from('car_models')
+              .insert([{ 
+                  name, 
+                  brand_id: brandId,
+                  category_id: categoryId || null,
+                  is_active: isAdmin 
+              }])
+              .select('id')
+              .single();
+  
+          if (error) {
+              console.error('Error creating model:', error);
+              return null;
+          }
+  
+          return newModel?.id ?? null;
+      } catch (error) {
+          console.error('Error in findOrCreateModel:', error);
+          return null;
+      }
+  }
+
+  // ===== BRAND MANAGEMENT =====
+  async updateBrandName(brandId: number, newName: string): Promise<boolean> {
     try {
-      // Check if model exists
-      const { data: existing } = await supabase
+      const name = newName.trim();
+      if (!brandId || !name) return false;
+      const { error } = await supabase
+        .from('car_brands')
+        .update({ name })
+        .eq('id', brandId);
+      if (error) { console.error('Error updating brand name:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in updateBrandName:', e); return false; }
+  }
+
+  async deactivateBrand(brandId: number): Promise<boolean> {
+    try {
+      if (!brandId) return false;
+      const { error } = await supabase
+        .from('car_brands')
+        .update({ is_active: false })
+        .eq('id', brandId);
+      if (error) { console.error('Error deactivating brand:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in deactivateBrand:', e); return false; }
+  }
+
+  async reassignCarsBrand(fromBrandId: number, toBrandId: number): Promise<boolean> {
+    try {
+      if (!fromBrandId || !toBrandId || fromBrandId === toBrandId) return false;
+      const { error } = await supabase
+        .from('cars')
+        .update({ brand_id: toBrandId })
+        .eq('brand_id', fromBrandId);
+      if (error) { console.error('Error reassigning cars brand:', error); return false; }
+      // Optional: nonaktifkan entri lama setelah reassign
+      await this.deactivateBrand(fromBrandId);
+      return true;
+    } catch (e) { console.error('Error in reassignCarsBrand:', e); return false; }
+  }
+
+  // ===== MODEL MANAGEMENT =====
+  async updateModelName(modelId: number, newName: string): Promise<boolean> {
+    try {
+      const name = newName.trim();
+      if (!modelId || !name) return false;
+      const { error } = await supabase
         .from('car_models')
-        .select('id')
-        .eq('brand_id', brandId)
-        .ilike('name', modelName)
-        .single();
+        .update({ name })
+        .eq('id', modelId);
+      if (error) { console.error('Error updating model name:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in updateModelName:', e); return false; }
+  }
 
-      if (existing) {
-        return existing.id;
-      }
-
-      // Create new model
-      const { data: newModel, error } = await supabase
+  async deactivateModel(modelId: number): Promise<boolean> {
+    try {
+      if (!modelId) return false;
+      const { error } = await supabase
         .from('car_models')
-        .insert([{ 
-          name: modelName, 
-          brand_id: brandId,
-          category_id: categoryId || null,
-          is_active: true 
-        }])
-        .select('id')
-        .single();
+        .update({ is_active: false })
+        .eq('id', modelId);
+      if (error) { console.error('Error deactivating model:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in deactivateModel:', e); return false; }
+  }
 
-      if (error) {
-        console.error('Error creating model:', error);
-        return null;
-      }
+  async reassignCarsModel(fromModelId: number, toModelId: number): Promise<boolean> {
+    try {
+      if (!fromModelId || !toModelId || fromModelId === toModelId) return false;
+      const { error } = await supabase
+        .from('cars')
+        .update({ model_id: toModelId })
+        .eq('model_id', fromModelId);
+      if (error) { console.error('Error reassigning cars model:', error); return false; }
+      await this.deactivateModel(fromModelId);
+      return true;
+    } catch (e) { console.error('Error in reassignCarsModel:', e); return false; }
+  }
 
-      return newModel.id;
-    } catch (error) {
-      console.error('Error in findOrCreateModel:', error);
-      return null;
-    }
+  // ===== CATEGORY MANAGEMENT =====
+  async updateCategoryName(categoryId: number, newName: string): Promise<boolean> {
+    try {
+      const name = newName.trim();
+      if (!categoryId || !name) return false;
+      const slug = this.makeSlug(name);
+      const { error } = await supabase
+        .from('car_categories')
+        .update({ name, slug })
+        .eq('id', categoryId);
+      if (error) { console.error('Error updating category name:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in updateCategoryName:', e); return false; }
+  }
+
+  async deactivateCategory(categoryId: number): Promise<boolean> {
+    try {
+      if (!categoryId) return false;
+      const { error } = await supabase
+        .from('car_categories')
+        .update({ is_active: false })
+        .eq('id', categoryId);
+      if (error) { console.error('Error deactivating category:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in deactivateCategory:', e); return false; }
+  }
+
+  async reassignCarsCategory(fromCategoryId: number, toCategoryId: number): Promise<boolean> {
+    try {
+      if (!fromCategoryId || !toCategoryId || fromCategoryId === toCategoryId) return false;
+      const { error } = await supabase
+        .from('cars')
+        .update({ category_id: toCategoryId })
+        .eq('category_id', fromCategoryId);
+      if (error) { console.error('Error reassigning cars category:', error); return false; }
+      await this.deactivateCategory(fromCategoryId);
+      return true;
+    } catch (e) { console.error('Error in reassignCarsCategory:', e); return false; }
+  }
+
+  // Reactivation methods
+  async reactivateBrand(brandId: number): Promise<boolean> {
+    try {
+      if (!brandId) return false;
+      const { error } = await supabase
+        .from('car_brands')
+        .update({ is_active: true })
+        .eq('id', brandId);
+      if (error) { console.error('Error reactivating brand:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in reactivateBrand:', e); return false; }
+  }
+
+  async reactivateModel(modelId: number): Promise<boolean> {
+    try {
+      if (!modelId) return false;
+      const { error } = await supabase
+        .from('car_models')
+        .update({ is_active: true })
+        .eq('id', modelId);
+      if (error) { console.error('Error reactivating model:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in reactivateModel:', e); return false; }
+  }
+
+  async reactivateCategory(categoryId: number): Promise<boolean> {
+    try {
+      if (!categoryId) return false;
+      const { error } = await supabase
+        .from('car_categories')
+        .update({ is_active: true })
+        .eq('id', categoryId);
+      if (error) { console.error('Error reactivating category:', error); return false; }
+      return true;
+    } catch (e) { console.error('Error in reactivateCategory:', e); return false; }
   }
 }
 

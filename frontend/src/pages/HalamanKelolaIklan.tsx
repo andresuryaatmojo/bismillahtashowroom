@@ -72,6 +72,7 @@ interface CarFormData {
 const HalamanKelolaIklan: React.FC = () => {
   const navigate = useNavigate();
   const { user, isLoading: authLoading } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner';
   
   const [cars, setCars] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +99,14 @@ const HalamanKelolaIklan: React.FC = () => {
   const [brands, setBrands] = useState<any[]>([]);
   const [models, setModels] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  
+  // Tambahan state untuk quick-add admin
+  const [showAddBrand, setShowAddBrand] = useState(false);
+  const [newBrandName, setNewBrandName] = useState('');
+  const [showAddModel, setShowAddModel] = useState(false);
+  const [newModelName, setNewModelName] = useState('');
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   
   // Image upload
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
@@ -405,6 +414,58 @@ const HalamanKelolaIklan: React.FC = () => {
       alert(err.message || 'Gagal memilih paket');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Handler quick-add
+  const handleAddBrand = async () => {
+    if (!newBrandName.trim()) return;
+    const id = await carService.findOrCreateBrand(newBrandName.trim(), isAdmin);
+    if (id) {
+      const brandsData = await carService.getBrands();
+      setBrands(brandsData);
+      setFormData(prev => ({ ...prev, brand_id: id, model_id: undefined }));
+      setNewBrandName('');
+      setShowAddBrand(false);
+      
+      // Tampilkan notifikasi berdasarkan status user
+      if (!isAdmin) {
+        alert('Brand baru telah ditambahkan dan menunggu persetujuan admin.');
+      }
+    }
+  };
+
+  const handleAddModel = async () => {
+    if (!formData.brand_id || !newModelName.trim()) return;
+    const id = await carService.findOrCreateModel(newModelName.trim(), formData.brand_id, formData.category_id, isAdmin);
+    if (id) {
+      const modelsData = await carService.getModelsByBrand(formData.brand_id);
+      setModels(modelsData);
+      setFormData(prev => ({ ...prev, model_id: id }));
+      setNewModelName('');
+      setShowAddModel(false);
+      
+      // Tampilkan notifikasi berdasarkan status user
+      if (!isAdmin) {
+        alert('Model baru telah ditambahkan dan menunggu persetujuan admin.');
+      }
+    }
+  };
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return;
+    const id = await carService.findOrCreateCategory(newCategoryName.trim(), isAdmin);
+    if (id) {
+      const categoriesData = await carService.getCategories();
+      setCategories(categoriesData);
+      setFormData(prev => ({ ...prev, category_id: id }));
+      setNewCategoryName('');
+      setShowAddCategory(false);
+      
+      // Tampilkan notifikasi berdasarkan status user
+      if (!isAdmin) {
+        alert('Kategori baru telah ditambahkan dan menunggu persetujuan admin.');
+      }
     }
   };
 
@@ -979,67 +1040,127 @@ const HalamanKelolaIklan: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label>Merek *</Label>
-                      <Select 
-                        value={formData.brand_id?.toString()} 
-                        onValueChange={(value) => setFormData(prev => ({ 
-                          ...prev, 
-                          brand_id: parseInt(value), 
-                          model_id: undefined 
-                        }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Pilih merek" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {brands.map(b => (
-                            <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-start gap-2">
+                        <Select 
+                          value={formData.brand_id?.toString()} 
+                          onValueChange={(value) => setFormData(prev => ({ 
+                            ...prev, 
+                            brand_id: parseInt(value), 
+                            model_id: undefined 
+                          }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Pilih merek" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {brands.filter(b => b.is_active || (!b.is_active && b.id === formData.brand_id)).map(b => (
+                              <SelectItem key={b.id} value={b.id.toString()}>
+                                {b.name}
+                                {!b.is_active && (
+                                  <span className="text-xs text-orange-500 ml-2">(Menunggu Persetujuan)</span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddBrand(s => !s)}>
+                          <Plus className="w-4 h-4" />
+                        </Button>
+                      </div>
+                      {showAddBrand && (
+                        <div className="mt-2 flex gap-2">
+                          <Input 
+                            value={newBrandName} 
+                            onChange={(e) => setNewBrandName(e.target.value)} 
+                            placeholder="Nama merek baru"
+                          />
+                          <Button size="sm" onClick={handleAddBrand}>Simpan</Button>
+                        </div>
+                      )}
                     </div>
 
                     <div>
                       <Label>Model *</Label>
-                      <Select 
-                        value={formData.model_id?.toString()} 
-                        onValueChange={(value) => setFormData(prev => ({ 
-                          ...prev, 
-                          model_id: parseInt(value) 
-                        }))}
-                        disabled={!formData.brand_id}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Pilih model" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {models.map(m => (
-                            <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-start gap-2">
+                        <Select 
+                          value={formData.model_id?.toString()} 
+                          onValueChange={(value) => setFormData(prev => ({ 
+                            ...prev, 
+                            model_id: parseInt(value) 
+                          }))}
+                          disabled={!formData.brand_id}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Pilih model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {models.filter(m => m.is_active || (!m.is_active && m.id === formData.model_id)).map(m => (
+                              <SelectItem key={m.id} value={m.id.toString()}>
+                                {m.name}
+                                {!m.is_active && (
+                                  <span className="text-xs text-orange-500 ml-2">(Menunggu Persetujuan)</span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddModel(s => !s)} disabled={!formData.brand_id}>
+                          <Plus className="w-4 h-4" />
+                        </Button>
+                      </div>
                       {!formData.brand_id && (
                         <p className="text-xs text-gray-500 mt-1">Pilih merek terlebih dahulu</p>
+                      )}
+                      {showAddModel && (
+                        <div className="mt-2 flex gap-2">
+                          <Input 
+                            value={newModelName} 
+                            onChange={(e) => setNewModelName(e.target.value)} 
+                            placeholder="Nama model baru"
+                          />
+                          <Button size="sm" onClick={handleAddModel} disabled={!formData.brand_id}>Simpan</Button>
+                        </div>
                       )}
                     </div>
 
                     <div>
                       <Label>Kategori *</Label>
-                      <Select 
-                        value={formData.category_id?.toString()} 
-                        onValueChange={(value) => setFormData(prev => ({ 
-                          ...prev, 
-                          category_id: parseInt(value) 
-                        }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Pilih kategori" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.map(c => (
-                            <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-start gap-2">
+                        <Select 
+                          value={formData.category_id?.toString()} 
+                          onValueChange={(value) => setFormData(prev => ({ 
+                            ...prev, 
+                            category_id: parseInt(value) 
+                          }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Pilih kategori" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories.filter(c => c.is_active || (!c.is_active && c.id === formData.category_id)).map(c => (
+                              <SelectItem key={c.id} value={c.id.toString()}>
+                                {c.name}
+                                {!c.is_active && (
+                                  <span className="text-xs text-orange-500 ml-2">(Menunggu Persetujuan)</span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddCategory(s => !s)}>
+                          <Plus className="w-4 h-4" />
+                        </Button>
+                      </div>
+                      {showAddCategory && (
+                        <div className="mt-2 flex gap-2">
+                          <Input 
+                            value={newCategoryName} 
+                            onChange={(e) => setNewCategoryName(e.target.value)} 
+                            placeholder="Nama kategori baru"
+                          />
+                          <Button size="sm" onClick={handleAddCategory}>Simpan</Button>
+                        </div>
+                      )}
                     </div>
 
                     <div>
