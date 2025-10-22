@@ -41,6 +41,32 @@ interface CarFormData {
   location_city: string;
   location_province?: string;
   seller_type: 'showroom' | 'external';
+  // Tambahan untuk Detail Mobil
+  vin_number?: string;
+  seat_capacity?: number;
+  registration_type?: 'perorangan' | 'perusahaan';
+  registration_date?: string;
+  stnk_expiry_date?: string;
+  has_spare_key: boolean;
+  has_warranty: boolean;
+  has_service_record: boolean;
+  // Fitur / Spesifikasi
+  specifications?: {
+    has_airbags: boolean;
+    has_abs: boolean;
+    has_parking_sensor: boolean;
+    has_parking_camera: boolean;
+    has_cruise_control: boolean;
+    has_keyless_entry: boolean;
+    has_push_start: boolean;
+    has_sunroof: boolean;
+    has_bluetooth: boolean;
+    has_usb_port: boolean;
+    has_rear_ac: boolean;
+    has_wireless_charging: boolean;
+    has_led_drl: boolean;
+    has_modern_head_unit: boolean;
+  };
 }
 
 const HalamanKelolaIklan: React.FC = () => {
@@ -106,7 +132,32 @@ const HalamanKelolaIklan: React.FC = () => {
     description: '',
     location_city: '',
     location_province: '',
-    seller_type: 'external'
+    seller_type: 'external',
+    // Tambahkan nilai default untuk Detail & Fitur
+    vin_number: '',
+    seat_capacity: 5,
+    registration_type: 'perorangan',
+    registration_date: '',
+    stnk_expiry_date: '',
+    has_spare_key: false,
+    has_warranty: false,
+    has_service_record: false,
+    specifications: {
+      has_airbags: false,
+      has_abs: false,
+      has_parking_sensor: false,
+      has_parking_camera: false,
+      has_cruise_control: false,
+      has_keyless_entry: false,
+      has_push_start: false,
+      has_sunroof: false,
+      has_bluetooth: false,
+      has_usb_port: false,
+      has_rear_ac: false,
+      has_wireless_charging: false,
+      has_led_drl: false,
+      has_modern_head_unit: false,
+    },
   });
 
   // Check seller mode
@@ -273,6 +324,11 @@ const HalamanKelolaIklan: React.FC = () => {
           throw new Error(result.error || 'Gagal update mobil');
         }
         carId = selectedCar.id;
+
+        // Simpan/Update spesifikasi
+        if (formData.specifications) {
+          await carService.updateCarSpecifications(carId, formData.specifications);
+        }
         
         await loadCars();
         resetForm();
@@ -287,6 +343,11 @@ const HalamanKelolaIklan: React.FC = () => {
         }
         carId = result.data.id;
         setNewCarId(carId);
+
+        // Simpan spesifikasi
+        if (formData.specifications) {
+          await carService.createCarSpecifications(carId, formData.specifications);
+        }
 
         // Upload images first
         if (selectedImages.length > 0) {
@@ -434,7 +495,32 @@ const HalamanKelolaIklan: React.FC = () => {
       description: '',
       location_city: '',
       location_province: '',
-      seller_type: 'external'
+      seller_type: 'external',
+      // Pastikan field Detail & Fitur ada
+      vin_number: '',
+      seat_capacity: 5,
+      registration_type: 'perorangan',
+      registration_date: '',
+      stnk_expiry_date: '',
+      has_spare_key: false,
+      has_warranty: false,
+      has_service_record: false,
+      specifications: {
+        has_airbags: false,
+        has_abs: false,
+        has_parking_sensor: false,
+        has_parking_camera: false,
+        has_cruise_control: false,
+        has_keyless_entry: false,
+        has_push_start: false,
+        has_sunroof: false,
+        has_bluetooth: false,
+        has_usb_port: false,
+        has_rear_ac: false,
+        has_wireless_charging: false,
+        has_led_drl: false,
+        has_modern_head_unit: false,
+      },
     });
     setSelectedCar(null);
     setIsEditMode(false);
@@ -450,30 +536,70 @@ const HalamanKelolaIklan: React.FC = () => {
   };
 
   // Handle edit
-  const handleEdit = (car: any) => {
+  const handleEdit = async (car: any) => {
     setSelectedCar(car);
-    setFormData({
-      title: car.title,
-      brand_id: car.brand_id,
-      model_id: car.model_id,
-      category_id: car.category_id,
-      year: car.year,
-      price: car.price,
-      is_negotiable: car.is_negotiable,
-      market_price: car.market_price,
-      condition: car.condition,
-      color: car.color,
-      mileage: car.mileage,
-      transmission: car.transmission,
-      fuel_type: car.fuel_type,
-      engine_capacity: car.engine_capacity,
-      description: car.description || '',
-      location_city: car.location_city,
-      location_province: car.location_province || '',
-      seller_type: car.seller_type
-    });
-    setIsEditMode(true);
-    setShowModal(true);
+    setLoading(true);
+    try {
+      // Ambil data lengkap termasuk spesifikasi
+      const full = await carService.getCarById(car.id);
+      const specs = full?.car_specifications || null;
+
+      setFormData({
+        title: car.title,
+        brand_id: car.brand_id,
+        model_id: car.model_id,
+        category_id: car.category_id,
+        year: car.year,
+        price: car.price,
+        is_negotiable: car.is_negotiable,
+        market_price: car.market_price,
+        condition: car.condition,
+        color: car.color,
+        mileage: car.mileage,
+        transmission: car.transmission,
+        fuel_type: car.fuel_type,
+        engine_capacity: car.engine_capacity,
+        description: car.description || '',
+        location_city: car.location_city,
+        location_province: car.location_province || '',
+        seller_type: car.seller_type,
+        // Field Detail & Fitur dengan fallback aman
+        vin_number: car.vin_number || '',
+        seat_capacity: car.seat_capacity ?? 5,
+        registration_type: car.registration_type || 'perorangan',
+        registration_date: car.registration_date || '',
+        stnk_expiry_date: car.stnk_expiry_date || '',
+        has_spare_key: !!car.has_spare_key,
+        has_warranty: !!car.has_warranty,
+        has_service_record: !!car.has_service_record,
+        specifications: {
+          has_airbags: !!specs?.has_airbags,
+          has_abs: !!specs?.has_abs,
+          has_parking_sensor: !!specs?.has_parking_sensor,
+          has_parking_camera: !!specs?.has_parking_camera,
+          has_cruise_control: !!specs?.has_cruise_control,
+          has_keyless_entry: !!specs?.has_keyless_entry,
+          has_push_start: !!specs?.has_push_start,
+          has_sunroof: !!specs?.has_sunroof,
+          has_bluetooth: !!specs?.has_bluetooth,
+          has_usb_port: !!specs?.has_usb_port,
+          has_rear_ac: !!specs?.has_rear_ac,
+          has_wireless_charging: !!specs?.has_wireless_charging,
+          has_led_drl: !!specs?.has_led_drl,
+          has_modern_head_unit: !!specs?.has_modern_head_unit,
+        },
+      });
+
+      setIsEditMode(true);
+      setShowModal(true);
+    } catch (err) {
+      console.error('Error loading car details:', err);
+      // Tetap buka modal agar user bisa lanjut mengedit
+      setIsEditMode(true);
+      setShowModal(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handle add new
@@ -841,9 +967,10 @@ const HalamanKelolaIklan: React.FC = () => {
 
             <div className="p-6 max-h-[calc(100vh-200px)] overflow-y-auto">
               <Tabs defaultValue="basic">
-                <TabsList className="grid w-full grid-cols-3 mb-6">
+                <TabsList className="grid w-full grid-cols-4 mb-6">
                   <TabsTrigger value="basic">Informasi Dasar</TabsTrigger>
                   <TabsTrigger value="specs">Spesifikasi</TabsTrigger>
+                  <TabsTrigger value="details">Detail & Fitur</TabsTrigger>
                   <TabsTrigger value="images">Gambar</TabsTrigger>
                 </TabsList>
 
@@ -1066,6 +1193,338 @@ const HalamanKelolaIklan: React.FC = () => {
                         onChange={(e) => setFormData(prev => ({ ...prev, engine_capacity: parseInt(e.target.value) || 0 }))}
                         placeholder="1300"
                       />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                {/* Tab: Details & Fitur */}
+                <TabsContent value="details" className="space-y-6">
+                  {/* Detail Mobil */}
+                  <div>
+                    <h3 className="font-semibold text-lg mb-4">Detail Mobil</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="vin_number">Nomor Rangka/VIN</Label>
+                        <Input
+                          id="vin_number"
+                          value={formData.vin_number || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, vin_number: e.target.value }))}
+                          placeholder="Contoh: MHKA1BA1J0K123456"
+                          maxLength={17}
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="seat_capacity">Jumlah Tempat Duduk *</Label>
+                        <Select
+                          value={formData.seat_capacity?.toString() || '5'}
+                          onValueChange={(value) => setFormData(prev => ({ ...prev, seat_capacity: parseInt(value) }))}
+                        >
+                          <SelectTrigger id="seat_capacity">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="2">2 Kursi</SelectItem>
+                            <SelectItem value="4">4 Kursi</SelectItem>
+                            <SelectItem value="5">5 Kursi</SelectItem>
+                            <SelectItem value="6">6 Kursi</SelectItem>
+                            <SelectItem value="7">7 Kursi</SelectItem>
+                            <SelectItem value="8">8 Kursi</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="registration_type">Tipe Registrasi *</Label>
+                        <Select
+                          value={formData.registration_type || 'perorangan'}
+                          onValueChange={(value: any) => setFormData(prev => ({ ...prev, registration_type: value }))}
+                        >
+                          <SelectTrigger id="registration_type">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="perorangan">Perorangan</SelectItem>
+                            <SelectItem value="perusahaan">Perusahaan</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="registration_date">Tanggal Registrasi</Label>
+                        <Input
+                          id="registration_date"
+                          type="date"
+                          value={formData.registration_date || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, registration_date: e.target.value }))}
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="stnk_expiry_date">Masa Berlaku STNK</Label>
+                        <Input
+                          id="stnk_expiry_date"
+                          type="date"
+                          value={formData.stnk_expiry_date || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, stnk_expiry_date: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="has_spare_key"
+                          checked={formData.has_spare_key || false}
+                          onChange={(e) => setFormData(prev => ({ ...prev, has_spare_key: e.target.checked }))}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <Label htmlFor="has_spare_key" className="cursor-pointer">
+                          Ada Kunci Cadangan
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="has_warranty"
+                          checked={formData.has_warranty || false}
+                          onChange={(e) => setFormData(prev => ({ ...prev, has_warranty: e.target.checked }))}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <Label htmlFor="has_warranty" className="cursor-pointer">
+                          Ada Garansi Pabrik
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="has_service_record"
+                          checked={formData.has_service_record || false}
+                          onChange={(e) => setFormData(prev => ({ ...prev, has_service_record: e.target.checked }))}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <Label htmlFor="has_service_record" className="cursor-pointer">
+                          Ada Service Record
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Fitur Mobil */}
+                  <div>
+                    <h3 className="font-semibold text-lg mb-4">Fitur Mobil</h3>
+
+                    {/* Keselamatan */}
+                    <div className="mb-4">
+                      <h4 className="font-medium mb-2">Keselamatan</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_airbags"
+                            checked={formData.specifications?.has_airbags || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_airbags: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_airbags" className="cursor-pointer">Airbag</Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_abs"
+                            checked={formData.specifications?.has_abs || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_abs: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_abs" className="cursor-pointer">ABS</Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_parking_sensor"
+                            checked={formData.specifications?.has_parking_sensor || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_parking_sensor: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_parking_sensor" className="cursor-pointer">Sensor Parkir</Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_parking_camera"
+                            checked={formData.specifications?.has_parking_camera || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_parking_camera: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_parking_camera" className="cursor-pointer">Kamera Mundur</Label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Kenyamanan */}
+                    <div className="mb-4">
+                      <h4 className="font-medium mb-2">Kenyamanan</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_cruise_control"
+                            checked={formData.specifications?.has_cruise_control || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_cruise_control: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_cruise_control" className="cursor-pointer">Cruise Control</Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_keyless_entry"
+                            checked={formData.specifications?.has_keyless_entry || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_keyless_entry: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_keyless_entry" className="cursor-pointer">Keyless Entry</Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_push_start"
+                            checked={formData.specifications?.has_push_start || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_push_start: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_push_start" className="cursor-pointer">Push Start Button</Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_sunroof"
+                            checked={formData.specifications?.has_sunroof || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_sunroof: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_sunroof" className="cursor-pointer">Sunroof</Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_rear_ac"
+                            checked={formData.specifications?.has_rear_ac || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_rear_ac: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_rear_ac" className="cursor-pointer">AC Belakang</Label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Lainnya */}
+                    <div>
+                      <h4 className="font-medium mb-2">Lainnya</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_bluetooth"
+                            checked={formData.specifications?.has_bluetooth || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_bluetooth: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_bluetooth" className="cursor-pointer">Bluetooth</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_usb_port"
+                            checked={formData.specifications?.has_usb_port || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_usb_port: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_usb_port" className="cursor-pointer">USB Port</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_wireless_charging"
+                            checked={formData.specifications?.has_wireless_charging || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_wireless_charging: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_wireless_charging" className="cursor-pointer">Wireless Charging</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_led_drl"
+                            checked={formData.specifications?.has_led_drl || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_led_drl: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_led_drl" className="cursor-pointer">LED DRL</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="has_modern_head_unit"
+                            checked={formData.specifications?.has_modern_head_unit || false}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              specifications: { ...prev.specifications!, has_modern_head_unit: e.target.checked }
+                            }))}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <Label htmlFor="has_modern_head_unit" className="cursor-pointer">Head Unit Modern</Label>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </TabsContent>

@@ -283,34 +283,21 @@ class CarService {
         supabase.from('car_categories').select('*').eq('id', car.category_id).single(),
         supabase.from('car_images').select('*').eq('car_id', car.id).order('display_order'),
         supabase.from('car_specifications').select('*').eq('car_id', car.id).single(),
-        supabase.from('users').select('id, username, full_name, seller_rating, seller_type, phone_number, city').eq('id', car.seller_id).single()
+        supabase.from('users').select('id, username, full_name, seller_rating, seller_type').eq('id', car.seller_id).single()
       ]);
 
       // Combine all data
-      const carWithDetails = {
+      const result = {
         ...car,
-        car_brands: brand.data || { id: 0, name: 'Unknown', logo_url: null, country: null },
-        car_models: model.data || { id: 0, name: 'Unknown', brand_id: 0 },
-        car_categories: category.data || { id: 0, name: 'Unknown', slug: 'unknown' },
+        car_brands: brand.data || null,
+        car_models: model.data || null,
+        car_categories: category.data || null,
         car_images: images.data || [],
         car_specifications: specs.data || null,
-        users: seller.data || { 
-          id: car.seller_id, 
-          username: '', 
-          full_name: 'Seller', 
-          seller_rating: 0,
-          seller_type: null,
-          phone_number: null,
-          city: null
-        }
+        users: seller.data || null
       };
 
-      // Increment view count (fire and forget)
-      this.incrementViewCount(carId).catch(err => 
-        console.error('Error incrementing view:', err)
-      );
-
-      return carWithDetails;
+      return result;
     } catch (error) {
       console.error('Error in getCarById:', error);
       return null;
@@ -318,135 +305,162 @@ class CarService {
   }
 
   /**
-   * Get featured cars (mobil unggulan)
-   */
-  async getFeaturedCars(limit: number = 8): Promise<CarWithRelations[]> {
-    try {
-      const { data, error } = await supabase
-        .from('cars')
-        .select(`
-          *,
-          car_brands (id, name, logo_url),
-          car_models (id, name),
-          car_categories (id, name, slug),
-          car_images (id, image_url, is_primary, display_order),
-          users (id, username, full_name, seller_rating)
-        `)
-        .eq('status', 'available')
-        .eq('is_featured', true)
-        .order('posted_at', { ascending: false })
-        .limit(limit);
-
-      if (error) throw error;
-
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching featured cars:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get brands untuk filter
-   */
-  async getBrands(): Promise<Array<{ id: number; name: string; logo_url?: string }>> {
-    try {
-      const { data, error } = await supabase
-        .from('car_brands')
-        .select('id, name, logo_url')
-        .eq('is_active', true)
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching brands:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get models by brand ID
-   */
-  async getModelsByBrand(brandId: number): Promise<Array<{ id: number; name: string }>> {
-    try {
-      const { data, error } = await supabase
-        .from('car_models')
-        .select('id, name')
-        .eq('brand_id', brandId)
-        .eq('is_active', true)
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching models:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get categories untuk filter
-   */
-  async getCategories(): Promise<Array<{ id: number; name: string; slug: string }>> {
-    try {
-      const { data, error } = await supabase
-        .from('car_categories')
-        .select('id, name, slug')
-        .eq('is_active', true)
-        .order('display_order', { ascending: true });
-
-      if (error) throw error;
-
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Search cars by query
-   */
-  async searchCars(query: string, limit: number = 10): Promise<CarWithRelations[]> {
-    try {
-      const { data, error } = await supabase
-        .from('cars')
-        .select(`
-          *,
-          car_brands (id, name),
-          car_models (id, name),
-          car_categories (id, name),
-          car_images (id, image_url, is_primary)
-        `)
-        .eq('status', 'available')
-        .or(`title.ilike.%${query}%,description.ilike.%${query}%`)
-        .limit(limit);
-
-      if (error) throw error;
-
-      return data || [];
-    } catch (error) {
-      console.error('Error searching cars:', error);
-      return [];
-    }
-  }
-
-  /**
    * Increment view count
    */
-  private async incrementViewCount(carId: string): Promise<void> {
+  async incrementViewCount(carId: string): Promise<void> {
     try {
-      await supabase.rpc('increment_car_views', { car_id: carId });
+      await supabase.rpc('increment_view_count', { car_id: carId });
     } catch (error) {
       console.error('Error incrementing view count:', error);
     }
   }
 
   /**
-   * Get price statistics untuk filter
+   * Increment contact count
+   */
+  async incrementContactCount(carId: string): Promise<void> {
+    try {
+      await supabase.rpc('increment_contact_count', { car_id: carId });
+    } catch (error) {
+      console.error('Error incrementing contact count:', error);
+    }
+  }
+
+  /**
+   * Get featured cars
+   */
+  async getFeaturedCars(limit: number = 6): Promise<CarWithRelations[]> {
+    try {
+      const { data, error } = await supabase
+        .from('cars')
+        .select(`
+          *,
+          car_brands (id, name, logo_url, country),
+          car_models (id, name, brand_id),
+          car_categories (id, name, slug),
+          car_images (id, image_url, is_primary, display_order),
+          users (id, username, full_name, seller_rating, seller_type)
+        `)
+        .eq('status', 'available')
+        .eq('is_featured', true)
+        .order('posted_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('Error fetching featured cars:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getFeaturedCars:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get latest cars
+   */
+  async getLatestCars(limit: number = 12): Promise<CarWithRelations[]> {
+    try {
+      const { data, error } = await supabase
+        .from('cars')
+        .select(`
+          *,
+          car_brands (id, name, logo_url, country),
+          car_models (id, name, brand_id),
+          car_categories (id, name, slug),
+          car_images (id, image_url, is_primary, display_order),
+          users (id, username, full_name, seller_rating, seller_type)
+        `)
+        .eq('status', 'available')
+        .order('posted_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('Error fetching latest cars:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getLatestCars:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get brands
+   */
+  async getBrands(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('car_brands')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching brands:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getBrands:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get models by brand
+   */
+  async getModelsByBrand(brandId: number): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('car_models')
+        .select('*')
+        .eq('brand_id', brandId)
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching models:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getModelsByBrand:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get categories
+   */
+  async getCategories(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('car_categories')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching categories:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getCategories:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get price range for filters
    */
   async getPriceRange(): Promise<{ min: number; max: number }> {
     try {
@@ -456,7 +470,10 @@ class CarService {
         .eq('status', 'available')
         .order('price', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching price range:', error);
+        return { min: 0, max: 0 };
+      }
 
       if (!data || data.length === 0) {
         return { min: 0, max: 0 };
@@ -477,12 +494,15 @@ class CarService {
   /**
    * Create new car (Admin only)
    */
-  async createCar(carData: Partial<Car>): Promise<{ success: boolean; data?: any; error?: string }> {
+  async createCar(carData: any): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
+      // HAPUS specifications dari carData
+      const { specifications, ...cleanCarData } = carData;
+
       const { data, error } = await supabase
         .from('cars')
         .insert([{
-          ...carData,
+          ...cleanCarData,
           view_count: 0,
           contact_count: 0,
           wishlist_count: 0,
@@ -510,12 +530,15 @@ class CarService {
   /**
    * Update car (Admin only)
    */
-  async updateCar(carId: string, carData: Partial<Car>): Promise<{ success: boolean; data?: any; error?: string }> {
+  async updateCar(carId: string, carData: any): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
+      // HAPUS specifications dari carData
+      const { specifications, ...cleanCarData } = carData;
+
       const { data, error } = await supabase
         .from('cars')
         .update({
-          ...carData,
+          ...cleanCarData,
           updated_at: new Date().toISOString()
         })
         .eq('id', carId)
@@ -751,6 +774,97 @@ class CarService {
     } catch (error) {
       console.error('Error in getAllCarsAdmin:', error);
       return { data: [], total: 0, page: 1, limit: 20, total_pages: 0 };
+    }
+  }
+
+  /**
+   * Upload multiple car images
+   */
+  async uploadCarImages(carId: string, files: File[]): Promise<{ success: boolean; error?: string }> {
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const uploadResult = await this.uploadCarImage(file, carId);
+        
+        if (!uploadResult.success) {
+          return { success: false, error: uploadResult.error };
+        }
+
+        const saveResult = await this.saveCarImageToDb(
+          carId, 
+          uploadResult.url!, 
+          i === 0, // First image is primary
+          i
+        );
+
+        if (!saveResult.success) {
+          return { success: false, error: saveResult.error };
+        }
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error uploading multiple images:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Create car specifications
+   */
+  async createCarSpecifications(carId: string, specifications: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase
+        .from('car_specifications')
+        .insert([{
+          car_id: carId,
+          ...specifications
+        }]);
+
+      if (error) {
+        console.error('Error creating specifications:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error in createCarSpecifications:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update car specifications
+   */
+  async updateCarSpecifications(carId: string, specifications: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Check if specifications exist
+      const { data: existing } = await supabase
+        .from('car_specifications')
+        .select('id')
+        .eq('car_id', carId)
+        .single();
+
+      if (existing) {
+        // Update existing
+        const { error } = await supabase
+          .from('car_specifications')
+          .update(specifications)
+          .eq('car_id', carId);
+
+        if (error) {
+          console.error('Error updating specifications:', error);
+          return { success: false, error: error.message };
+        }
+      } else {
+        // Create new if not exists
+        return await this.createCarSpecifications(carId, specifications);
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error in updateCarSpecifications:', error);
+      return { success: false, error: error.message };
     }
   }
 
