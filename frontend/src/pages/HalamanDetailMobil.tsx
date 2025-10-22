@@ -13,7 +13,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { Separator } from '../components/ui/separator';
 import { 
   Car, Phone, MapPin, Star, Calendar, Clock, CheckCircle, 
-  Fuel, Gauge, Settings, Zap, Shield, Award, CreditCard, ArrowLeft, Loader2
+  Fuel, Gauge, Settings, Zap, Shield, Award, CreditCard, ArrowLeft, Loader2,
+  Camera, KeyRound, Power, Bluetooth, Usb, Fan, Wifi, Sun, Monitor, Radar
 } from 'lucide-react';
 import { carService } from '../services/carService';
 import { testDriveService } from '../services/testDriveService';
@@ -160,27 +161,39 @@ const HalamanDetailMobil: React.FC = () => {
 
   // Map fuel types
   const getFuelTypeLabel = (type: string) => {
-    const labels: any = {
-      'gasoline': 'Bensin',
-      'diesel': 'Diesel',
-      'electric': 'Listrik',
-      'hybrid': 'Hybrid',
-      'phev': 'PHEV'
+    const labels: Record<string, string> = {
+      gasoline: 'Bensin',
+      diesel: 'Diesel',
+      electric: 'Listrik',
+      hybrid: 'Hybrid',
+      phev: 'PHEV'
     };
     return labels[type] || type;
   };
 
   // Map transmission types
   const getTransmissionLabel = (type: string) => {
-    const labels: any = {
-      'manual': 'Manual',
-      'automatic': 'Automatic',
-      'cvt': 'CVT',
-      'dct': 'DCT',
-      'amt': 'AMT'
+    const labels: Record<string, string> = {
+      manual: 'Manual',
+      automatic: 'Otomatis',
+      cvt: 'CVT',
+      dct: 'DCT',
+      amt: 'AMT'
     };
     return labels[type] || type;
   };
+
+  // Helper baru untuk tampilan detail
+  const formatDateID = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+  };
+  const yesNo = (val?: boolean) => (val ? 'Ya' : 'Tidak');
+  const registrationLabel = (type?: string) =>
+    type === 'perorangan' ? 'Perorangan' : type === 'perusahaan' ? 'Perusahaan' : (type || '-');
+  const seatLabel = (n?: number) => (typeof n === 'number' ? (n >= 7 ? '7 atau lebih' : `${n} Kursi`) : '-');
 
   // Loading state
   if (loading) {
@@ -213,7 +226,20 @@ const HalamanDetailMobil: React.FC = () => {
   }
 
   const primaryImage = car.car_images?.find((img: any) => img.is_primary) || car.car_images?.[0];
-  const specs = car.car_specifications || {};
+  // Gunakan fallback ke `car.specifications` untuk kompatibilitas data lama
+  const specs = car.car_specifications || car.specifications || {};
+  
+  // Check if specifications exist and have any features
+  const hasSpecs = specs && (
+    specs.has_abs || specs.has_ebd || specs.has_parking_sensor || 
+    specs.has_parking_camera || specs.has_ac || specs.has_power_steering ||
+    specs.has_power_window || specs.has_central_lock || specs.has_cruise_control ||
+    specs.has_keyless_entry || specs.has_push_start || specs.has_sunroof ||
+    specs.has_audio_system || specs.has_touchscreen || specs.has_bluetooth ||
+    specs.has_usb_port || specs.has_rear_ac || specs.has_wireless_charging ||
+    specs.has_led_drl || specs.has_modern_head_unit || specs.doors || 
+    specs.seats || specs.airbags
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -342,7 +368,7 @@ const HalamanDetailMobil: React.FC = () => {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                     <div className="text-center p-4 bg-gray-50 rounded-lg">
                       <Gauge className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-                      <div className="font-bold">{car.mileage?.toLocaleString() || 0} km</div>
+                      <div className="font-bold">{car.mileage?.toLocaleString('id-ID') || 0} km</div>
                       <div className="text-sm text-gray-600">Kilometer</div>
                     </div>
                     <div className="text-center p-4 bg-gray-50 rounded-lg">
@@ -365,8 +391,137 @@ const HalamanDetailMobil: React.FC = () => {
               </Card>
             </motion.div>
 
+            {/* Detail Mobil */}
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: 0.35 }}
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Car className="w-5 h-5 mr-2" />
+                    Detail Mobil
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Kolom kiri */}
+                    <div className="space-y-3">
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Jenis Bahan Bakar</span>
+                        <span className="font-medium">{getFuelTypeLabel(car.fuel_type)}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Jumlah Tempat Duduk</span>
+                        <span className="font-medium">{seatLabel(car.seat_capacity)}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Tipe Registrasi</span>
+                        <span className="font-medium">{registrationLabel(car.registration_type)}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Kunci Cadangan</span>
+                        <span className="font-medium">{yesNo(car.has_spare_key)}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Garansi Pabrik</span>
+                        <span className="font-medium">{yesNo(car.has_warranty)}</span>
+                      </div>
+                    </div>
+
+                    {/* Kolom kanan */}
+                    <div className="space-y-3">
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Warna</span>
+                        <span className="font-medium">{car.color || '-'}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Tanggal Registrasi</span>
+                        <span className="font-medium">{formatDateID(car.registration_date)}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Jarak Tempuh Saat Ini</span>
+                        <span className="font-medium">{car.mileage?.toLocaleString('id-ID') || 0} km</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Service Record</span>
+                        <span className="font-medium">{yesNo(car.has_service_record)}</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-600">Masa Berlaku STNK</span>
+                        <span className="font-medium">{formatDateID(car.stnk_expiry_date)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Baris tambahan: Transmisi & Kapasitas Mesin */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div className="flex justify-between py-2 border-b">
+                      <span className="text-gray-600">Transmisi</span>
+                      <span className="font-medium">{getTransmissionLabel(car.transmission)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b">
+                      <span className="text-gray-600">Kapasitas Mesin</span>
+                      <span className="font-medium">{car.engine_capacity || 0} cc</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Fitur Mobil */}
+            {(() => {
+              const features = [
+                { key: 'has_airbags', label: 'Airbag', icon: <Shield className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_abs', label: 'ABS', icon: <CheckCircle className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_parking_sensor', label: 'Sensor Parkir', icon: <Radar className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_parking_camera', label: 'Kamera Mundur', icon: <Camera className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_cruise_control', label: 'Cruise Control', icon: <Gauge className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_keyless_entry', label: 'Keyless Entry', icon: <KeyRound className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_push_start', label: 'Push Start Button', icon: <Power className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_sunroof', label: 'Sunroof', icon: <Sun className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_bluetooth', label: 'Bluetooth', icon: <Bluetooth className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_usb_port', label: 'USB Port', icon: <Usb className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_rear_ac', label: 'AC Belakang', icon: <Fan className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_wireless_charging', label: 'Wireless Charging', icon: <Wifi className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_led_drl', label: 'LED Daytime Running Lights', icon: <Sun className="w-8 h-8 text-blue-600" /> },
+                { key: 'has_modern_head_unit', label: 'Head Unit Modern', icon: <Monitor className="w-8 h-8 text-blue-600" /> },
+              ];
+              const active = features.filter(f => Boolean((specs as any)?.[f.key]));
+              return active.length > 0 ? (
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.6, delay: 0.38 }}
+                >
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <Settings className="w-5 h-5 mr-2" />
+                        Fitur
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-500 mb-4">
+                        Fitur bervariasi berdasarkan model dan varian mobil. Berikut fitur yang tersedia pada mobil ini.
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                        {active.map((f) => (
+                          <div key={f.key} className="text-center p-4 bg-gray-50 rounded-lg">
+                            <div className="flex items-center justify-center mb-2">{f.icon}</div>
+                            <div className="font-medium">{f.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ) : null;
+            })()}
+
             {/* Specifications */}
-            {specs && (
+            {hasSpecs && (
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}

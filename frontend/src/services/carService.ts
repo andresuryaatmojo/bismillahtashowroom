@@ -282,7 +282,7 @@ class CarService {
         supabase.from('car_models').select('*').eq('id', car.model_id).single(),
         supabase.from('car_categories').select('*').eq('id', car.category_id).single(),
         supabase.from('car_images').select('*').eq('car_id', car.id).order('display_order'),
-        supabase.from('car_specifications').select('*').eq('car_id', car.id).single(),
+        supabase.from('car_specifications').select('*').eq('car_id', car.id).maybeSingle(),
         supabase.from('users').select('id, username, full_name, seller_rating, seller_type').eq('id', car.seller_id).single()
       ]);
 

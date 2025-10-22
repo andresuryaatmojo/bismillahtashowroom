@@ -320,6 +320,10 @@ const HalamanKelolaMobil: React.FC = () => {
         if (!result.success) {
           throw new Error(result.error || 'Gagal update mobil');
         }
+        // Simpan/Update spesifikasi ke tabel car_specifications
+        if (formData.specifications && carId) {
+          await carService.updateCarSpecifications(carId, formData.specifications);
+        }
       } else {
         // Create new car
         const result = await carService.createCar(carData);
@@ -327,6 +331,11 @@ const HalamanKelolaMobil: React.FC = () => {
           throw new Error(result.error || 'Gagal create mobil');
         }
         carId = result.data.id;
+
+        // Buat record spesifikasi
+        if (formData.specifications && carId) {
+          await carService.createCarSpecifications(carId, formData.specifications);
+        }
       }
 
       // Upload images if any
