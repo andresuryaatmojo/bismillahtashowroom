@@ -217,11 +217,23 @@ export class KontrollerArtikel {
       // Kategori
       if (kategoriFilter.length > 0) {
         const ids = kategoriFilter.filter(k => /^\d+$/.test(k)).map(Number);
+        
+        // Jika ada slug kategori, konversi ke ID terlebih dahulu
+        if (slugKategori.length > 0) {
+          const { data: categoryData } = await supabase
+            .from('article_categories')
+            .select('id')
+            .in('slug', slugKategori);
+          
+          if (categoryData && categoryData.length > 0) {
+            const slugIds = categoryData.map(cat => cat.id);
+            ids.push(...slugIds);
+          }
+        }
+        
+        // Filter berdasarkan category_id
         if (ids.length > 0) {
           query = query.in('category_id', ids);
-        }
-        if (slugKategori.length > 0) {
-          query = query.in('article_categories.slug', slugKategori);
         }
       }
 
