@@ -395,9 +395,9 @@ const HalamanWishlist: React.FC = () => {
                         className="text-lg font-semibold text-gray-800 cursor-pointer hover:text-blue-600 transition-colors"
                         onClick={() => pilihMobilUntukDetail(item.car_id)}
                       >
-                        {car.car_brands?.name} {car.car_models?.name}
+                        {car.title}
                       </h3>
-                      <p className="text-gray-600 text-sm">{car.title} • {car.year}</p>
+                      <p className="text-gray-600 text-sm">{car.car_categories?.name} • {car.condition === 'new' ? 'Baru' : 'Bekas'}</p>
                     </div>
                     
                     <button

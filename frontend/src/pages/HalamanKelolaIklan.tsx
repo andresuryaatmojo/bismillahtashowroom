@@ -100,6 +100,34 @@ const HalamanKelolaIklan: React.FC = () => {
   const [models, setModels] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   
+  // Tab navigation state
+  const [currentTab, setCurrentTab] = useState('basic');
+  
+  const tabs = [
+    { id: 'basic', label: 'Informasi Dasar' },
+    { id: 'specs', label: 'Spesifikasi' },
+    { id: 'details', label: 'Detail & Fitur' },
+    { id: 'images', label: 'Gambar' }
+  ];
+
+  const getCurrentTabIndex = () => tabs.findIndex(tab => tab.id === currentTab);
+  const isFirstTab = getCurrentTabIndex() === 0;
+  const isLastTab = getCurrentTabIndex() === tabs.length - 1;
+
+  const goToNextTab = () => {
+    const currentIndex = getCurrentTabIndex();
+    if (currentIndex < tabs.length - 1) {
+      setCurrentTab(tabs[currentIndex + 1].id);
+    }
+  };
+
+  const goToPreviousTab = () => {
+    const currentIndex = getCurrentTabIndex();
+    if (currentIndex > 0) {
+      setCurrentTab(tabs[currentIndex - 1].id);
+    }
+  };
+  
   // Tambahan state untuk quick-add admin
   const [showAddBrand, setShowAddBrand] = useState(false);
   const [newBrandName, setNewBrandName] = useState('');
@@ -125,6 +153,9 @@ const HalamanKelolaIklan: React.FC = () => {
     with_package: 0,
     free_listings: 0
   });
+
+  // Location mode state
+  const [locationMode, setLocationMode] = useState<'profile' | 'custom'>('profile');
 
   // Form state
   const [formData, setFormData] = useState<CarFormData>({
@@ -168,6 +199,24 @@ const HalamanKelolaIklan: React.FC = () => {
       has_modern_head_unit: false,
     },
   });
+
+  // Load user profile untuk mengisi lokasi otomatis
+  useEffect(() => {
+    if (user && user.city && user.province && locationMode === 'profile') {
+      setFormData(prev => ({
+        ...prev,
+        location_city: user.city || '',
+        location_province: user.province || ''
+      }));
+    } else if (locationMode === 'custom') {
+      // Reset to empty when switching to custom mode
+      setFormData(prev => ({
+        ...prev,
+        location_city: '',
+        location_province: ''
+      }));
+    }
+  }, [user, locationMode]);
 
   // Check seller mode
   useEffect(() => {
@@ -313,10 +362,31 @@ const HalamanKelolaIklan: React.FC = () => {
         return;
       }
 
-      if (!formData.location_city) {
-        setError('Lokasi kota wajib diisi');
+      // Validasi lokasi berdasarkan mode
+      if (locationMode === 'profile') {
+        // Jika menggunakan lokasi profil, pastikan user memiliki lokasi
+        if (!user?.city || !user?.province) {
+          setError('Lokasi profil belum lengkap. Silakan lengkapi profil atau pilih "Lokasi berbeda"');
+          return;
+        }
+        // Set lokasi dari profil user
+        formData.location_city = user.city;
+        formData.location_province = user.province;
+      } else {
+        // Jika menggunakan lokasi custom, pastikan kota diisi
+        if (!formData.location_city.trim()) {
+          setError('Lokasi kota wajib diisi');
+          return;
+        }
+      }
+
+      // Validasi form
+      if (!formData.title.trim()) {
+        alert('Judul iklan harus diisi');
         return;
       }
+
+      // Lokasi sudah divalidasi di atas, tidak perlu validasi ulang
 
       const carData = {
         ...formData,
@@ -1027,7 +1097,7 @@ const HalamanKelolaIklan: React.FC = () => {
             </div>
 
             <div className="p-6 max-h-[calc(100vh-200px)] overflow-y-auto">
-              <Tabs defaultValue="basic">
+              <Tabs value={currentTab} onValueChange={setCurrentTab}>
                 <TabsList className="grid w-full grid-cols-4 mb-6">
                   <TabsTrigger value="basic">Informasi Dasar</TabsTrigger>
                   <TabsTrigger value="specs">Spesifikasi</TabsTrigger>
@@ -1174,22 +1244,33 @@ const HalamanKelolaIklan: React.FC = () => {
 
                     <div>
                       <Label>Tahun *</Label>
-                      <Input
-                        type="number"
-                        value={formData.year}
-                        onChange={(e) => setFormData(prev => ({ ...prev, year: parseInt(e.target.value) || new Date().getFullYear() }))}
-                        min="1900"
-                        max={new Date().getFullYear() + 1}
-                      />
+                      <Select
+                        value={formData.year.toString()}
+                        onValueChange={(value) => setFormData(prev => ({ ...prev, year: parseInt(value) }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih tahun" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 30 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                            <SelectItem key={year} value={year.toString()}>
+                              {year}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div>
                       <Label>Harga (Rp) *</Label>
                       <Input
-                        type="number"
-                        value={formData.price}
-                        onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                        placeholder="150000000"
+                        type="text"
+                        value={formData.price ? `Rp ${formData.price.toLocaleString('id-ID')}` : ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d]/g, '');
+                          setFormData(prev => ({ ...prev, price: parseInt(value) || 0 }));
+                        }}
+                        placeholder="Rp 250.000.000"
                       />
                     </div>
 
@@ -1202,14 +1283,79 @@ const HalamanKelolaIklan: React.FC = () => {
                       />
                     </div>
 
+                  {/* Lokasi Section */}
+                  <div className="space-y-4">
                     <div>
-                      <Label>Kota *</Label>
-                      <Input
-                        value={formData.location_city}
-                        onChange={(e) => setFormData(prev => ({ ...prev, location_city: e.target.value }))}
-                        placeholder="Jakarta"
-                      />
+                      <Label className="text-base font-medium">Lokasi Mobil</Label>
+                      <p className="text-sm text-gray-600 mb-3">Pilih lokasi dimana mobil berada</p>
+                      
+                      <div className="space-y-3">
+                        <div className="flex gap-4">
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="locationMode"
+                              value="profile"
+                              checked={locationMode === 'profile'}
+                              onChange={(e) => setLocationMode(e.target.value as 'profile' | 'custom')}
+                              className="text-blue-600"
+                            />
+                            <span className="text-sm">Gunakan lokasi dari profil</span>
+                          </label>
+                          
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="locationMode"
+                              value="custom"
+                              checked={locationMode === 'custom'}
+                              onChange={(e) => setLocationMode(e.target.value as 'profile' | 'custom')}
+                              className="text-blue-600"
+                            />
+                            <span className="text-sm">Lokasi berbeda</span>
+                          </label>
+                        </div>
+
+                        {locationMode === 'profile' && user?.city && user?.province && (
+                          <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                            <p className="text-sm text-blue-800">
+                              <strong>Lokasi dari profil:</strong> {user.city}, {user.province}
+                            </p>
+                          </div>
+                        )}
+
+                        {locationMode === 'custom' && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <Label>Kota *</Label>
+                              <Input
+                                value={formData.location_city}
+                                onChange={(e) => setFormData(prev => ({ ...prev, location_city: e.target.value }))}
+                                placeholder="Jakarta"
+                              />
+                            </div>
+
+                            <div>
+                              <Label>Provinsi</Label>
+                              <Input
+                                value={formData.location_province}
+                                onChange={(e) => setFormData(prev => ({ ...prev, location_province: e.target.value }))}
+                                placeholder="DKI Jakarta"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {(!user?.city || !user?.province) && locationMode === 'profile' && (
+                          <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                            <p className="text-sm text-yellow-800">
+                              ⚠️ Lokasi belum lengkap di profil. Silakan lengkapi profil atau pilih "Lokasi berbeda"
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
+                  </div>
                   </div>
 
                   <div>
@@ -1233,6 +1379,16 @@ const HalamanKelolaIklan: React.FC = () => {
                     <Label htmlFor="is_negotiable" className="cursor-pointer">
                       Harga bisa dinegosiasi
                     </Label>
+                  </div>
+
+                  {/* Navigation buttons for basic tab */}
+                  <div className="flex justify-end pt-4">
+                    <Button 
+                      onClick={goToNextTab}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Berikutnya
+                    </Button>
                   </div>
                 </TabsContent>
 
@@ -1261,11 +1417,25 @@ const HalamanKelolaIklan: React.FC = () => {
                     <div>
                       <Label>Kilometer</Label>
                       <Input
-                        type="number"
-                        value={formData.mileage}
-                        onChange={(e) => setFormData(prev => ({ ...prev, mileage: parseInt(e.target.value) || 0 }))}
+                        type="text"
+                        value={formData.mileage ? formData.mileage.toLocaleString('id-ID') : ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d]/g, '');
+                          setFormData(prev => ({ ...prev, mileage: parseInt(value) || 0 }));
+                        }}
                         placeholder="50000"
+                        onFocus={(e) => {
+                          if (formData.mileage > 0) {
+                            e.target.value = formData.mileage.toString();
+                          }
+                        }}
+                        onBlur={(e) => {
+                          if (formData.mileage > 0) {
+                            e.target.value = formData.mileage.toLocaleString('id-ID');
+                          }
+                        }}
                       />
+                      <div className="text-xs text-gray-500 mt-1">Satuan: kilometer (km)</div>
                     </div>
 
                     <div>
@@ -1309,12 +1479,43 @@ const HalamanKelolaIklan: React.FC = () => {
                     <div>
                       <Label>Kapasitas Mesin (CC)</Label>
                       <Input
-                        type="number"
-                        value={formData.engine_capacity}
-                        onChange={(e) => setFormData(prev => ({ ...prev, engine_capacity: parseInt(e.target.value) || 0 }))}
+                        type="text"
+                        value={formData.engine_capacity ? formData.engine_capacity.toLocaleString('id-ID') : ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d]/g, '');
+                          setFormData(prev => ({ ...prev, engine_capacity: parseInt(value) || 0 }));
+                        }}
                         placeholder="1300"
+                        onFocus={(e) => {
+                          if (formData.engine_capacity > 0) {
+                            e.target.value = formData.engine_capacity.toString();
+                          }
+                        }}
+                        onBlur={(e) => {
+                          if (formData.engine_capacity > 0) {
+                            e.target.value = formData.engine_capacity.toLocaleString('id-ID');
+                          }
+                        }}
                       />
+                      <div className="text-xs text-gray-500 mt-1">Satuan: cubic centimeter (CC)</div>
                     </div>
+                  </div>
+
+                  {/* Navigation buttons for details tab */}
+                  <div className="flex justify-between pt-4">
+                    <Button 
+                      variant="outline"
+                      onClick={goToPreviousTab}
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Sebelumnya
+                    </Button>
+                    <Button 
+                      onClick={goToNextTab}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Berikutnya
+                    </Button>
                   </div>
                 </TabsContent>
 
@@ -1648,6 +1849,23 @@ const HalamanKelolaIklan: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Navigation buttons for specs tab */}
+                  <div className="flex justify-between pt-4">
+                    <Button 
+                      variant="outline"
+                      onClick={goToPreviousTab}
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Sebelumnya
+                    </Button>
+                    <Button 
+                      onClick={goToNextTab}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Berikutnya
+                    </Button>
+                  </div>
                 </TabsContent>
 
                 {/* Tab: Images */}
@@ -1706,6 +1924,34 @@ const HalamanKelolaIklan: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Navigation buttons for images tab */}
+                  <div className="flex justify-between pt-4">
+                    <Button 
+                      variant="outline"
+                      onClick={goToPreviousTab}
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Sebelumnya
+                    </Button>
+                    <Button 
+                      onClick={saveCar} 
+                      disabled={submitting || uploadingImages}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      {(submitting || uploadingImages) ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          {uploadingImages ? 'Mengupload gambar...' : 'Menyimpan...'}
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 mr-2" />
+                          {isEditMode ? 'Update' : 'Lanjut ke Pilih Paket'}
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </TabsContent>
               </Tabs>
 
@@ -1723,23 +1969,6 @@ const HalamanKelolaIklan: React.FC = () => {
                     disabled={submitting || uploadingImages}
                   >
                     Batal
-                  </Button>
-                  <Button 
-                    onClick={saveCar} 
-                    disabled={submitting || uploadingImages}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {(submitting || uploadingImages) ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        {uploadingImages ? 'Mengupload gambar...' : 'Menyimpan...'}
-                      </>
-                    ) : (
-                      <>
-                        <Save className="w-4 h-4 mr-2" />
-                        {isEditMode ? 'Update' : 'Lanjut ke Pilih Paket'}
-                      </>
-                    )}
                   </Button>
                 </div>
               </div>

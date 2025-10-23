@@ -114,6 +114,35 @@ const HalamanKelolaMobil: React.FC = () => {
   const [totalCars, setTotalCars] = useState(0);
   const itemsPerPage = 20;
 
+  // Tab navigation state
+  const [currentTab, setCurrentTab] = useState('basic');
+  
+  const tabs = [
+    { id: 'basic', label: 'Informasi Dasar' },
+    { id: 'specs', label: 'Spesifikasi' },
+    { id: 'details', label: 'Detail & Fitur' },
+    { id: 'images', label: 'Gambar' },
+    { id: 'settings', label: 'Pengaturan' }
+  ];
+
+  const getCurrentTabIndex = () => tabs.findIndex(tab => tab.id === currentTab);
+  const isFirstTab = getCurrentTabIndex() === 0;
+  const isLastTab = getCurrentTabIndex() === tabs.length - 1;
+
+  const goToNextTab = () => {
+    const currentIndex = getCurrentTabIndex();
+    if (currentIndex < tabs.length - 1) {
+      setCurrentTab(tabs[currentIndex + 1].id);
+    }
+  };
+
+  const goToPreviousTab = () => {
+    const currentIndex = getCurrentTabIndex();
+    if (currentIndex > 0) {
+      setCurrentTab(tabs[currentIndex - 1].id);
+    }
+  };
+
   // Form state
   const [formData, setFormData] = useState<CarFormData>({
     title: '',
@@ -127,8 +156,8 @@ const HalamanKelolaMobil: React.FC = () => {
     fuel_type: 'gasoline',
     engine_capacity: 0,
     description: '',
-    location_city: '',
-    location_province: '',
+    location_city: 'Bandung', // Lokasi showroom tetap
+    location_province: 'Jawa Barat', // Lokasi showroom tetap
     status: 'available',
     seller_type: 'showroom',
     is_verified: false,
@@ -278,7 +307,7 @@ const HalamanKelolaMobil: React.FC = () => {
   // Handle quick-add functions
   const handleAddBrand = async () => {
     if (!newBrandName.trim()) return;
-    const id = await carService.findOrCreateBrand(newBrandName.trim());
+    const id = await carService.findOrCreateBrand(newBrandName.trim(), isAdmin);
     if (!id) {
       alert('Gagal menyimpan merek. Cek console: kemungkinan RLS Supabase menolak INSERT.');
       return;
@@ -292,7 +321,7 @@ const HalamanKelolaMobil: React.FC = () => {
 
   const handleAddModel = async () => {
     if (!formData.brand_id || !newModelName.trim()) return;
-    const id = await carService.findOrCreateModel(newModelName.trim(), formData.brand_id, formData.category_id);
+    const id = await carService.findOrCreateModel(newModelName.trim(), formData.brand_id, formData.category_id, isAdmin);
     if (!id) {
       alert('Gagal menyimpan model. Cek console untuk detail.');
       return;
@@ -306,7 +335,7 @@ const HalamanKelolaMobil: React.FC = () => {
 
   const handleAddCategory = async () => {
     if (!newCategoryName.trim()) return;
-    const id = await carService.findOrCreateCategory(newCategoryName.trim());
+    const id = await carService.findOrCreateCategory(newCategoryName.trim(), isAdmin);
     if (id) {
       const categoriesData = await carService.getCategories();
       setCategories(categoriesData);
@@ -495,6 +524,43 @@ const HalamanKelolaMobil: React.FC = () => {
     }
   };
 
+  const handleHardDeleteBrand = async (id: number) => {
+    try {
+      // First attempt without admin confirmation to check for references
+      const result = await carService.hardDeleteBrand(id, false);
+      
+      if (result.requiresConfirmation && result.references) {
+        let confirmMessage = `PERINGATAN: ${result.error}\n\nDetail mobil yang masih menggunakan merek ini:\n`;
+        
+        // Show all cars with their status
+        confirmMessage += result.references.details.map(car => `- ${car.title} (${car.status})`).join('\n');
+        
+        confirmMessage += `\n\nApakah Anda yakin ingin menghapus merek ini secara permanen?\nTindakan ini TIDAK DAPAT DIBATALKAN!`;
+        
+        if (window.confirm(confirmMessage)) {
+          // Admin confirmed, proceed with hard delete
+          const confirmedResult = await carService.hardDeleteBrand(id, true);
+          if (confirmedResult.success) {
+            const brandsData = isAdmin ? await carService.getBrands() : await carService.getActiveBrands();
+            setBrands(brandsData);
+            alert('Merek berhasil dihapus secara permanen');
+          } else {
+            alert(confirmedResult.error || 'Gagal menghapus merek');
+          }
+        }
+      } else if (result.success) {
+        const brandsData = isAdmin ? await carService.getBrands() : await carService.getActiveBrands();
+        setBrands(brandsData);
+        alert('Merek berhasil dihapus secara permanen');
+      } else {
+        alert(result.error || 'Gagal menghapus merek');
+      }
+    } catch (error) {
+      console.error('Error hard deleting brand:', error);
+      alert('Gagal menghapus merek');
+    }
+  };
+
   const handleReactivateModel = async (id: number) => {
     if (!window.confirm('Yakin ingin mengaktifkan kembali model ini?')) return;
     try {
@@ -514,6 +580,47 @@ const HalamanKelolaMobil: React.FC = () => {
     }
   };
 
+  const handleHardDeleteModel = async (id: number) => {
+    try {
+      // First attempt without admin confirmation to check for references
+      const result = await carService.hardDeleteModel(id, false);
+      
+      if (result.requiresConfirmation && result.references) {
+        let confirmMessage = `PERINGATAN: ${result.error}\n\nDetail mobil yang masih menggunakan model ini:\n`;
+        
+        // Show all cars with their status
+        confirmMessage += result.references.details.map(car => `- ${car.title} (${car.status})`).join('\n');
+        
+        confirmMessage += `\n\nApakah Anda yakin ingin menghapus model ini secara permanen?\nTindakan ini TIDAK DAPAT DIBATALKAN!`;
+        
+        if (window.confirm(confirmMessage)) {
+          // Admin confirmed, proceed with hard delete
+          const confirmedResult = await carService.hardDeleteModel(id, true);
+          if (confirmedResult.success && formData.brand_id) {
+            const modelsData = isAdmin 
+              ? await carService.getModelsByBrand(formData.brand_id)
+              : await carService.getActiveModelsByBrand(formData.brand_id);
+            setModels(modelsData);
+            alert('Model berhasil dihapus secara permanen');
+          } else {
+            alert(confirmedResult.error || 'Gagal menghapus model');
+          }
+        }
+      } else if (result.success && formData.brand_id) {
+        const modelsData = isAdmin 
+          ? await carService.getModelsByBrand(formData.brand_id)
+          : await carService.getActiveModelsByBrand(formData.brand_id);
+        setModels(modelsData);
+        alert('Model berhasil dihapus secara permanen');
+      } else {
+        alert(result.error || 'Gagal menghapus model');
+      }
+    } catch (error) {
+      console.error('Error hard deleting model:', error);
+      alert('Gagal menghapus model');
+    }
+  };
+
   const handleReactivateCategory = async (id: number) => {
     if (!window.confirm('Yakin ingin mengaktifkan kembali kategori ini?')) return;
     try {
@@ -528,6 +635,43 @@ const HalamanKelolaMobil: React.FC = () => {
     } catch (error) {
       console.error('Error reactivating category:', error);
       alert('Gagal mengaktifkan kategori');
+    }
+  };
+
+  const handleHardDeleteCategory = async (id: number) => {
+    try {
+      // First attempt without admin confirmation to check for references
+      const result = await carService.hardDeleteCategory(id, false);
+      
+      if (result.requiresConfirmation && result.references) {
+        let confirmMessage = `PERINGATAN: ${result.error}\n\nDetail mobil yang masih menggunakan kategori ini:\n`;
+        
+        // Show all cars with their status
+        confirmMessage += result.references.details.map(car => `- ${car.title} (${car.status})`).join('\n');
+        
+        confirmMessage += `\n\nApakah Anda yakin ingin menghapus kategori ini secara permanen?\nTindakan ini TIDAK DAPAT DIBATALKAN!`;
+        
+        if (window.confirm(confirmMessage)) {
+          // Admin confirmed, proceed with hard delete
+          const confirmedResult = await carService.hardDeleteCategory(id, true);
+          if (confirmedResult.success) {
+            const categoriesData = isAdmin ? await carService.getCategories() : await carService.getActiveCategories();
+            setCategories(categoriesData);
+            alert('Kategori berhasil dihapus secara permanen');
+          } else {
+            alert(confirmedResult.error || 'Gagal menghapus kategori');
+          }
+        }
+      } else if (result.success) {
+        const categoriesData = isAdmin ? await carService.getCategories() : await carService.getActiveCategories();
+        setCategories(categoriesData);
+        alert('Kategori berhasil dihapus secara permanen');
+      } else {
+        alert(result.error || 'Gagal menghapus kategori');
+      }
+    } catch (error) {
+      console.error('Error hard deleting category:', error);
+      alert('Gagal menghapus kategori');
     }
   };
 
@@ -577,11 +721,6 @@ const HalamanKelolaMobil: React.FC = () => {
       // Validate required fields
       if (!formData.title || !formData.brand_id || !formData.model_id || !formData.category_id) {
         setError('Mohon lengkapi semua field yang wajib diisi (Merek, Model, Kategori, Judul)');
-        return;
-      }
-
-      if (!formData.location_city) {
-        setError('Lokasi kota wajib diisi');
         return;
       }
 
@@ -675,8 +814,8 @@ const HalamanKelolaMobil: React.FC = () => {
       fuel_type: 'gasoline',
       engine_capacity: 0,
       description: '',
-      location_city: '',
-      location_province: '',
+      location_city: 'Bandung',
+      location_province: 'Jawa Barat',
       status: 'available',
       seller_type: 'showroom',
       is_verified: false,
@@ -1177,8 +1316,8 @@ const HalamanKelolaMobil: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-6">
-              <Tabs defaultValue="basic">
+            <div className="p-6 max-h-[calc(100vh-200px)] overflow-y-auto">
+              <Tabs value={currentTab} onValueChange={setCurrentTab}>
                 <TabsList className="grid w-full grid-cols-5 mb-6">
                   <TabsTrigger value="basic">Informasi Dasar</TabsTrigger>
                   <TabsTrigger value="specs">Spesifikasi</TabsTrigger>
@@ -1309,15 +1448,26 @@ const HalamanKelolaMobil: React.FC = () => {
                                           </Select>
                                         </>
                                       ) : (
-                                        <Button 
-                                          size="sm" 
-                                          variant="outline"
-                                          onClick={() => handleReactivateBrand(brand.id)}
-                                          title="Aktifkan Kembali"
-                                          className="text-green-600 hover:text-green-700"
-                                        >
-                                          <CheckCircle className="w-4 h-4" />
-                                        </Button>
+                                        <div className="flex gap-2">
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleReactivateBrand(brand.id)}
+                                            title="Aktifkan Kembali"
+                                            className="text-green-600 hover:text-green-700"
+                                          >
+                                            <CheckCircle className="w-4 h-4" />
+                                          </Button>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleHardDeleteBrand(brand.id)}
+                                            title="Hapus Permanen"
+                                            className="text-red-600 hover:text-red-700 border-red-300"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                        </div>
                                       )}
                                     </div>
                                   </div>
@@ -1488,15 +1638,26 @@ const HalamanKelolaMobil: React.FC = () => {
                                           </Select>
                                         </>
                                       ) : (
-                                        <Button 
-                                          size="sm" 
-                                          variant="outline"
-                                          onClick={() => handleReactivateModel(model.id)}
-                                          title="Aktifkan Kembali"
-                                          className="text-green-600 hover:text-green-700"
-                                        >
-                                          <CheckCircle className="w-4 h-4" />
-                                        </Button>
+                                        <div className="flex gap-2">
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleReactivateModel(model.id)}
+                                            title="Aktifkan Kembali"
+                                            className="text-green-600 hover:text-green-700"
+                                          >
+                                            <CheckCircle className="w-4 h-4" />
+                                          </Button>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleHardDeleteModel(model.id)}
+                                            title="Hapus Permanen"
+                                            className="text-red-600 hover:text-red-700 border-red-300"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                        </div>
                                       )}
                                     </div>
                                   </div>
@@ -1656,15 +1817,26 @@ const HalamanKelolaMobil: React.FC = () => {
                                           </Select>
                                         </>
                                       ) : (
-                                        <Button 
-                                          size="sm" 
-                                          variant="outline"
-                                          onClick={() => handleReactivateCategory(category.id)}
-                                          title="Aktifkan Kembali"
-                                          className="text-green-600 hover:text-green-700"
-                                        >
-                                          <CheckCircle className="w-4 h-4" />
-                                        </Button>
+                                        <div className="flex gap-2">
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleReactivateCategory(category.id)}
+                                            title="Aktifkan Kembali"
+                                            className="text-green-600 hover:text-green-700"
+                                          >
+                                            <CheckCircle className="w-4 h-4" />
+                                          </Button>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleHardDeleteCategory(category.id)}
+                                            title="Hapus Permanen"
+                                            className="text-red-600 hover:text-red-700 border-red-300"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                        </div>
                                       )}
                                     </div>
                                   </div>
@@ -1720,24 +1892,34 @@ const HalamanKelolaMobil: React.FC = () => {
 
                     <div>
                       <Label htmlFor="year">Tahun *</Label>
-                      <Input
-                        id="year"
-                        type="number"
-                        value={formData.year}
-                        onChange={(e) => setFormData(prev => ({ ...prev, year: parseInt(e.target.value) || new Date().getFullYear() }))}
-                        min="1900"
-                        max={new Date().getFullYear() + 1}
-                      />
+                      <Select
+                        value={formData.year.toString()}
+                        onValueChange={(value) => setFormData(prev => ({ ...prev, year: parseInt(value) }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih tahun" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 30 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                            <SelectItem key={year} value={year.toString()}>
+                              {year}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div>
                       <Label htmlFor="price">Harga (Rp) *</Label>
                       <Input
                         id="price"
-                        type="number"
-                        value={formData.price}
-                        onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                        placeholder="150000000"
+                        type="text"
+                        value={formData.price ? `Rp ${formData.price.toLocaleString('id-ID')}` : ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d]/g, '');
+                          setFormData(prev => ({ ...prev, price: parseInt(value) || 0 }));
+                        }}
+                        placeholder="Rp 150.000.000"
                       />
                     </div>
 
@@ -1751,34 +1933,24 @@ const HalamanKelolaMobil: React.FC = () => {
                       />
                     </div>
 
-                    <div>
-                      <Label htmlFor="location_city">Kota *</Label>
-                      <Input
-                        id="location_city"
-                        value={formData.location_city}
-                        onChange={(e) => setFormData(prev => ({ ...prev, location_city: e.target.value }))}
-                        placeholder="Jakarta"
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="location_province">Provinsi</Label>
-                      <Input
-                        id="location_province"
-                        value={formData.location_province}
-                        onChange={(e) => setFormData(prev => ({ ...prev, location_province: e.target.value }))}
-                        placeholder="DKI Jakarta"
-                      />
+                    {/* Lokasi showroom tetap: Bandung, Jawa Barat */}
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <Label className="text-sm font-medium text-gray-700">Lokasi Showroom</Label>
+                      <p className="text-sm text-gray-600 mt-1">Bandung, Jawa Barat</p>
+                      <p className="text-xs text-gray-500 mt-1">Lokasi showroom tidak dapat diubah</p>
                     </div>
 
                     <div>
                       <Label htmlFor="market_price">Harga Pasar (Opsional)</Label>
                       <Input
                         id="market_price"
-                        type="number"
-                        value={formData.market_price || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, market_price: parseFloat(e.target.value) || undefined }))}
-                        placeholder="160000000"
+                        type="text"
+                        value={formData.market_price ? `Rp ${formData.market_price.toLocaleString('id-ID')}` : ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d]/g, '');
+                          setFormData(prev => ({ ...prev, market_price: value ? parseInt(value) : undefined }));
+                        }}
+                        placeholder="Rp 160.000.000"
                       />
                     </div>
                   </div>
@@ -1792,6 +1964,16 @@ const HalamanKelolaMobil: React.FC = () => {
                       placeholder="Deskripsi lengkap kondisi mobil, fitur, kelengkapan, dll..."
                       rows={4}
                     />
+                  </div>
+
+                  {/* Navigation buttons for basic tab */}
+                  <div className="flex justify-end pt-4">
+                    <Button 
+                      onClick={goToNextTab}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Berikutnya
+                    </Button>
                   </div>
                 </TabsContent>
 
@@ -1821,11 +2003,25 @@ const HalamanKelolaMobil: React.FC = () => {
                       <Label htmlFor="mileage">Kilometer</Label>
                       <Input
                         id="mileage"
-                        type="number"
-                        value={formData.mileage}
-                        onChange={(e) => setFormData(prev => ({ ...prev, mileage: parseInt(e.target.value) || 0 }))}
+                        type="text"
+                        value={formData.mileage ? formData.mileage.toLocaleString('id-ID') : ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d]/g, '');
+                          setFormData(prev => ({ ...prev, mileage: parseInt(value) || 0 }));
+                        }}
                         placeholder="50000"
+                        onFocus={(e) => {
+                          if (formData.mileage > 0) {
+                            e.target.value = formData.mileage.toString();
+                          }
+                        }}
+                        onBlur={(e) => {
+                          if (formData.mileage > 0) {
+                            e.target.value = formData.mileage.toLocaleString('id-ID');
+                          }
+                        }}
                       />
+                      <div className="text-xs text-gray-500 mt-1">Satuan: kilometer (km)</div>
                     </div>
 
                     <div>
@@ -1870,12 +2066,42 @@ const HalamanKelolaMobil: React.FC = () => {
                       <Label htmlFor="engine_capacity">Kapasitas Mesin (CC)</Label>
                       <Input
                         id="engine_capacity"
-                        type="number"
-                        value={formData.engine_capacity}
-                        onChange={(e) => setFormData(prev => ({ ...prev, engine_capacity: parseInt(e.target.value) || 0 }))}
-                        placeholder="1300"
+                        type="text"
+                        value={formData.engine_capacity ? formData.engine_capacity.toLocaleString('id-ID') : ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d]/g, '');
+                          setFormData(prev => ({ ...prev, engine_capacity: parseInt(value) || 0 }));
+                        }}
+                        placeholder="1500"
+                        onFocus={(e) => {
+                          if (formData.engine_capacity > 0) {
+                            e.target.value = formData.engine_capacity.toString();
+                          }
+                        }}
+                        onBlur={(e) => {
+                          if (formData.engine_capacity > 0) {
+                            e.target.value = formData.engine_capacity.toLocaleString('id-ID');
+                          }
+                        }}
                       />
+                      <div className="text-xs text-gray-500 mt-1">Satuan: cubic centimeter (CC)</div>
                     </div>
+                  </div>
+
+                  {/* Navigation buttons for specs tab */}
+                  <div className="flex justify-between pt-4">
+                    <Button 
+                      variant="outline"
+                      onClick={goToPreviousTab}
+                    >
+                      Sebelumnya
+                    </Button>
+                    <Button 
+                      onClick={goToNextTab}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Berikutnya
+                    </Button>
                   </div>
                 </TabsContent>
 
@@ -2141,6 +2367,22 @@ const HalamanKelolaMobil: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Navigation buttons for details tab */}
+                  <div className="flex justify-between pt-4">
+                    <Button 
+                      variant="outline"
+                      onClick={goToPreviousTab}
+                    >
+                      Sebelumnya
+                    </Button>
+                    <Button 
+                      onClick={goToNextTab}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Berikutnya
+                    </Button>
+                  </div>
                 </TabsContent>
 
                 {/* Tab: Images */}
@@ -2212,6 +2454,23 @@ const HalamanKelolaMobil: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Navigation buttons for images tab */}
+                  <div className="flex justify-between pt-4">
+                    <Button 
+                      variant="outline"
+                      onClick={goToPreviousTab}
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Sebelumnya
+                    </Button>
+                    <Button 
+                      onClick={goToNextTab}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Berikutnya
+                    </Button>
+                  </div>
                 </TabsContent>
 
                 {/* Tab: Settings */}
@@ -2310,6 +2569,34 @@ const HalamanKelolaMobil: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Navigation buttons for settings tab */}
+                  <div className="flex justify-between pt-4">
+                    <Button 
+                      variant="outline"
+                      onClick={goToPreviousTab}
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Sebelumnya
+                    </Button>
+                    <Button 
+                      onClick={saveCar}
+                      disabled={submitting || uploadingImages}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      {submitting || uploadingImages ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          {uploadingImages ? 'Mengupload...' : 'Menyimpan...'}
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 mr-2" />
+                          {isEditMode ? 'Update Mobil' : 'Simpan Mobil'}
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </TabsContent>
               </Tabs>
 
@@ -2327,23 +2614,6 @@ const HalamanKelolaMobil: React.FC = () => {
                     disabled={submitting || uploadingImages}
                   >
                     Batal
-                  </Button>
-                  <Button 
-                    onClick={saveCar} 
-                    disabled={submitting || uploadingImages}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {(submitting || uploadingImages) ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        {uploadingImages ? 'Mengupload gambar...' : 'Menyimpan...'}
-                      </>
-                    ) : (
-                      <>
-                        <Save className="w-4 h-4 mr-2" />
-                        {isEditMode ? 'Update Mobil' : 'Simpan Mobil'}
-                      </>
-                    )}
                   </Button>
                 </div>
               </div>

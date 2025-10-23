@@ -228,9 +228,9 @@ const HalamanKatalog: React.FC = () => {
           <CardContent className="p-6">
             <div className="mb-4">
               <h3 className="text-xl font-bold text-slate-900 mb-1 group-hover:text-blue-600 transition-colors">
-                {car.car_brands.name} {car.car_models.name}
+                {car.title}
               </h3>
-              <p className="text-slate-600 text-sm">{car.title} • {car.year}</p>
+              <p className="text-slate-600 text-sm">{car.car_categories?.name} • {car.condition === 'new' ? 'Baru' : 'Bekas'}</p>
             </div>
 
             <div className="mb-4">

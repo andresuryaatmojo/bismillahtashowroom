@@ -266,9 +266,9 @@ const HalamanDetailMobil: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-bold text-gray-900">
-                {car.car_brands.name} {car.car_models.name} {car.year}
+                {car.title}
               </h1>
-              <p className="text-lg text-gray-600 mt-1">{car.title}</p>
+              <p className="text-lg text-gray-600 mt-1">{car.car_categories?.name} • {car.location_city}</p>
               <div className="flex items-center mt-2 space-x-4">
                 <Badge variant={car.condition === 'new' ? 'default' : 'secondary'}>
                   <Car className="w-3 h-3 mr-1" />

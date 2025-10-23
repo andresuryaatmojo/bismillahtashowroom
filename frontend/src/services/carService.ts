@@ -1276,6 +1276,431 @@ class CarService {
       return true;
     } catch (e) { console.error('Error in reactivateCategory:', e); return false; }
   }
+
+  // ===== HARD DELETE WITH VALIDATION =====
+
+  /**
+   * Check if brand has references (cars using this brand)
+   */
+  async checkBrandReferences(brandId: number): Promise<{ 
+    hasReferences: boolean; 
+    count: number; 
+    details: any[]; 
+    activeCars: any[]; 
+    inactiveCars: any[]; 
+    totalReferences: number; 
+  }> {
+    try {
+      // Check for ALL cars using this brand (any status)
+      const { data: allCars, error: allError } = await supabase
+        .from('cars')
+        .select('id, title, status')
+        .eq('brand_id', brandId);
+
+      if (allError) {
+        console.error('Error checking brand references:', allError);
+        return { hasReferences: false, count: 0, details: [], activeCars: [], inactiveCars: [], totalReferences: 0 };
+      }
+
+      // Separate active cars (that should prevent deletion) from inactive ones
+      const activeCars = allCars?.filter(car => ['pending', 'available', 'reserved'].includes(car.status)) || [];
+      const inactiveCars = allCars?.filter(car => ['rejected', 'sold'].includes(car.status)) || [];
+
+      return {
+        hasReferences: (allCars?.length || 0) > 0,
+        count: activeCars.length, // Only count active cars for warning
+        details: allCars || [],
+        activeCars,
+        inactiveCars,
+        totalReferences: allCars?.length || 0
+      };
+    } catch (error) {
+      console.error('Error in checkBrandReferences:', error);
+      return { hasReferences: false, count: 0, details: [], activeCars: [], inactiveCars: [], totalReferences: 0 };
+    }
+  }
+
+  /**
+   * Check if model has references (cars using this model)
+   */
+  async checkModelReferences(modelId: number): Promise<{ 
+    hasReferences: boolean; 
+    count: number; 
+    details: any[]; 
+    activeCars: any[]; 
+    inactiveCars: any[]; 
+    totalReferences: number; 
+  }> {
+    try {
+      // Check for ALL cars using this model (any status)
+      const { data: allCars, error: allError } = await supabase
+        .from('cars')
+        .select('id, title, status')
+        .eq('model_id', modelId);
+
+      if (allError) {
+        console.error('Error checking model references:', allError);
+        return { hasReferences: false, count: 0, details: [], activeCars: [], inactiveCars: [], totalReferences: 0 };
+      }
+
+      // Separate active cars (that should prevent deletion) from inactive ones
+      const activeCars = allCars?.filter(car => ['pending', 'available', 'reserved'].includes(car.status)) || [];
+      const inactiveCars = allCars?.filter(car => ['rejected', 'sold'].includes(car.status)) || [];
+
+      return {
+        hasReferences: (allCars?.length || 0) > 0,
+        count: activeCars.length, // Only count active cars for warning
+        details: allCars || [],
+        activeCars,
+        inactiveCars,
+        totalReferences: allCars?.length || 0
+      };
+    } catch (error) {
+      console.error('Error in checkModelReferences:', error);
+      return { hasReferences: false, count: 0, details: [], activeCars: [], inactiveCars: [], totalReferences: 0 };
+    }
+  }
+
+  /**
+   * Check if category has references (cars using this category)
+   */
+  async checkCategoryReferences(categoryId: number): Promise<{ 
+    hasReferences: boolean; 
+    count: number; 
+    details: any[]; 
+    activeCars: any[]; 
+    inactiveCars: any[]; 
+    totalReferences: number; 
+  }> {
+    try {
+      // Check for ALL cars using this category (any status)
+      const { data: allCars, error: allError } = await supabase
+        .from('cars')
+        .select('id, title, status')
+        .eq('category_id', categoryId);
+
+      if (allError) {
+        console.error('Error checking category references:', allError);
+        return { hasReferences: false, count: 0, details: [], activeCars: [], inactiveCars: [], totalReferences: 0 };
+      }
+
+      // Separate active cars (that should prevent deletion) from inactive ones
+      const activeCars = allCars?.filter(car => ['pending', 'available', 'reserved'].includes(car.status)) || [];
+      const inactiveCars = allCars?.filter(car => ['rejected', 'sold'].includes(car.status)) || [];
+
+      return {
+        hasReferences: (allCars?.length || 0) > 0,
+        count: activeCars.length, // Only count active cars for warning
+        details: allCars || [],
+        activeCars,
+        inactiveCars,
+        totalReferences: allCars?.length || 0
+      };
+    } catch (error) {
+      console.error('Error in checkCategoryReferences:', error);
+      return { hasReferences: false, count: 0, details: [], activeCars: [], inactiveCars: [], totalReferences: 0 };
+    }
+  }
+
+  /**
+   * Hard delete brand with validation
+   */
+  async hardDeleteBrand(brandId: number, adminConfirmed: boolean = false): Promise<{ 
+    success: boolean; 
+    error?: string; 
+    requiresConfirmation?: boolean;
+    references?: { 
+      hasReferences: boolean; 
+      count: number; 
+      details: any[]; 
+      activeCars: any[]; 
+      inactiveCars: any[]; 
+      totalReferences: number; 
+    };
+  }> {
+    try {
+      // First check for references
+      const references = await this.checkBrandReferences(brandId);
+      
+      // If there are ANY references (active or inactive) and admin hasn't confirmed
+      if (references.hasReferences && !adminConfirmed) {
+        // If there are active cars, require confirmation
+        if (references.count > 0) {
+          return {
+            success: false,
+            requiresConfirmation: true,
+            references,
+            error: `Brand ini masih digunakan oleh ${references.count} mobil aktif. Konfirmasi admin diperlukan untuk menghapus.`
+          };
+        } else {
+          // Only inactive cars, show different message but still require confirmation
+          return {
+            success: false,
+            requiresConfirmation: true,
+            references,
+            error: `Brand ini masih digunakan oleh ${references.totalReferences} mobil (semua nonaktif). Konfirmasi admin diperlukan untuk menghapus.`
+          };
+        }
+      }
+
+      // If admin confirmed or no references, proceed with deletion
+      if (references.hasReferences && adminConfirmed) {
+        console.log(`Admin confirmed hard delete of brand ${brandId} with ${references.totalReferences} total references (${references.count} active)`);
+        
+        // First, delete all cars that reference this brand
+        const { error: carsDeleteError } = await supabase
+          .from('cars')
+          .delete()
+          .eq('brand_id', brandId);
+
+        if (carsDeleteError) {
+          return {
+            success: false,
+            error: `Gagal menghapus mobil yang menggunakan brand: ${carsDeleteError.message}`
+          };
+        }
+      }
+
+      // Perform the hard delete of the brand
+      const { error } = await supabase
+        .from('car_brands')
+        .delete()
+        .eq('id', brandId);
+
+      if (error) {
+        return {
+          success: false,
+          error: `Gagal menghapus brand: ${error.message}`
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error in hardDeleteBrand:', error);
+      return {
+        success: false,
+        error: 'Terjadi kesalahan saat menghapus brand'
+      };
+    }
+  }
+
+  /**
+   * Hard delete model with validation
+   */
+  async hardDeleteModel(modelId: number, adminConfirmed: boolean = false): Promise<{ 
+    success: boolean; 
+    error?: string; 
+    requiresConfirmation?: boolean;
+    references?: { 
+      hasReferences: boolean; 
+      count: number; 
+      details: any[]; 
+      activeCars: any[]; 
+      inactiveCars: any[]; 
+      totalReferences: number; 
+    };
+  }> {
+    try {
+      // First check for references
+      const references = await this.checkModelReferences(modelId);
+      
+      // If there are ANY references (active or inactive) and admin hasn't confirmed
+      if (references.hasReferences && !adminConfirmed) {
+        // If there are active cars, require confirmation
+        if (references.count > 0) {
+          return {
+            success: false,
+            requiresConfirmation: true,
+            references,
+            error: `Model ini masih digunakan oleh ${references.count} mobil aktif. Konfirmasi admin diperlukan untuk menghapus.`
+          };
+        } else {
+          // Only inactive cars, show different message but still require confirmation
+          return {
+            success: false,
+            requiresConfirmation: true,
+            references,
+            error: `Model ini masih digunakan oleh ${references.totalReferences} mobil (semua nonaktif). Konfirmasi admin diperlukan untuk menghapus.`
+          };
+        }
+      }
+
+      // If admin confirmed or no references, proceed with deletion
+      if (references.hasReferences && adminConfirmed) {
+        console.log(`Admin confirmed hard delete of model ${modelId} with ${references.totalReferences} total references (${references.count} active)`);
+      }
+
+      // Perform the hard delete
+      const { error } = await supabase
+        .from('car_models')
+        .delete()
+        .eq('id', modelId);
+
+      if (error) {
+        return {
+          success: false,
+          error: `Gagal menghapus model: ${error.message}`
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error in hardDeleteModel:', error);
+      return {
+        success: false,
+        error: 'Terjadi kesalahan saat menghapus model'
+      };
+    }
+  }
+
+  /**
+   * Hard delete category with validation
+   */
+  async hardDeleteCategory(categoryId: number, adminConfirmed: boolean = false): Promise<{ 
+    success: boolean; 
+    error?: string; 
+    requiresConfirmation?: boolean;
+    references?: { 
+      hasReferences: boolean; 
+      count: number; 
+      details: any[]; 
+      activeCars: any[]; 
+      inactiveCars: any[]; 
+      totalReferences: number; 
+    };
+  }> {
+    try {
+      // First check for references
+      const references = await this.checkCategoryReferences(categoryId);
+      
+      // If there are ANY references (active or inactive) and admin hasn't confirmed
+      if (references.hasReferences && !adminConfirmed) {
+        // If there are active cars, require confirmation
+        if (references.count > 0) {
+          return {
+            success: false,
+            requiresConfirmation: true,
+            references,
+            error: `Kategori ini masih digunakan oleh ${references.count} mobil aktif. Konfirmasi admin diperlukan untuk menghapus.`
+          };
+        } else {
+          // Only inactive cars, show different message but still require confirmation
+          return {
+            success: false,
+            requiresConfirmation: true,
+            references,
+            error: `Kategori ini masih digunakan oleh ${references.totalReferences} mobil (semua nonaktif). Konfirmasi admin diperlukan untuk menghapus.`
+          };
+        }
+      }
+
+      // If admin confirmed or no references, proceed with deletion
+      if (references.hasReferences && adminConfirmed) {
+        console.log(`Admin confirmed hard delete of category ${categoryId} with ${references.totalReferences} total references (${references.count} active)`);
+      }
+
+      // Perform the hard delete
+      const { error } = await supabase
+        .from('car_categories')
+        .delete()
+        .eq('id', categoryId);
+
+      if (error) {
+        return {
+          success: false,
+          error: `Gagal menghapus kategori: ${error.message}`
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error in hardDeleteCategory:', error);
+      return {
+        success: false,
+        error: 'Terjadi kesalahan saat menghapus kategori'
+      };
+    }
+  }
+
+  /**
+   * Get deletion candidates (inactive items that can be safely deleted)
+   */
+  async getDeletionCandidates(): Promise<{
+    brands: any[];
+    models: any[];
+    categories: any[];
+  }> {
+    try {
+      // Get inactive brands with no active references
+      const { data: inactiveBrands } = await supabase
+        .from('car_brands')
+        .select('*')
+        .eq('is_active', false);
+
+      // Get inactive models with no active references
+      const { data: inactiveModels } = await supabase
+        .from('car_models')
+        .select('*')
+        .eq('is_active', false);
+
+      // Get inactive categories with no active references
+      const { data: inactiveCategories } = await supabase
+        .from('car_categories')
+        .select('*')
+        .eq('is_active', false);
+
+      // Filter out items that still have active references
+      const safeBrands = [];
+      const safeModels = [];
+      const safeCategories = [];
+
+      if (inactiveBrands) {
+        for (const brand of inactiveBrands) {
+          const refs = await this.checkBrandReferences(brand.id);
+          if (!refs.hasReferences) {
+            safeBrands.push({ ...brand, canDelete: true });
+          } else {
+            safeBrands.push({ ...brand, canDelete: false, activeReferences: refs.count });
+          }
+        }
+      }
+
+      if (inactiveModels) {
+        for (const model of inactiveModels) {
+          const refs = await this.checkModelReferences(model.id);
+          if (!refs.hasReferences) {
+            safeModels.push({ ...model, canDelete: true });
+          } else {
+            safeModels.push({ ...model, canDelete: false, activeReferences: refs.count });
+          }
+        }
+      }
+
+      if (inactiveCategories) {
+        for (const category of inactiveCategories) {
+          const refs = await this.checkCategoryReferences(category.id);
+          if (!refs.hasReferences) {
+            safeCategories.push({ ...category, canDelete: true });
+          } else {
+            safeCategories.push({ ...category, canDelete: false, activeReferences: refs.count });
+          }
+        }
+      }
+
+      return {
+        brands: safeBrands,
+        models: safeModels,
+        categories: safeCategories
+      };
+    } catch (error) {
+      console.error('Error getting deletion candidates:', error);
+      return {
+        brands: [],
+        models: [],
+        categories: []
+      };
+    }
+  }
 }
 
 // Export singleton instance
