@@ -793,7 +793,8 @@ class CarService {
           car_models (id, name),
           car_categories (id, name, slug),
           car_images (id, image_url, is_primary, display_order),
-          users (id, username, full_name, seller_rating, seller_type)
+          users (id, username, full_name, seller_rating, seller_type),
+          listing_payments (package_id, payment_status, activated_at, expires_at)
         `, { count: 'exact' })
         .order('created_at', { ascending: false });
 

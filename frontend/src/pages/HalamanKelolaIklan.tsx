@@ -359,6 +359,7 @@ const HalamanKelolaIklan: React.FC = () => {
       // Validate required fields
       if (!formData.title || !formData.brand_id || !formData.model_id || !formData.category_id) {
         setError('Mohon lengkapi semua field yang wajib diisi (Merek, Model, Kategori, Judul)');
+        setCurrentTab('images'); // Pindah ke tab gambar untuk menampilkan error
         return;
       }
 
@@ -849,6 +850,63 @@ const HalamanKelolaIklan: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Package Information Banner */}
+        <Card className="mb-8 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+          <CardContent className="p-6">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <h2 className="text-xl font-bold text-gray-900 mb-2 flex items-center">
+                  <Package className="w-6 h-6 mr-2 text-blue-600" />
+                  Pilihan Paket Iklan
+                </h2>
+                <p className="text-gray-700 mb-4">
+                  Kami menyediakan berbagai paket iklan mulai dari <span className="font-semibold text-green-600">GRATIS</span> hingga paket premium untuk meningkatkan visibilitas iklan Anda.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-white rounded-lg p-4 border border-gray-200">
+                    <div className="flex items-center mb-2">
+                      <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
+                      <span className="font-semibold text-green-600">Paket Gratis</span>
+                    </div>
+                    <ul className="text-sm text-gray-600 space-y-1">
+                      <li>• Iklan standar 30 hari</li>
+                      <li>• Maksimal 5 foto</li>
+                      <li>• Tampil di pencarian biasa</li>
+                    </ul>
+                  </div>
+                  <div className="bg-white rounded-lg p-4 border border-blue-200">
+                    <div className="flex items-center mb-2">
+                      <Crown className="w-5 h-5 text-blue-600 mr-2" />
+                      <span className="font-semibold text-blue-600">Paket Premium</span>
+                    </div>
+                    <ul className="text-sm text-gray-600 space-y-1">
+                      <li>• Iklan featured & highlighted</li>
+                      <li>• Maksimal 15 foto</li>
+                      <li>• Prioritas di pencarian</li>
+                    </ul>
+                  </div>
+                  <div className="bg-white rounded-lg p-4 border border-purple-200">
+                    <div className="flex items-center mb-2">
+                      <Zap className="w-5 h-5 text-purple-600 mr-2" />
+                      <span className="font-semibold text-purple-600">Paket VIP</span>
+                    </div>
+                    <ul className="text-sm text-gray-600 space-y-1">
+                      <li>• Semua fitur premium</li>
+                      <li>• Badge khusus</li>
+                      <li>• Fitur sundul iklan</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 p-3 bg-blue-100 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>💡 Tips:</strong> Anda dapat memilih paket setelah mengisi data mobil. Paket gratis tersedia untuk semua user!
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>
@@ -1870,6 +1928,19 @@ const HalamanKelolaIklan: React.FC = () => {
 
                 {/* Tab: Images */}
                 <TabsContent value="images" className="space-y-4">
+                  {/* Error Alert - Moved to Images Tab */}
+                  {error && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                      <div className="flex items-start">
+                        <AlertCircle className="w-5 h-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
+                        <div className="text-sm text-red-800">
+                          <p className="font-medium mb-1">Terjadi Kesalahan</p>
+                          <p>{error}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div>
                     <Label>Upload Gambar Mobil</Label>
                     <div className="mt-2">

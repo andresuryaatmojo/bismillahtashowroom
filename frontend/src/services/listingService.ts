@@ -128,6 +128,53 @@ class ListingService {
   }
 
   /**
+   * Check if storage bucket exists
+   */
+  async checkPaymentProofsBucket(): Promise<{ exists: boolean; error?: string }> {
+    try {
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+      
+      if (listError) {
+        console.error('Error listing buckets:', listError);
+        return { exists: false, error: listError.message };
+      }
+
+      const bucketExists = buckets?.some(bucket => bucket.name === 'payment-proofs');
+      return { exists: bucketExists };
+    } catch (error: any) {
+      console.error('Error in checkPaymentProofsBucket:', error);
+      return { exists: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get payment proof URL with proper error handling
+   */
+  async getPaymentProofUrl(proofPath: string | null): Promise<{ success: boolean; url?: string; error?: string }> {
+    try {
+      if (!proofPath) {
+        return { success: false, error: 'Bukti pembayaran belum diupload' };
+      }
+
+      // Extract filename from full URL if needed
+      let fileName = proofPath;
+      if (proofPath.includes('/payment-proofs/')) {
+        fileName = proofPath.split('/payment-proofs/')[1];
+      }
+
+      // Get public URL directly - let Supabase handle the bucket existence
+      const { data: { publicUrl } } = supabase.storage
+        .from('payment-proofs')
+        .getPublicUrl(fileName);
+
+      return { success: true, url: publicUrl };
+    } catch (error: any) {
+      console.error('Error in getPaymentProofUrl:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * Upload payment proof
    */
   async uploadPaymentProof(
@@ -162,7 +209,7 @@ class ListingService {
       const { error: updateError } = await supabase
         .from('listing_payments')
         .update({
-          proof_of_payment: publicUrl,
+          proof_of_payment: fileName, // Store just the filename, not full URL
           payment_status: 'processing'
         })
         .eq('id', paymentId);
@@ -361,6 +408,131 @@ class ListingService {
       console.error('Error checking seller mode:', error);
       return false;
     }
+  }
+
+  /**
+   * Get all payments (admin)
+   */
+  async getAllPayments(): Promise<ListingPayment[]> {
+      try {
+          const { data, error } = await supabase
+              .from('listing_payments')
+              .select('*')
+              .order('created_at', { ascending: false });
+  
+          if (error) throw error;
+          return data || [];
+      } catch (error) {
+          console.error('Error fetching all payments:', error);
+          return [];
+      }
+  }
+
+  /**
+   * Get payments by car ID
+   */
+  async getPaymentsByCarId(carId: string): Promise<ListingPayment[]> {
+      try {
+          const { data, error } = await supabase
+              .from('listing_payments')
+              .select('*')
+              .eq('car_id', carId)
+              .order('created_at', { ascending: false });
+  
+          if (error) throw error;
+          return data || [];
+      } catch (error) {
+          console.error('Error fetching payments by car:', error);
+          return [];
+      }
+  }
+
+  /**
+   * Update payment status and activate listing package if success
+   */
+  async updatePaymentStatus(
+      paymentId: string,
+      status: 'success' | 'failed' | 'processing',
+      adminId?: string
+  ): Promise<{ success: boolean; error?: string }> {
+      try {
+          // Update payment status
+          const { data: paymentData, error: selErr } = await supabase
+              .from('listing_payments')
+              .select('*')
+              .eq('id', paymentId)
+              .single();
+  
+          if (selErr) {
+              console.error('Error selecting payment:', selErr);
+              return { success: false, error: selErr.message };
+          }
+  
+          const nowIso = new Date().toISOString();
+  
+          const { error: updErr } = await supabase
+              .from('listing_payments')
+              .update({
+                  payment_status: status,
+                  verified_by: adminId || null,
+                  verified_at: status === 'success' ? nowIso : null
+              })
+              .eq('id', paymentId);
+  
+          if (updErr) {
+              console.error('Error updating payment status:', updErr);
+              return { success: false, error: updErr.message };
+          }
+  
+          // If success, activate the package on the car and set activation window
+          if (status === 'success') {
+              // Get package duration
+              const pkg = await this.getPackageById(paymentData.package_id);
+              if (!pkg) {
+                  return { success: false, error: 'Paket tidak ditemukan saat aktivasi' };
+              }
+  
+              // Activate listing on car
+              const startDate = new Date();
+              const endDate = new Date();
+              endDate.setDate(endDate.getDate() + pkg.duration_days);
+  
+              // Update car with package
+              const { error: carErr } = await supabase
+                  .from('cars')
+                  .update({
+                      package_id: paymentData.package_id,
+                      listing_start_date: startDate.toISOString(),
+                      listing_end_date: endDate.toISOString(),
+                      status: 'pending' // tetap menunggu approve admin
+                  })
+                  .eq('id', paymentData.car_id);
+  
+              if (carErr) {
+                  console.error('Error activating package on car:', carErr);
+                  return { success: false, error: carErr.message };
+              }
+  
+              // Update payment activation window
+              const { error: payUpdErr } = await supabase
+                  .from('listing_payments')
+                  .update({
+                      activated_at: startDate.toISOString(),
+                      expires_at: endDate.toISOString()
+                  })
+                  .eq('id', paymentId);
+  
+              if (payUpdErr) {
+                  console.error('Error updating payment activation window:', payUpdErr);
+                  return { success: false, error: payUpdErr.message };
+              }
+          }
+  
+          return { success: true };
+      } catch (error: any) {
+          console.error('Error in updatePaymentStatus:', error);
+          return { success: false, error: error.message };
+      }
   }
 }
 
