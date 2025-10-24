@@ -19,6 +19,7 @@ import {
 import { carService } from '../services/carService';
 import { testDriveService } from '../services/testDriveService';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface BookingForm {
   fullName: string;
@@ -33,7 +34,8 @@ interface BookingForm {
 const HalamanDetailMobil: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [car, setCar] = useState<any | null>(null);
+  const { user } = useAuth();
+  const [car, setCar] = useState<any>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [bookingForm, setBookingForm] = useState<BookingForm>({
@@ -45,8 +47,8 @@ const HalamanDetailMobil: React.FC = () => {
     message: '',
     bookingType: 'test-drive'
   });
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -245,7 +247,7 @@ const HalamanDetailMobil: React.FC = () => {
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Back Button - Positioned to the left */}
-        <div className="flex justify-start mb-4">
+        <div className="flex justify-start mb-4 space-x-2">
           <Button 
             variant="ghost" 
             className="flex items-center gap-2 hover:bg-gray-100"
@@ -254,6 +256,18 @@ const HalamanDetailMobil: React.FC = () => {
             <ArrowLeft className="w-4 h-4" />
             Kembali ke Katalog
           </Button>
+          
+          {/* Admin-only button to return to car management */}
+          {user?.role === 'admin' && (
+            <Button 
+              variant="outline" 
+              className="flex items-center gap-2 hover:bg-blue-50 border-blue-200 text-blue-600"
+              onClick={() => navigate('/admin/mobil-showroom')}
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Kembali ke Mobil Showroom
+            </Button>
+          )}
         </div>
 
         {/* Header */}

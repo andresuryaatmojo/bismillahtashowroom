@@ -141,6 +141,10 @@ const HalamanKelolaIklan: React.FC = () => {
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   
+  // Existing images management
+  const [existingImages, setExistingImages] = useState<Array<{id: string, image_url: string}>>([]);
+  const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
+  
   // Statistics
   const [statistics, setStatistics] = useState({
     total: 0,
@@ -306,45 +310,98 @@ const HalamanKelolaIklan: React.FC = () => {
 
   // Handle image selection
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('handleImageSelect called'); // Debug log
     if (e.target.files) {
       const files = Array.from(e.target.files);
+      console.log('Selected files:', files); // Debug log
       const newPreviewUrls = files.map(file => URL.createObjectURL(file));
       
-      setSelectedImages(prev => [...prev, ...files]);
-      setImagePreviewUrls(prev => [...prev, ...newPreviewUrls]);
+      setSelectedImages(prev => {
+        const updated = [...prev, ...files];
+        console.log('Updated selectedImages:', updated); // Debug log
+        return updated;
+      });
+      setImagePreviewUrls(prev => {
+        const updated = [...prev, ...newPreviewUrls];
+        console.log('Updated imagePreviewUrls:', updated); // Debug log
+        return updated;
+      });
     }
   };
 
   // Remove selected image
   const removeSelectedImage = (index: number) => {
+    console.log('removeSelectedImage called with index:', index); // Debug log
     URL.revokeObjectURL(imagePreviewUrls[index]);
-    setSelectedImages(prev => prev.filter((_, i) => i !== index));
-    setImagePreviewUrls(prev => prev.filter((_, i) => i !== index));
+    setSelectedImages(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      console.log('Updated selectedImages:', updated); // Debug log
+      return updated;
+    });
+    setImagePreviewUrls(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      console.log('Updated imagePreviewUrls:', updated); // Debug log
+      return updated;
+    });
   };
 
   // Upload images
   const uploadImages = async (carId: string) => {
     setUploadingImages(true);
     try {
-      for (let i = 0; i < selectedImages.length; i++) {
-        const file = selectedImages[i];
-        const uploadResult = await carService.uploadCarImage(file, carId);
-        
-        if (!uploadResult.success || !uploadResult.url) {
-          console.error('Failed to upload image:', uploadResult.error);
-          continue;
+      // 1) Hapus gambar yang ditandai untuk dihapus
+      if (imagesToDelete.length > 0) {
+        console.log('Deleting images:', imagesToDelete);
+        for (const imageId of imagesToDelete) {
+          const del = await carService.deleteCarImage(imageId);
+          if (!del.success) {
+            console.error('Failed to delete image:', imageId, del.error);
+          } else {
+            console.log('Deleted image:', imageId);
+          }
         }
+      }
 
-        await carService.saveCarImageToDb(carId, uploadResult.url, i === 0, i);
+      // 2) Upload gambar baru jika ada
+      if (selectedImages.length > 0) {
+        for (let i = 0; i < selectedImages.length; i++) {
+          const file = selectedImages[i];
+
+          const uploadResult = await carService.uploadCarImage(file, carId);
+          if (!uploadResult.success || !uploadResult.url) {
+            console.error('Failed to upload image:', uploadResult.error);
+            continue;
+          }
+
+          // Gambar pertama hanya jadi primary jika tidak ada existing images lagi
+          const isPrimary = i === 0 && existingImages.length === 0;
+          const displayOrder = i + existingImages.length;
+
+          const saveResult = await carService.saveCarImageToDb(
+            carId,
+            uploadResult.url,
+            isPrimary,
+            displayOrder
+          );
+
+          if (!saveResult.success) {
+            console.error('Failed to save image to db:', saveResult.error);
+          } else {
+            console.log('Saved image to db:', uploadResult.url);
+          }
+        }
       }
     } catch (err) {
-      console.error('Error uploading images:', err);
+      console.error('Error uploading/deleting images:', err);
       throw err;
     } finally {
       setUploadingImages(false);
+
+      // Bersihkan preview URL dan reset state gambar
       imagePreviewUrls.forEach(url => URL.revokeObjectURL(url));
       setSelectedImages([]);
       setImagePreviewUrls([]);
+      setImagesToDelete([]);
     }
   };
 
@@ -408,6 +465,11 @@ const HalamanKelolaIklan: React.FC = () => {
         // Simpan/Update spesifikasi
         if (formData.specifications) {
           await carService.updateCarSpecifications(carId, formData.specifications);
+        }
+
+        // Handle image updates (delete and upload)
+        if (selectedImages.length > 0 || imagesToDelete.length > 0) {
+          await uploadImages(carId);
         }
         
         await loadCars();
@@ -486,6 +548,42 @@ const HalamanKelolaIklan: React.FC = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Remove existing image (mark for deletion)
+  const removeExistingImage = (imageId: string) => {
+    console.log('removeExistingImage called with imageId:', imageId); // Debug log
+    
+    // Add to delete list
+    setImagesToDelete(prev => {
+      if (prev.includes(imageId)) {
+        console.log('Image already in delete list'); // Debug log
+        return prev;
+      }
+      const updated = [...prev, imageId];
+      console.log('Updated imagesToDelete:', updated); // Debug log
+      return updated;
+    });
+    
+    // Remove from existing images display - Force new array creation
+    setExistingImages(prev => {
+      console.log('Original existingImages before filter:', prev); // Debug log
+      console.log('Trying to remove imageId:', imageId); // Debug log
+      
+      const filtered = prev.filter(img => {
+        console.log('Checking img.id:', img.id, 'against imageId:', imageId); // Debug log
+        return img.id !== imageId;
+      });
+      
+      // Create completely new array with new object references
+      const updated = filtered.map(img => ({ ...img }));
+      
+      console.log('Updated existingImages after filter:', updated); // Debug log
+      console.log('Length before:', prev.length, 'Length after:', updated.length); // Debug log
+      
+      // Force re-render by returning new array reference
+      return [...updated];
+    });
   };
 
   // Handler quick-add
@@ -669,12 +767,33 @@ const HalamanKelolaIklan: React.FC = () => {
 
   // Handle edit
   const handleEdit = async (car: any) => {
+    console.log('handleEdit called with car:', car); // Debug log
+    console.log('car.car_images:', car.car_images); // Debug log
+    
     setSelectedCar(car);
     setLoading(true);
     try {
       // Ambil data lengkap termasuk spesifikasi
       const full = await carService.getCarById(car.id);
       const specs = full?.car_specifications || null;
+
+      // Load existing images
+      if (car.car_images && car.car_images.length > 0) {
+        const images = car.car_images.map((img: any) => ({
+          id: img.id,
+          image_url: img.image_url
+        }));
+        console.log('Setting existingImages:', images); // Debug log
+        setExistingImages(images);
+      } else {
+        console.log('No car_images found, setting empty array'); // Debug log
+        setExistingImages([]);
+      }
+
+      // Reset image states
+      setImagesToDelete([]);
+      setSelectedImages([]);
+      setImagePreviewUrls([]);
 
       setFormData({
         title: car.title,
@@ -1967,9 +2086,39 @@ const HalamanKelolaIklan: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Existing Images - Only show in edit mode */}
+                  {isEditMode && existingImages.length > 0 && (
+                    <div>
+                      <Label>Gambar Saat Ini ({existingImages.length})</Label>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                        {existingImages.map((image, index) => (
+                          <div key={image.id} className="relative group">
+                            <img
+                              src={image.image_url}
+                              alt={`Existing ${index + 1}`}
+                              className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeExistingImage(image.id)}
+                              className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <XCircle className="w-5 h-5" />
+                            </button>
+                            {index === 0 && existingImages.length > 0 && imagePreviewUrls.length === 0 && (
+                              <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
+                                Utama
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {imagePreviewUrls.length > 0 && (
                     <div>
-                      <Label>Preview Gambar ({imagePreviewUrls.length})</Label>
+                      <Label>Preview Gambar Baru ({imagePreviewUrls.length})</Label>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
                         {imagePreviewUrls.map((url, index) => (
                           <div key={index} className="relative group">
@@ -1985,9 +2134,9 @@ const HalamanKelolaIklan: React.FC = () => {
                             >
                               <XCircle className="w-5 h-5" />
                             </button>
-                            {index === 0 && (
+                            {((existingImages.length === 0 && index === 0) || (existingImages.length > 0 && index === 0)) && (
                               <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                                Utama
+                                {existingImages.length === 0 ? 'Utama' : 'Utama Baru'}
                               </div>
                             )}
                           </div>

@@ -98,6 +98,8 @@ const HalamanKelolaMobil: React.FC = () => {
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [existingImages, setExistingImages] = useState<any[]>([]);
+  const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
   
   // Filters
   const [filters, setFilters] = useState({
@@ -302,6 +304,12 @@ const HalamanKelolaMobil: React.FC = () => {
     
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
     setImagePreviewUrls(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Remove existing image (mark for deletion)
+  const removeExistingImage = (imageId: string) => {
+    setImagesToDelete(prev => [...prev, imageId]);
+    setExistingImages(prev => prev.filter(img => img.id !== imageId));
   };
 
   // Handle quick-add functions
@@ -679,6 +687,12 @@ const HalamanKelolaMobil: React.FC = () => {
   const uploadImages = async (carId: string) => {
     setUploadingImages(true);
     try {
+      // Delete marked images first
+      for (const imageId of imagesToDelete) {
+        await carService.deleteCarImage(imageId);
+      }
+
+      // Upload new images
       for (let i = 0; i < selectedImages.length; i++) {
         const file = selectedImages[i];
         
@@ -693,8 +707,8 @@ const HalamanKelolaMobil: React.FC = () => {
         await carService.saveCarImageToDb(
           carId, 
           uploadResult.url, 
-          i === 0, // First image is primary
-          i
+          i === 0 && existingImages.length === 0, // First image is primary only if no existing images
+          i + existingImages.length // Adjust order based on existing images
         );
       }
     } catch (err) {
@@ -707,6 +721,7 @@ const HalamanKelolaMobil: React.FC = () => {
       imagePreviewUrls.forEach(url => URL.revokeObjectURL(url));
       setSelectedImages([]);
       setImagePreviewUrls([]);
+      setImagesToDelete([]);
     }
   };
 
@@ -756,7 +771,7 @@ const HalamanKelolaMobil: React.FC = () => {
       }
 
       // Upload images if any
-      if (selectedImages.length > 0 && carId) {
+      if (selectedImages.length > 0 || imagesToDelete.length > 0) {
         await uploadImages(carId);
       }
 
@@ -853,6 +868,8 @@ const HalamanKelolaMobil: React.FC = () => {
     imagePreviewUrls.forEach(url => URL.revokeObjectURL(url));
     setSelectedImages([]);
     setImagePreviewUrls([]);
+    setExistingImages([]);
+    setImagesToDelete([]);
     setError(null);
   };
 
@@ -907,6 +924,18 @@ const HalamanKelolaMobil: React.FC = () => {
         has_modern_head_unit: false,
       }
     });
+    
+    // Load existing images for edit mode
+    console.log('Car data:', car); // Debug log
+    console.log('Car images:', car.car_images); // Debug log
+    if (car.car_images && car.car_images.length > 0) {
+      setExistingImages(car.car_images);
+      console.log('Setting existing images:', car.car_images); // Debug log
+    } else {
+      setExistingImages([]);
+      console.log('No existing images found'); // Debug log
+    }
+    
     setIsEditMode(true);
     setShowModal(true);
   };
@@ -1115,7 +1144,7 @@ const HalamanKelolaMobil: React.FC = () => {
               </div>
 
               <Button 
-                variant="outline"
+                variant="destructive"
                 onClick={() => setFilters({
                   search: '', status: '', condition: '', year_min: '', year_max: '', price_min: '', price_max: ''
                 })}
@@ -2413,6 +2442,36 @@ const HalamanKelolaMobil: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Existing Images (Edit Mode) */}
+                  {isEditMode && existingImages.length > 0 && (
+                    <div>
+                      <Label>Gambar yang Sudah Ada ({existingImages.length})</Label>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                        {existingImages.map((image, index) => (
+                          <div key={image.id} className="relative group">
+                            <img
+                              src={image.image_url}
+                              alt={`Existing ${index + 1}`}
+                              className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeExistingImage(image.id)}
+                              className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <XCircle className="w-5 h-5" />
+                            </button>
+                            {image.is_primary && (
+                              <div className="absolute bottom-2 left-2 bg-green-600 text-white text-xs px-2 py-1 rounded">
+                                Gambar Utama
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Image Previews */}
                   {imagePreviewUrls.length > 0 && (
                     <div>
@@ -2432,7 +2491,7 @@ const HalamanKelolaMobil: React.FC = () => {
                             >
                               <XCircle className="w-5 h-5" />
                             </button>
-                            {index === 0 && (
+                            {index === 0 && existingImages.length === 0 && (
                               <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
                                 Gambar Utama
                               </div>
@@ -2449,7 +2508,7 @@ const HalamanKelolaMobil: React.FC = () => {
                         <AlertCircle className="w-5 h-5 text-blue-600 mr-2 flex-shrink-0 mt-0.5" />
                         <div className="text-sm text-blue-800">
                           <p className="font-medium mb-1">Mode Edit</p>
-                          <p>Gambar yang di-upload akan ditambahkan ke gambar yang sudah ada. Untuk mengganti gambar lama, hapus terlebih dahulu di halaman detail mobil.</p>
+                          <p>Anda dapat menghapus gambar yang sudah ada dengan mengklik tombol X pada gambar. Gambar baru yang di-upload akan ditambahkan ke gambar yang tersisa.</p>
                         </div>
                       </div>
                     </div>
