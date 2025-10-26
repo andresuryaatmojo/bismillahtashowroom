@@ -270,20 +270,77 @@ const HalamanDetailMobil: React.FC = () => {
           )}
         </div>
 
-        {/* Header */}
-        <motion.div 
-          className="mb-8"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold text-gray-900">
+        {/* Header with Image Side by Side */}
+        <div className="grid grid-cols-1 lg:grid-cols-6 gap-8 mb-8">
+          {/* Image Gallery - Left Side (Wider) */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="lg:col-span-4"
+          >
+            <Card className="overflow-hidden h-full">
+              <CardContent className="p-0 h-full">
+                <div className="relative h-full">
+                  <img
+                    src={car.car_images[selectedImageIndex]?.image_url || 'https://via.placeholder.com/800x600'}
+                    alt={car.title}
+                    className="w-full h-full object-cover min-h-[400px]"
+                  />
+                  <div className="absolute bottom-4 left-4 right-4">
+                    <div className="flex space-x-2 overflow-x-auto">
+                      {car.car_images.map((image: any, index: number) => (
+                        <button
+                          key={image.id}
+                          onClick={() => setSelectedImageIndex(index)}
+                          className={`flex-shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-colors ${
+                            selectedImageIndex === index ? 'border-blue-600' : 'border-white'
+                          }`}
+                        >
+                          <img
+                            src={image.image_url}
+                            alt={`Thumbnail ${index + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* Car Title and Price - Right Side (Narrower) */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="flex items-start justify-end lg:col-span-2"
+          >
+            <div className="text-right">
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">
                 {car.title}
               </h1>
-              <p className="text-lg text-gray-600 mt-1">{car.car_categories?.name} • {car.location_city}</p>
-              <div className="flex items-center mt-2 space-x-4">
+              <p className="text-lg text-gray-600 mb-3">{car.car_categories?.name} • {car.location_city}</p>
+              
+              {/* Price Section */}
+              <div className="mb-4">
+                <div className="text-3xl font-bold text-blue-600">
+                  {formatCurrency(car.price)}
+                </div>
+                {car.market_price && car.market_price > car.price && (
+                  <div className="text-lg text-gray-500 line-through">
+                    {formatCurrency(car.market_price)}
+                  </div>
+                )}
+                {car.is_negotiable && (
+                  <Badge variant="outline" className="mt-2">Harga Nego</Badge>
+                )}
+              </div>
+
+              {/* Badges Section */}
+              <div className="flex items-center justify-end mt-2 space-x-4 flex-wrap">
                 <Badge variant={car.condition === 'new' ? 'default' : 'secondary'}>
                   <Car className="w-3 h-3 mr-1" />
                   {car.condition === 'new' ? 'Baru' : 'Bekas'}
@@ -304,62 +361,12 @@ const HalamanDetailMobil: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-3xl font-bold text-blue-600">
-                {formatCurrency(car.price)}
-              </div>
-              {car.market_price && car.market_price > car.price && (
-                <div className="text-lg text-gray-500 line-through">
-                  {formatCurrency(car.market_price)}
-                </div>
-              )}
-              {car.is_negotiable && (
-                <Badge variant="outline" className="mt-2">Harga Nego</Badge>
-              )}
-            </div>
-          </div>
-        </motion.div>
+          </motion.div>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column */}
           <div className="lg:col-span-2 space-y-8">
-            {/* Image Gallery */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-            >
-              <Card className="overflow-hidden">
-                <CardContent className="p-0">
-                  <div className="relative">
-                    <img
-                      src={car.car_images[selectedImageIndex]?.image_url || 'https://via.placeholder.com/800x600'}
-                      alt={car.title}
-                      className="w-full h-96 object-cover"
-                    />
-                    <div className="absolute bottom-4 left-4 right-4">
-                      <div className="flex space-x-2 overflow-x-auto">
-                        {car.car_images.map((image: any, index: number) => (
-                          <button
-                            key={image.id}
-                            onClick={() => setSelectedImageIndex(index)}
-                            className={`flex-shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-colors ${
-                              selectedImageIndex === index ? 'border-blue-600' : 'border-white'
-                            }`}
-                          >
-                            <img
-                              src={image.image_url}
-                              alt={`Thumbnail ${index + 1}`}
-                              className="w-full h-full object-cover"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
 
             {/* Description */}
             <motion.div
@@ -378,29 +385,6 @@ const HalamanDetailMobil: React.FC = () => {
                   <p className="text-gray-600 leading-relaxed">
                     {car.description || 'Tidak ada deskripsi tersedia.'}
                   </p>
-                  
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Gauge className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-                      <div className="font-bold">{car.mileage?.toLocaleString('id-ID') || 0} km</div>
-                      <div className="text-sm text-gray-600">Kilometer</div>
-                    </div>
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Settings className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-                      <div className="font-bold">{getTransmissionLabel(car.transmission)}</div>
-                      <div className="text-sm text-gray-600">Transmisi</div>
-                    </div>
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Fuel className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-                      <div className="font-bold">{getFuelTypeLabel(car.fuel_type)}</div>
-                      <div className="text-sm text-gray-600">Bahan Bakar</div>
-                    </div>
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Zap className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-                      <div className="font-bold">{car.engine_capacity || 0} cc</div>
-                      <div className="text-sm text-gray-600">Mesin</div>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
             </motion.div>
@@ -541,129 +525,6 @@ const HalamanDetailMobil: React.FC = () => {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.6, delay: 0.4 }}
               >
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Settings className="w-5 h-5 mr-2" />
-                      Spesifikasi Detail
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                      {specs.doors && (
-                        <div className="flex justify-between py-2 border-b">
-                          <span className="text-gray-600">Pintu</span>
-                          <span className="font-medium">{specs.doors}</span>
-                        </div>
-                      )}
-                      {specs.seats && (
-                        <div className="flex justify-between py-2 border-b">
-                          <span className="text-gray-600">Tempat Duduk</span>
-                          <span className="font-medium">{specs.seats}</span>
-                        </div>
-                      )}
-                      {specs.airbags && (
-                        <div className="flex justify-between py-2 border-b">
-                          <span className="text-gray-600">Airbags</span>
-                          <span className="font-medium">{specs.airbags}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <Separator />
-
-                    {/* Safety Features */}
-                    <div>
-                      <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                        <Shield className="w-4 h-4 mr-2" />
-                        Fitur Keselamatan
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2">
-                        {specs.has_abs && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">ABS</span>
-                          </div>
-                        )}
-                        {specs.has_ebd && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">EBD</span>
-                          </div>
-                        )}
-                        {specs.has_esc && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">ESC</span>
-                          </div>
-                        )}
-                        {specs.has_parking_sensor && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Parking Sensor</span>
-                          </div>
-                        )}
-                        {specs.has_parking_camera && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Parking Camera</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    {/* Comfort Features */}
-                    <div>
-                      <h4 className="font-semibold text-gray-900 mb-3">Fitur Kenyamanan</h4>
-                      <div className="grid grid-cols-2 gap-2">
-                        {specs.has_ac && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">AC</span>
-                          </div>
-                        )}
-                        {specs.has_power_steering && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Power Steering</span>
-                          </div>
-                        )}
-                        {specs.has_power_window && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Power Window</span>
-                          </div>
-                        )}
-                        {specs.has_central_lock && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Central Lock</span>
-                          </div>
-                        )}
-                        {specs.has_keyless_entry && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Keyless Entry</span>
-                          </div>
-                        )}
-                        {specs.has_push_start && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Push Start</span>
-                          </div>
-                        )}
-                        {specs.has_sunroof && (
-                          <div className="flex items-center">
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                            <span className="text-sm">Sunroof</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
               </motion.div>
             )}
 
