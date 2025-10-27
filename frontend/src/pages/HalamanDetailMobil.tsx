@@ -14,7 +14,7 @@ import { Separator } from '../components/ui/separator';
 import { 
   Car, Phone, MapPin, Star, Calendar, Clock, CheckCircle, 
   Fuel, Gauge, Settings, Zap, Shield, Award, CreditCard, ArrowLeft, Loader2,
-  Camera, KeyRound, Power, Bluetooth, Usb, Fan, Wifi, Sun, Monitor, Radar
+  Camera, KeyRound, Power, Bluetooth, Usb, Fan, Wifi, Sun, Monitor, Radar, MessageSquare
 } from 'lucide-react';
 import { carService } from '../services/carService';
 import { testDriveService } from '../services/testDriveService';
@@ -50,13 +50,19 @@ const HalamanDetailMobil: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showBookingModal, setShowBookingModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isInWishlist, setIsInWishlist] = useState(false);
 
   useEffect(() => {
     loadCarData();
     loadUser();
-  }, [id]);
+    if (id && user) {
+      checkWishlistStatus(id);
+    }
+  }, [id, user]);
 
+  // Load user data
   const loadUser = async () => {
     const { data } = await supabase.auth.getUser();
     if (data.user) {
@@ -76,6 +82,68 @@ const HalamanDetailMobil: React.FC = () => {
           phone: userData.phone_number || ''
         }));
       }
+    }
+  };
+
+  // Check if car is in user's wishlist
+  const checkWishlistStatus = async (carId: string) => {
+    if (!user) return;
+    
+    try {
+      const { data } = await supabase
+        .from('wishlists')
+        .select('*')
+        .eq('car_id', carId)
+        .eq('user_id', user.id)
+        .single();
+      
+      setIsInWishlist(!!data);
+    } catch (error) {
+      console.error('Error checking wishlist status:', error);
+    }
+  };
+
+  // Toggle wishlist status
+  const handleToggleWishlist = async () => {
+    if (!user) {
+      navigate('/login', { state: { from: `/mobil/${id}` } });
+      return;
+    }
+
+    try {
+      if (isInWishlist) {
+        // Remove from wishlist
+        await supabase
+          .from('wishlists')
+          .delete()
+          .eq('car_id', id)
+          .eq('user_id', user.id);
+      } else {
+        // Add to wishlist
+        await supabase
+          .from('wishlists')
+          .insert([{ car_id: id, user_id: user.id }]);
+      }
+      
+      // Toggle state
+      setIsInWishlist(!isInWishlist);
+    } catch (error) {
+      console.error('Error toggling wishlist:', error);
+    }
+  };
+
+  // Handle share functionality
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: car?.title || 'Detail Mobil',
+        text: `Lihat ${car?.title} di Bismillah Showroom`,
+        url: window.location.href
+      }).catch(err => console.error('Error sharing:', err));
+    } else {
+      // Fallback - copy to clipboard
+      navigator.clipboard.writeText(window.location.href);
+      alert('Link berhasil disalin ke clipboard!');
     }
   };
 
@@ -132,7 +200,8 @@ const HalamanDetailMobil: React.FC = () => {
         scheduled_date: bookingForm.preferredDate,
         scheduled_time: bookingForm.preferredTime,
         user_notes: bookingForm.message,
-        location: 'Showroom'
+        location: 'Showroom',
+        duration_minutes: 30 // Durasi default 30 menit
       });
 
       console.log('Test drive result:', result);
@@ -318,47 +387,115 @@ const HalamanDetailMobil: React.FC = () => {
             transition={{ duration: 0.6 }}
             className="flex items-start justify-end lg:col-span-2"
           >
-            <div className="text-right">
-              <h1 className="text-4xl font-bold text-gray-900 mb-2">
+            <div className="w-full">
+              {/* 1. Judul Mobil */}
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">
                 {car.title}
               </h1>
-              <p className="text-lg text-gray-600 mb-3">{car.car_categories?.name} • {car.location_city}</p>
               
-              {/* Price Section */}
-              <div className="mb-4">
-                <div className="text-3xl font-bold text-blue-600">
-                  {formatCurrency(car.price)}
+              {/* 2. Kilometer | Transmisi */}
+              <p className="text-lg text-gray-600 mb-4">
+                {car.mileage?.toLocaleString() || '0'} km | {car.transmission || 'Manual'}
+              </p>
+              
+              {/* 3. Harga */}
+              <div className="mb-5">
+                <div className="text-3xl font-bold text-red-600">
+                  Rp {car.price?.toLocaleString() || '0'}
                 </div>
                 {car.market_price && car.market_price > car.price && (
                   <div className="text-lg text-gray-500 line-through">
-                    {formatCurrency(car.market_price)}
+                    Rp {car.market_price?.toLocaleString() || '0'}{car.is_negotiable ? '(Cash)' : ''}
                   </div>
                 )}
-                {car.is_negotiable && (
-                  <Badge variant="outline" className="mt-2">Harga Nego</Badge>
-                )}
               </div>
-
-              {/* Badges Section */}
-              <div className="flex items-center justify-end mt-2 space-x-4 flex-wrap">
-                <Badge variant={car.condition === 'new' ? 'default' : 'secondary'}>
-                  <Car className="w-3 h-3 mr-1" />
-                  {car.condition === 'new' ? 'Baru' : 'Bekas'}
-                </Badge>
-                <Badge variant={car.status === 'available' ? 'default' : 'destructive'}>
-                  <CheckCircle className="w-3 h-3 mr-1" />
-                  {car.status === 'available' ? 'Tersedia' : 'Tidak Tersedia'}
-                </Badge>
-                {car.is_verified && (
-                  <Badge className="bg-emerald-500">
-                    <CheckCircle className="w-3 h-3 mr-1" />
-                    Terverifikasi
-                  </Badge>
-                )}
-                <div className="flex items-center text-yellow-500">
-                  <Star className="w-4 h-4 mr-1 fill-current" />
-                  <span className="text-sm font-medium">{car.average_rating?.toFixed(1) || '0.0'}</span>
+              
+              {/* 4. Simulasi Kredit, Wishlist, Share */}
+              <div className="flex items-center justify-between mt-4">
+                <Button 
+                  variant="outline" 
+                  className="flex items-center gap-2 text-blue-600 border-blue-600"
+                  onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  Simulasi Kredit
+                </Button>
+                
+                <div className="flex items-center gap-3">
+                  <Button 
+                    variant="ghost" 
+                    className="rounded-full w-10 h-10 p-0 flex items-center justify-center hover:bg-red-50"
+                    onClick={() => handleToggleWishlist()}
+                  >
+                    {isInWishlist ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                      </svg>
+                    )}
+                  </Button>
+                  
+                  <Button 
+                    variant="ghost" 
+                    className="rounded-full w-10 h-10 p-0 flex items-center justify-center hover:bg-blue-50"
+                    onClick={() => handleShare()}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="18" cy="5" r="3"></circle>
+                      <circle cx="6" cy="12" r="3"></circle>
+                      <circle cx="18" cy="19" r="3"></circle>
+                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                    </svg>
+                  </Button>
                 </div>
+              </div>
+              
+              {/* Pembatas horizontal */}
+              <div className="w-full h-px bg-gray-200 my-6"></div>
+              
+              {/* Tombol Kontak dan Booking */}
+              <div className="grid grid-cols-5 gap-4 mt-4">
+                <div 
+                  className="flex items-center justify-center cursor-pointer text-blue-600 hover:text-blue-800"
+                  onClick={() => window.location.href = `tel:${car.seller_phone || '+6281234567890'}`}
+                >
+                  <Phone className="w-4 h-4" />
+                </div>
+                
+                <Button 
+                  variant="outline" 
+                  className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 col-span-2"
+                  onClick={() => setShowBookingModal(true)}
+                >
+                  Pesan Mobil
+                </Button>
+                
+                <Button 
+                  variant="default" 
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white col-span-2"
+                  onClick={() => setShowBookingModal(true)}
+                >
+                  Tes Drive Gratis
+                </Button>
+              </div>
+              
+              {/* WhatsApp Bantuan */}
+              <div className="mt-6 bg-gray-100 p-4 rounded-lg flex items-center justify-between">
+                <span className="text-gray-600">Butuh bantuan? Hubungi kami melalui</span>
+                <Button 
+                  variant="default" 
+                  className="bg-green-500 hover:bg-green-600 flex items-center gap-2"
+                  onClick={() => window.open(`https://wa.me/${car.whatsapp_contact || '6281234567890'}`, '_blank')}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="white">
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                  </svg>
+                  WhatsApp
+                </Button>
               </div>
             </div>
           </motion.div>
@@ -587,7 +724,7 @@ const HalamanDetailMobil: React.FC = () => {
             </motion.div>
           </div>
 
-          {/* Right Column - Booking Form */}
+          {/* Right Column - Price Information */}
           <div className="lg:col-span-1">
             <motion.div
               className="sticky top-8"
@@ -598,111 +735,11 @@ const HalamanDetailMobil: React.FC = () => {
               <Card className="shadow-lg">
                 <CardHeader>
                   <CardTitle className="flex items-center">
-                    <Calendar className="w-5 h-5 mr-2" />
-                    Booking Test Drive
+                    <CreditCard className="w-5 h-5 mr-2" />
+                    Informasi Harga
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <form onSubmit={handleBookingSubmit} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="fullName">Nama Lengkap</Label>
-                      <Input
-                        id="fullName"
-                        placeholder="Masukkan nama lengkap"
-                        value={bookingForm.fullName}
-                        onChange={(e) => setBookingForm({...bookingForm, fullName: e.target.value})}
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="Masukkan email"
-                        value={bookingForm.email}
-                        onChange={(e) => setBookingForm({...bookingForm, email: e.target.value})}
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Nomor Telepon</Label>
-                      <Input
-                        id="phone"
-                        placeholder="Masukkan nomor telepon"
-                        value={bookingForm.phone}
-                        onChange={(e) => setBookingForm({...bookingForm, phone: e.target.value})}
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="preferredDate">Tanggal Preferensi</Label>
-                      <Input
-                        id="preferredDate"
-                        type="date"
-                        value={bookingForm.preferredDate}
-                        onChange={(e) => setBookingForm({...bookingForm, preferredDate: e.target.value})}
-                        required
-                        min={new Date().toISOString().split('T')[0]}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="preferredTime">Waktu Preferensi</Label>
-                      <Select 
-                        value={bookingForm.preferredTime} 
-                        onValueChange={(value) => setBookingForm({...bookingForm, preferredTime: value})}
-                        required
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Pilih waktu" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {timeSlots.map((time) => (
-                            <SelectItem key={time} value={time}>
-                              <div className="flex items-center">
-                                <Clock className="w-4 h-4 mr-2" />
-                                {time}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="message">Pesan (Opsional)</Label>
-                      <Textarea
-                        id="message"
-                        placeholder="Tambahkan pesan atau pertanyaan..."
-                        value={bookingForm.message}
-                        onChange={(e) => setBookingForm({...bookingForm, message: e.target.value})}
-                        rows={3}
-                      />
-                    </div>
-
-                    <Button
-                      type="submit"
-                      size="lg"
-                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
-                      disabled={submitting || car.status !== 'available'}
-                    >
-                      {submitting ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Memproses...
-                        </>
-                      ) : (
-                        'Kirim Permintaan'
-                      )}
-                    </Button>
-                  </form>
-
-                  <Separator />
-
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <span className="text-lg font-semibold text-gray-900">Harga</span>
@@ -724,10 +761,20 @@ const HalamanDetailMobil: React.FC = () => {
                       variant="outline"
                       size="lg"
                       className="w-full"
-                      onClick={() => alert('Fitur simulasi kredit segera hadir!')}
+                      onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
                     >
                       <CreditCard className="w-4 h-4 mr-2" />
                       Simulasi Kredit
+                    </Button>
+                    
+                    <Button
+                      variant="default"
+                      size="lg"
+                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
+                      onClick={() => setShowBookingModal(true)}
+                    >
+                      <Calendar className="w-4 h-4 mr-2" />
+                      Booking Test Drive
                     </Button>
                   </div>
                 </CardContent>
@@ -736,6 +783,125 @@ const HalamanDetailMobil: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Booking Modal */}
+      <Dialog open={showBookingModal} onOpenChange={setShowBookingModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-blue-600">
+              Booking Test Drive
+            </DialogTitle>
+            <DialogDescription>
+              Isi formulir di bawah untuk menjadwalkan test drive mobil {car.title}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleBookingSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="fullName">Nama Lengkap</Label>
+              <Input
+                id="fullName"
+                placeholder="Masukkan nama lengkap"
+                value={bookingForm.fullName}
+                onChange={(e) => setBookingForm({...bookingForm, fullName: e.target.value})}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="Masukkan email"
+                value={bookingForm.email}
+                onChange={(e) => setBookingForm({...bookingForm, email: e.target.value})}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone">Nomor Telepon</Label>
+              <Input
+                id="phone"
+                placeholder="Masukkan nomor telepon"
+                value={bookingForm.phone}
+                onChange={(e) => setBookingForm({...bookingForm, phone: e.target.value})}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="preferredDate">Tanggal Preferensi</Label>
+              <Input
+                id="preferredDate"
+                type="date"
+                value={bookingForm.preferredDate}
+                onChange={(e) => setBookingForm({...bookingForm, preferredDate: e.target.value})}
+                required
+                min={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="preferredTime">Waktu Preferensi</Label>
+              <Select 
+                value={bookingForm.preferredTime} 
+                onValueChange={(value) => setBookingForm({...bookingForm, preferredTime: value})}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih waktu" />
+                </SelectTrigger>
+                <SelectContent>
+                  {timeSlots.map((time) => (
+                    <SelectItem key={time} value={time}>
+                      <div className="flex items-center">
+                        <Clock className="w-4 h-4 mr-2" />
+                        {time}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="message">Pesan (Opsional)</Label>
+              <Textarea
+                id="message"
+                placeholder="Tambahkan pesan atau pertanyaan..."
+                value={bookingForm.message}
+                onChange={(e) => setBookingForm({...bookingForm, message: e.target.value})}
+                rows={3}
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setShowBookingModal(false)}
+              >
+                Batal
+              </Button>
+              <Button
+                type="submit"
+                className="bg-gradient-to-r from-blue-600 to-indigo-600"
+                disabled={submitting || car.status !== 'available'}
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Memproses...
+                  </>
+                ) : (
+                  'Kirim Permintaan'
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Success Modal */}
       <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>

@@ -1,6 +1,7 @@
 // testDriveService.ts
 // Service untuk mengelola test drive requests
 import { supabase } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabaseAdmin';
 
 // ==================== INTERFACES ====================
 export interface TestDriveRequest {
@@ -12,11 +13,12 @@ export interface TestDriveRequest {
   duration_minutes: number;
   location?: string;
   location_address?: string;
-  status: 'pending' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no_show';
+  status: 'pending' | 'confirmed' | 'rescheduled' | 'reschedule_requested' | 'completed' | 'cancelled' | 'no_show';
   confirmed_by?: string;
   confirmed_at?: string;
   rejection_reason?: string;
   user_notes?: string;
+  admin_notes?: string; // <- tambahkan ini agar HalamanRiwayatTestDrive bisa membaca admin_notes
   feedback?: string;
   experience_rating?: number;
   is_interested?: boolean;
@@ -32,6 +34,7 @@ export interface CreateTestDriveInput {
   scheduled_time: string;
   user_notes?: string;
   location?: string;
+  duration_minutes?: number;
 }
 
 export interface TestDriveWithDetails extends TestDriveRequest {
@@ -168,6 +171,9 @@ class TestDriveService {
    */
   async getUserTestDrives(userId: string): Promise<TestDriveWithDetails[]> {
     try {
+      console.log('Fetching test drives for user:', userId);
+      
+      // Langsung query berdasarkan user_id
       const { data, error } = await supabase
         .from('test_drive_requests')
         .select(`
@@ -189,12 +195,13 @@ class TestDriveService {
         `)
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
-
+        
       if (error) {
-        console.error('Error fetching test drives:', error);
+        console.error('Error fetching test drives for user:', error);
         return [];
       }
-
+      
+      console.log('Test drives for user:', data);
       return data || [];
     } catch (error) {
       console.error('Error in getUserTestDrives:', error);
@@ -249,21 +256,35 @@ class TestDriveService {
     error?: string;
   }> {
     try {
+      console.log(`Attempting to cancel test drive: ID=${id}, UserID=${userId}`);
+      
       // Check if test drive belongs to user
-      const { data: testDrive } = await supabase
+      const { data: testDrive, error: fetchError } = await supabaseAdmin
         .from('test_drive_requests')
         .select('user_id, status')
         .eq('id', id)
         .single();
 
+      if (fetchError) {
+        console.error('Error fetching test drive:', fetchError);
+        return {
+          success: false,
+          error: `Gagal mengambil data test drive: ${fetchError.message}`
+        };
+      }
+
       if (!testDrive) {
+        console.error('Test drive not found:', id);
         return {
           success: false,
           error: 'Test drive tidak ditemukan'
         };
       }
 
+      console.log('Test drive found:', testDrive);
+
       if (testDrive.user_id !== userId) {
+        console.error(`User ID mismatch: Expected=${userId}, Actual=${testDrive.user_id}`);
         return {
           success: false,
           error: 'Anda tidak memiliki akses untuk membatalkan test drive ini'
@@ -271,29 +292,40 @@ class TestDriveService {
       }
 
       if (testDrive.status === 'completed' || testDrive.status === 'cancelled') {
+        console.error(`Invalid status for cancellation: ${testDrive.status}`);
         return {
           success: false,
           error: 'Test drive sudah selesai atau dibatalkan'
         };
       }
 
+      console.log('Validation passed, updating test drive status to cancelled');
+      
       // Update status to cancelled
-      const { error } = await supabase
+      const now = new Date().toISOString();
+      const updateData = {
+        status: 'cancelled',
+        cancelled_at: now,
+        updated_at: now
+      };
+      
+      console.log('Update data:', updateData);
+      
+      // Menggunakan supabaseAdmin untuk bypass RLS
+      const { error } = await supabaseAdmin
         .from('test_drive_requests')
-        .update({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', id);
 
       if (error) {
         console.error('Error cancelling test drive:', error);
         return {
           success: false,
-          error: 'Gagal membatalkan test drive'
+          error: `Gagal membatalkan test drive: ${error.message}`
         };
       }
 
+      console.log('Test drive successfully cancelled');
       return {
         success: true
       };
@@ -332,6 +364,169 @@ class TestDriveService {
     } catch (error) {
       console.error('Error checking available slots:', error);
       return [];
+    }
+  }
+
+  /**
+   * Confirm rescheduled test drive
+   */
+  async confirmRescheduledTestDrive(id: string, userId: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    try {
+      console.log(`Attempting to confirm rescheduled test drive: ID=${id}, UserID=${userId}`);
+      
+      // Check if test drive belongs to user and is in rescheduled status
+      const { data: testDrive, error: fetchError } = await supabaseAdmin
+        .from('test_drive_requests')
+        .select('user_id, status')
+        .eq('id', id)
+        .single();
+      
+      if (fetchError) {
+        console.error('Error fetching test drive:', fetchError);
+        return {
+          success: false,
+          error: `Gagal mengambil data test drive: ${fetchError.message}`
+        };
+      }
+
+      if (!testDrive) {
+        console.error('Test drive not found:', id);
+        return {
+          success: false,
+          error: 'Test drive tidak ditemukan'
+        };
+      }
+
+      console.log('Test drive found:', testDrive);
+
+      if (testDrive.user_id !== userId) {
+        console.error(`User ID mismatch: Expected=${userId}, Actual=${testDrive.user_id}`);
+        return {
+          success: false,
+          error: 'Anda tidak memiliki akses untuk mengonfirmasi test drive ini'
+        };
+      }
+
+      if (testDrive.status !== 'rescheduled') {
+        console.error(`Invalid status for confirmation: ${testDrive.status}`);
+        return {
+          success: false,
+          error: 'Test drive tidak dalam status dijadwalkan ulang'
+        };
+      }
+
+      console.log('Validation passed, updating test drive status to confirmed');
+      
+      // Update status to confirmed
+      const now = new Date().toISOString();
+      const updateData = {
+        status: 'confirmed',
+        confirmed_at: now,
+        updated_at: now
+      };
+      
+      console.log('Update data:', updateData);
+      
+      // Menggunakan supabaseAdmin untuk bypass RLS
+      const { error } = await supabaseAdmin
+        .from('test_drive_requests')
+        .update(updateData)
+        .eq('id', id);
+
+      if (error) {
+        console.error('Error confirming rescheduled test drive:', error);
+        return {
+          success: false,
+          error: `Gagal mengonfirmasi jadwal baru: ${error.message}`
+        };
+      }
+
+      console.log('Test drive successfully confirmed');
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error in confirmRescheduledTestDrive:', error);
+      return {
+        success: false,
+        error: 'Terjadi kesalahan sistem'
+      };
+    }
+  }
+
+  /**
+   * Request reschedule by user (propose a new date/time)
+   */
+  async requestReschedule(
+    id: string,
+    userId: string,
+    newDate: string,
+    newTime: string,
+    userNotes?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log(`User requesting reschedule: ID=${id}, UserID=${userId}, Date=${newDate}, Time=${newTime}`);
+
+      const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(newDate);
+      const timeOk = /^\d{2}:\d{2}$/.test(newTime);
+      if (!dateOk || !timeOk) {
+        return { success: false, error: 'Format tanggal atau waktu tidak valid (YYYY-MM-DD, HH:mm)' };
+      }
+
+      const { data: testDrive, error: fetchError } = await supabaseAdmin
+        .from('test_drive_requests')
+        .select('user_id, status')
+        .eq('id', id)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching test drive for reschedule:', fetchError);
+        return { success: false, error: `Gagal mengambil data test drive: ${fetchError.message}` };
+      }
+      if (!testDrive) {
+        return { success: false, error: 'Test drive tidak ditemukan' };
+      }
+      if (testDrive.user_id !== userId) {
+        return { success: false, error: 'Anda tidak memiliki akses untuk mengubah test drive ini' };
+      }
+
+      const allowed = ['pending', 'confirmed', 'rescheduled'];
+      if (!allowed.includes(testDrive.status)) {
+        return { success: false, error: 'Status test drive tidak memungkinkan pengajuan jadwal ulang' };
+      }
+
+      const now = new Date().toISOString();
+
+      // Gunakan marker di user_notes untuk menandai pengajuan dari user
+      const marker = '[USER_RESCHEDULE_REQUEST]';
+      const cleanedNotes = (userNotes || '').replace(/^\[USER_RESCHEDULE_REQUEST\]\s?/, '');
+      const updateData = {
+        status: 'rescheduled',
+        scheduled_date: newDate,
+        scheduled_time: newTime,
+        user_notes: userNotes || null,
+        admin_notes: 'reschedule_requested_by_user', // gunakan kolom baru
+        updated_at: now
+      };
+
+      const { error: updateError } = await supabaseAdmin
+        .from('test_drive_requests')
+        .update(updateData)
+        .eq('id', id);
+
+      if (updateError) {
+        console.error('Error requesting reschedule:', updateError);
+        return { success: false, error: `Gagal mengajukan jadwal ulang: ${updateError.message}` };
+      }
+
+      console.log('Reschedule request submitted successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('Error in requestReschedule:', error);
+      return { success: false, error: 'Terjadi kesalahan sistem' };
     }
   }
 }

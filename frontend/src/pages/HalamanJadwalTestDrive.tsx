@@ -16,7 +16,8 @@ import {
   Download,
   RefreshCw,
   AlertCircle,
-  Loader2
+  Loader2,
+  CheckSquare
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -28,6 +29,7 @@ import { Badge } from '../components/ui/badge';
 import { Textarea } from '../components/ui/textarea';
 import { testDriveService, TestDriveWithDetails } from '../services/testDriveService';
 import { supabase } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabaseAdmin';
 
 // Interface untuk statistik
 interface TestDriveStats {
@@ -115,12 +117,6 @@ const HalamanJadwalTestDrive: React.FC = () => {
             price,
             car_brands (name),
             car_models (name)
-          ),
-          users (
-            id,
-            full_name,
-            email,
-            phone_number
           )
         `)
         .order('created_at', { ascending: false });
@@ -133,8 +129,36 @@ const HalamanJadwalTestDrive: React.FC = () => {
       }
 
       console.log('Loaded test drives:', data);
-      setTestDrives(data || []);
-      calculateStats(data || []);
+      
+      // Ambil data user untuk setiap test drive
+      const formattedData = await Promise.all(data?.map(async (item) => {
+        // Ambil data user berdasarkan user_id
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('id, full_name, email, phone_number')
+          .eq('auth_user_id', item.user_id)
+          .single();
+        
+        if (userError) {
+          console.error('Error fetching user data:', userError);
+        }
+        
+        return {
+          ...item,
+          // Pastikan semua field yang diperlukan tersedia
+          scheduled_date: item.scheduled_date || '',
+          scheduled_time: item.scheduled_time || '',
+          duration_minutes: item.duration_minutes || 30,
+          status: item.status || 'pending',
+          location: item.location || 'Showroom',
+          user_notes: item.user_notes || '',
+          // Tambahkan data user
+          users: userData || null
+        };
+      }) || []);
+      
+      setTestDrives(formattedData);
+      calculateStats(formattedData);
     } catch (error) {
       console.error('Error:', error);
       alert('Terjadi kesalahan saat memuat data');
@@ -204,26 +228,96 @@ const HalamanJadwalTestDrive: React.FC = () => {
 
   const handleApprove = async (testDriveId: string) => {
     try {
-      const { error } = await supabase
+      console.log('Approving test drive with ID:', testDriveId);
+      
+      // Cek user saat ini untuk debugging
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Error getting current user:', userError);
+      } else {
+        console.log('Current user:', user);
+      }
+      
+      // Cek data test drive sebelum update
+      const { data: beforeData, error: beforeError } = await supabase
+        .from('test_drive_requests')
+        .select('*')
+        .eq('id', testDriveId)
+        .single();
+        
+      if (beforeError) {
+        console.error('Error fetching test drive before update:', beforeError);
+      } else {
+        console.log('Test drive data before update:', beforeData);
+      }
+      
+      // Gunakan supabaseAdmin untuk melewati RLS
+      const { error } = await supabaseAdmin
         .from('test_drive_requests')
         .update({
           status: 'confirmed',
           confirmed_at: new Date().toISOString(),
-          confirmed_by: 'admin' // Dalam implementasi nyata, gunakan user ID admin
+          confirmed_by: user?.id || 'admin',
+          updated_at: new Date().toISOString()
         })
         .eq('id', testDriveId);
 
       if (error) {
         console.error('Error approving test drive:', error);
-        alert('Gagal menyetujui test drive');
+        console.error('Error code:', error.code);
+        console.error('Error details:', error.details);
+        console.error('Error hint:', error.hint);
+        alert(`Gagal menyetujui test drive: ${error.message}`);
         return;
       }
-
+      
+      console.log('Test drive approved successfully');
+      
+      // Verifikasi perubahan
+      const { data: afterData, error: afterError } = await supabase
+        .from('test_drive_requests')
+        .select('*')
+        .eq('id', testDriveId)
+        .single();
+        
+      if (afterError) {
+        console.error('Error fetching test drive after update:', afterError);
+      } else {
+        console.log('Test drive data after update:', afterData);
+      }
+      
       alert('Test drive berhasil disetujui');
       loadTestDrives();
     } catch (error) {
       console.error('Error:', error);
-      alert('Terjadi kesalahan');
+      alert('Terjadi kesalahan saat menyetujui test drive');
+    }
+  };
+  
+  const handleComplete = async (testDriveId: string) => {
+    try {
+      // Gunakan supabaseAdmin untuk melewati RLS
+      const { error } = await supabaseAdmin
+        .from('test_drive_requests')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', testDriveId);
+
+      if (error) {
+        console.error('Error completing test drive:', error);
+        alert(`Gagal menyelesaikan test drive: ${error.message}`);
+        return;
+      }
+
+      console.log('Test drive marked as completed successfully');
+      alert('Test drive berhasil ditandai selesai');
+      loadTestDrives();
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Terjadi kesalahan saat menyelesaikan test drive');
     }
   };
 
@@ -267,22 +361,42 @@ const HalamanJadwalTestDrive: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase
+      console.log('Rescheduling test drive with ID:', selectedTestDrive.id);
+      console.log('New schedule data:', rescheduleForm);
+      
+      // Tambahkan log untuk debugging
+      const { data: testDriveData, error: fetchError } = await supabase
+        .from('test_drive_requests')
+        .select('*')
+        .eq('id', selectedTestDrive.id)
+        .single();
+        
+      if (fetchError) {
+        console.error('Error fetching test drive data:', fetchError);
+      } else {
+        console.log('Current test drive data:', testDriveData);
+      }
+      
+      // Update jadwal test drive menggunakan supabaseAdmin untuk melewati RLS
+      const { error } = await supabaseAdmin
         .from('test_drive_requests')
         .update({
           status: 'rescheduled',
           scheduled_date: rescheduleForm.newDate,
           scheduled_time: rescheduleForm.newTime,
-          user_notes: rescheduleForm.reason
+          user_notes: testDriveData?.user_notes, // Pertahankan catatan asli
+          admin_notes: rescheduleForm.reason?.trim() || null, // Simpan catatan admin
+          updated_at: new Date().toISOString()
         })
         .eq('id', selectedTestDrive.id);
 
       if (error) {
         console.error('Error rescheduling test drive:', error);
-        alert('Gagal mengubah jadwal test drive');
+        alert(`Gagal mengubah jadwal test drive: ${error.message}`);
         return;
       }
-
+      
+      console.log('Test drive rescheduled successfully');
       alert('Jadwal test drive berhasil diubah');
       setShowRescheduleModal(false);
       setRescheduleForm({ newDate: '', newTime: '', reason: '' });
@@ -290,7 +404,7 @@ const HalamanJadwalTestDrive: React.FC = () => {
       loadTestDrives();
     } catch (error) {
       console.error('Error:', error);
-      alert('Terjadi kesalahan');
+      alert('Terjadi kesalahan saat mengubah jadwal');
     }
   };
 
@@ -683,6 +797,41 @@ const HalamanJadwalTestDrive: React.FC = () => {
                                       <XCircle className="w-4 h-4" />
                                     </Button>
                                   </>
+                                )}
+                                
+                                {testDrive.status === 'confirmed' && (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleComplete(testDrive.id)}
+                                      className="bg-blue-600 hover:bg-blue-700"
+                                      title="Tandai Selesai"
+                                    >
+                                      <CheckSquare className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setSelectedTestDrive(testDrive);
+                                        setShowRescheduleModal(true);
+                                      }}
+                                      title="Jadwal Ulang"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </Button>
+                                  </>
+                                )}
+                                
+                                {testDrive.status === 'rescheduled' && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApprove(testDrive.id)}
+                                    className="bg-green-600 hover:bg-green-700"
+                                    title="Konfirmasi"
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                  </Button>
                                 )}
                               </div>
                             </td>

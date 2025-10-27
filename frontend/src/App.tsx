@@ -30,6 +30,7 @@ import HalamanLaporan from './pages/HalamanLaporan';
 import HalamanPembelian from './pages/HalamanPembelian';
 import HalamanPerbandingan from './pages/HalamanPerbandingan';
 import HalamanRiwayat from './pages/HalamanRiwayat';
+import HalamanRiwayatTestDrive from './pages/HalamanRiwayatTestDrive';
 import HalamanSimulasi from './pages/HalamanSimulasi';
 import HalamanTestDrive from './pages/HalamanTestDrive';
 import HalamanTradeIn from './pages/HalamanTradeIn';
@@ -90,8 +91,9 @@ const AppContent: React.FC = () => {
   return (
     <div className="App">
       {/* navigation bars */}
-      {isGuestPage && <GuestNavigation />}
-      {isAuthenticatedPage && (isAdminPage ? <AdminNavigation /> : (isExecutivePage ? <ExecutiveNavigation /> : <Navigation />))}
+      {!isAdminPage && !isExecutivePage && <GuestNavigation />}
+      {isAdminPage && <AdminNavigation />}
+      {isExecutivePage && <ExecutiveNavigation />}
       <div className={isAdminPage || isExecutivePage ? 'ml-64' : ''}>
         <Routes>
           {/* PUBLIC ROUTES */}
@@ -152,6 +154,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute>
                 <HalamanRiwayat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/riwayat-test-drive"
+            element={
+              <ProtectedRoute>
+                <HalamanRiwayatTestDrive />
               </ProtectedRoute>
             }
           />

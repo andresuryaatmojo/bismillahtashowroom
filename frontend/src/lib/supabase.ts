@@ -319,7 +319,7 @@ export interface Database {
           car_id: string;
           scheduled_date: string;
           scheduled_time: string;
-          status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          status: 'pending' | 'confirmed' | 'rescheduled' | 'reschedule_requested' | 'completed' | 'cancelled' | 'no_show';
           user_notes?: string;
           admin_notes?: string;
           created_at: string;
@@ -330,14 +330,14 @@ export interface Database {
           car_id: string;
           scheduled_date: string;
           scheduled_time: string;
-          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          status?: 'pending' | 'confirmed' | 'rescheduled' | 'reschedule_requested' | 'completed' | 'cancelled' | 'no_show';
           user_notes?: string;
           admin_notes?: string;
         };
         Update: {
           scheduled_date?: string;
           scheduled_time?: string;
-          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          status?: 'pending' | 'confirmed' | 'rescheduled' | 'reschedule_requested' | 'completed' | 'cancelled' | 'no_show';
           user_notes?: string;
           admin_notes?: string;
           updated_at?: string;

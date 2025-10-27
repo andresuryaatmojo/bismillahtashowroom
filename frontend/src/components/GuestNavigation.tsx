@@ -139,6 +139,12 @@ const GuestNavigation: React.FC = () => {
                       Iklan Saya
                     </Link>
                   </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/riwayat-test-drive" className="flex items-center gap-2 w-full">
+                      <FileText className="w-4 h-4" />
+                      Riwayat Test Drive
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
                     <Link to="/settings" className="flex items-center gap-2 w-full">
