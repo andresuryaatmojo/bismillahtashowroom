@@ -45,6 +45,7 @@ import HalamanKelolaArtikel from './pages/HalamanKelolaArtikel';
 import HalamanJadwalTestDrive from './pages/HalamanJadwalTestDrive';
 import HalamanModerasiIklan from './pages/HalamanModerasiIklan';
 import HalamanExecutive from './pages/HalamanExecutive';
+import HalamanChatAdmin from './pages/HalamanChatAdmin';
 
 // OTHER COMPONENTS
 import LoginForm from './components/LoginForm';
@@ -206,6 +207,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="admin">
                 <HalamanAdmin />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/chat"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanChatAdmin />
               </ProtectedRoute>
             }
           />

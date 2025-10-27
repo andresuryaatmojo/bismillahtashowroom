@@ -1,3 +1,4 @@
+// GuestNavigation component
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -18,9 +19,10 @@ import {
   LogOut,
   Edit,
   Receipt,
-  FileText
+  FileText,
+  Bell,
+  Mail
 } from 'lucide-react';
-
 const GuestNavigation: React.FC = () => {
   const location = useLocation();
   const { user, isAuthenticated, logout } = useAuth();
@@ -50,6 +52,9 @@ const GuestNavigation: React.FC = () => {
       .toUpperCase()
       .slice(0, 2);
   };
+
+  // Mock jumlah pesan belum dibaca (sesuaikan nanti dengan data nyata)
+  const unreadMessages = 0;
 
   return (
     <nav className="bg-white shadow-lg border-b">
@@ -94,6 +99,28 @@ const GuestNavigation: React.FC = () => {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* Ikon Notifikasi & Pesan */}
+            <div className="flex items-center gap-3 pl-3 border-l">
+              <button
+                className="relative p-2 rounded hover:bg-gray-100"
+                aria-label="Notifikasi"
+              >
+                <Bell className="w-5 h-5 text-gray-700" />
+              </button>
+              <Link
+                to="/chat"
+                className="relative p-2 rounded hover:bg-gray-100"
+                aria-label="Pesan"
+              >
+                <Mail className="w-5 h-5 text-gray-700" />
+                {unreadMessages > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
+                    {unreadMessages}
+                  </span>
+                )}
+              </Link>
+            </div>
 
             {/* Authentication Section */}
             {isAuthenticated && user ? (

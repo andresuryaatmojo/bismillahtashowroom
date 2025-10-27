@@ -1,7 +1,9 @@
+// Hero component
 import React from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ArrowUpRight, CirclePlay } from 'lucide-react';
+import ChatbotWidget from '../chat/ChatbotWidget';
 
 const Hero: React.FC = () => {
   return (
@@ -41,6 +43,8 @@ const Hero: React.FC = () => {
           />
         </div>
       </div>
+      {/* Widget chatbot floating dengan tombol eskalasi ke admin */}
+      <ChatbotWidget />
     </div>
   );
 };
