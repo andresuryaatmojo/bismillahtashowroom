@@ -31,6 +31,7 @@ interface BookingForm {
   bookingType: 'test-drive' | 'purchase-inquiry';
 }
 
+// Di dalam komponen HalamanDetailMobil, bagian tombol aksi
 const HalamanDetailMobil: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -459,17 +460,19 @@ const HalamanDetailMobil: React.FC = () => {
               
               {/* Tombol Kontak dan Booking */}
               <div className="grid grid-cols-5 gap-4 mt-4">
-                <div 
-                  className="flex items-center justify-center cursor-pointer text-blue-600 hover:text-blue-800"
-                  onClick={() => window.location.href = `tel:${car.seller_phone || '+6281234567890'}`}
+                <Button 
+                  variant="outline" 
+                  className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
+                  onClick={() => navigate('/chat')}
                 >
-                  <Phone className="w-4 h-4" />
-                </div>
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Chat</span>
+                </Button>
                 
                 <Button 
                   variant="outline" 
                   className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 col-span-2"
-                  onClick={() => setShowBookingModal(true)}
+                  onClick={() => id && navigate('/pembelian', { state: { mobilId: id } })}
                 >
                   Pesan Mobil
                 </Button>

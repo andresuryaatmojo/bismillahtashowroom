@@ -21,7 +21,6 @@ import LayananKomentar from '../services/LayananKomentar';
 import LayananPenilaian from '../services/LayananPenilaian';
 import LayananBookmark from '../services/LayananBookmark';
 import LayananWishlist from '../services/LayananWishlist';
-import { LayananChat } from '../services/LayananChat';
 import LayananChatbot from '../services/LayananChatbot';
 import LayananAnalitik from '../services/LayananAnalitik';
 // import LayananKPI from '../services/LayananKPI'; // Commented out due to no default export
@@ -197,52 +196,33 @@ describe('Service Layer Integration Tests', () => {
   });
 
   describe('Communication Services', () => {
-    test('LayananChat should handle chat operations', async () => {
-      const chatService = LayananChat.getInstance();
-      expect(chatService).toBeDefined();
-      
-      // Test chat message
-      const chatResult = await chatService.kirimPesan(
-        'test-chat-id',
-        'test-user-id',
-        'customer',
-        'Hello, I am interested in this car'
-      );
-      expect(chatResult.success).toBe(true);
-    });
-
     test('LayananChatbot should handle chatbot operations', async () => {
       const chatbotService = new LayananChatbot();
       expect(chatbotService).toBeDefined();
-      
-      // Test chatbot knowledge
       const chatbotResult = await chatbotService.ambilPertanyaanTidakTerjawab();
       expect(chatbotResult.success).toBe(true);
     });
-
-    test('LayananAnalitik should handle analytics operations', async () => {
-      const analitikService = new LayananAnalitik();
-      expect(analitikService).toBeDefined();
-      
-      // Test analytics tools loading
-      const analyticsResult = await analitikService.muatToolsAnalitik();
-      expect(analyticsResult.success).toBe(true);
-    });
   });
 
-  describe('Analytics Services', () => {
-    test('LayananAnalitik should handle analytics', async () => {
-      const analitikService = new LayananAnalitik();
-      expect(analitikService).toBeDefined();
-      
-      // Test data processing
-      const analyticsResult = await analitikService.prosesDataAnalitik(
-        'tool_1',
-        [{ test: 'data' }],
-        { jenis_data: 'operasional' }
-      );
-      expect(analyticsResult.success).toBe(true);
-    });
+  test('LayananAnalitik should handle analytics operations', async () => {
+    const analitikService = new LayananAnalitik();
+    expect(analitikService).toBeDefined();
+    
+    // Test analytics tools loading
+    const analyticsResult = await analitikService.muatToolsAnalitik();
+    expect(analyticsResult.success).toBe(true);
+  });
+  test('LayananAnalitik should handle analytics', async () => {
+    const analitikService = new LayananAnalitik();
+    expect(analitikService).toBeDefined();
+    
+    // Test data processing
+    const analyticsResult = await analitikService.prosesDataAnalitik(
+      'tool_1',
+      [{ test: 'data' }],
+      { jenis_data: 'operasional' }
+    );
+    expect(analyticsResult.success).toBe(true);
   });
 
   describe('Business Services', () => {

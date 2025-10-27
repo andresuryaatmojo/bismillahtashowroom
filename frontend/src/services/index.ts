@@ -27,7 +27,8 @@ export { default as LayananBookmark } from './LayananBookmark';
 export { default as LayananWishlist } from './LayananWishlist';
 
 // Communication Services
-export { default as LayananChat } from './LayananChat';
+// (hapus ekspor LayananChat)
+// export { default as LayananChat } from './LayananChat';
 export { default as LayananChatbot } from './LayananChatbot';
 
 // Analytics & Business Intelligence
@@ -121,7 +122,8 @@ import LayananKomentar from './LayananKomentar';
 import LayananPenilaian from './LayananPenilaian';
 import LayananBookmark from './LayananBookmark';
 import LayananWishlist from './LayananWishlist';
-import layananChat from './LayananChat';
+// (hapus import layananChat)
+// import layananChat from './LayananChat';
 import LayananChatbot from './LayananChatbot';
 import LayananAnalitik from './LayananAnalitik';
 import layananDashboard from './LayananDashboard';
@@ -162,7 +164,8 @@ export const serviceInstances = {
   wishlist: LayananWishlist.getInstance(),
   
   // Communication Services
-  chat: layananChat,
+  // (hapus pemetaan chat)
+  // chat: layananChat,
   chatbot: new LayananChatbot(),
   
   // Analytics Services
@@ -192,7 +195,8 @@ export const serviceCategories = {
   business: ['mobil', 'transaksi', 'pembayaran', 'kredit'],
   content: ['artikel', 'konten', 'perbandingan', 'rekomendasi'],
   interaction: ['ulasan', 'komentar', 'penilaian', 'bookmark', 'wishlist'],
-  communication: ['chat', 'chatbot'],
+  // Hanya chatbot yang tersisa di komunikasi
+  communication: ['chatbot'],
   analytics: ['analitik', 'kpi', 'dashboard', 'bisnis'],
   marketing: ['iklan', 'kemitraan'],
   utility: ['pencarian', 'berkas', 'export'],

@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import { carService } from '../services/carService';
 
 // Interfaces
 interface DataMobil {
@@ -100,6 +102,32 @@ const HalamanPembelian: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterHarga, setFilterHarga] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
   const [filterMerk, setFilterMerk] = useState<string>('all');
+  const location = useLocation();
+
+  // Fungsi pemetaan hasil service ke DataMobil lokal halaman ini
+  const mapCarToDataMobil = (c: any): DataMobil => ({
+    id: c.id,
+    merk: c?.car_brands?.name || 'Tidak diketahui',
+    model: c?.car_models?.name || c?.title || 'Tidak diketahui',
+    tahun: c?.year || new Date().getFullYear(),
+    warna: c?.color || 'Tidak diketahui',
+    transmisi: c?.transmission === 'manual' ? 'manual' : 'automatic',
+    bahanBakar: c?.fuel_type === 'diesel' ? 'diesel'
+               : c?.fuel_type === 'electric' ? 'listrik'
+               : (c?.fuel_type === 'hybrid' || c?.fuel_type === 'phev') ? 'hybrid'
+               : 'bensin',
+    harga: c?.price || 0,
+    kilometer: c?.mileage || 0,
+    lokasi: c?.location_city || 'Tidak diketahui',
+    // Jika URL gambar penuh, placeholder akan tampil via onError handler yang sudah ada
+    foto: (c?.car_images && c.car_images.length > 0) ? [c.car_images[0].image_url] : [''],
+    deskripsi: c?.description || '',
+    kondisi: c?.condition === 'new' ? 'baru' : 'bekas',
+    status: c?.status === 'available' ? 'tersedia' : c?.status === 'sold' ? 'terjual' : 'reserved',
+    nomorPolisi: undefined,
+    pajak: undefined,
+    stnk: undefined,
+  });
 
   // Methods implementation
   const pilihMobilDanKlikBeli = (idMobil: string) => {
@@ -225,6 +253,37 @@ const HalamanPembelian: React.FC = () => {
                    (Math.pow(1 + bungaBulanan, tenor) - 1);
     return cicilan;
   };
+
+  // Pre-seleksi mobil jika datang dari halaman detail
+  useEffect(() => {
+    const mobilId = (location.state as any)?.mobilId;
+    if (!mobilId) return;
+
+    let cancelled = false;
+    (async () => {
+      setStatusHalaman(prev => ({ ...prev, loading: true }));
+      const c = await carService.getCarById(mobilId);
+      if (cancelled) return;
+
+      if (c) {
+        const mapped = mapCarToDataMobil(c);
+        setDaftarMobil(prev => {
+          const exists = prev.some(m => m.id === mapped.id);
+          return exists ? prev : [...prev, mapped];
+        });
+        setStatusHalaman(prev => ({
+          ...prev,
+          selectedMobil: mapped,
+          step: 'data-pembelian',
+          loading: false
+        }));
+      } else {
+        setStatusHalaman(prev => ({ ...prev, loading: false, error: 'Mobil tidak ditemukan' }));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [location.state]);
 
   // Load initial data
   useEffect(() => {

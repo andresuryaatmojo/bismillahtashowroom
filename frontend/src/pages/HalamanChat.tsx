@@ -1,5 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Phone, Video, MoreVertical, Paperclip, Smile, Search, ArrowLeft, User, MessageSquare, Clock, Check, CheckCheck, X, Plus, Image, File } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  fetchRoomsForUser,
+  fetchMessages,
+  sendTextMessage,
+  subscribeRoomMessages,
+  markIncomingAsRead,
+  getRoomPeerId,
+  type ChatRoomDb,
+  type ChatMessageDb,
+  sendAttachmentMessage
+} from '../services/chatService';
 
 // Interfaces
 interface Pesan {
@@ -58,7 +70,16 @@ interface StateHalaman {
   replyingTo: Pesan | null;
 }
 
-const HalamanChat: React.FC = () => {
+// HalamanChat component
+function HalamanChat() {
+  const { user } = useAuth();
+  const [rooms, setRooms] = useState<ChatRoomDb[]>([]);
+  const [activeRoom, setActiveRoom] = useState<ChatRoomDb | null>(null);
+  const [messages, setMessages] = useState<ChatMessageDb[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [fileToSend, setFileToSend] = useState<File | null>(null);
+  const unsubscribeRef = useRef<null | (() => void)>(null);
+  
   const [state, setState] = useState<StateHalaman>({
     loading: false,
     error: null,
@@ -91,6 +112,73 @@ const HalamanChat: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const rs = await fetchRoomsForUser(user.id);
+        setRooms(rs);
+        if (!activeRoom && rs.length) setActiveRoom(rs[0]);
+      } catch (e) {
+        console.error('Gagal memuat rooms', e);
+      }
+    })();
+  }, [user?.id]);
+
+  useEffect(() => {
+    (async () => {
+      if (!activeRoom) return;
+      try {
+        const ms = await fetchMessages(activeRoom.id);
+        setMessages(ms);
+        if (user?.id) await markIncomingAsRead(activeRoom.id, user.id);
+      } catch (e) {
+        console.error('Gagal memuat pesan', e);
+      }
+    })();
+
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    if (activeRoom) {
+      unsubscribeRef.current = subscribeRoomMessages(activeRoom.id, (m) => {
+        setMessages(prev => [...prev, m]);
+      });
+    }
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
+  }, [activeRoom?.id, user?.id]);
+
+  const handleSelectRoom = (room: ChatRoomDb) => {
+    setActiveRoom(room);
+  };
+
+  const handleSend = async () => {
+    if (!user?.id || !activeRoom) return;
+    const receiverId = getRoomPeerId(activeRoom, user.id);
+    try {
+      if (fileToSend) {
+        const { message, attachment } = await sendAttachmentMessage(activeRoom.id, user.id, receiverId, fileToSend);
+        // gabungkan attachment ke message untuk render langsung
+        const withAtt = { ...message, chat_attachments: [attachment] } as ChatMessageDb & { chat_attachments: any[] };
+        setMessages(prev => [...prev, withAtt]);
+        setFileToSend(null);
+        setInputText('');
+      } else if (inputText.trim()) {
+        const sent = await sendTextMessage(activeRoom.id, user.id, receiverId, inputText.trim());
+        setMessages(prev => [...prev, sent]);
+        setInputText('');
+      }
+    } catch (e) {
+      console.error('Gagal mengirim pesan', e);
+    }
+  };
 
   // Method: bukaInterfaceChat
   const bukaInterfaceChat = async (idPenerima: string) => {
@@ -245,6 +333,11 @@ const HalamanChat: React.FC = () => {
         loading: false
       }));
     }
+  };
+  
+  // New method to handle sending messages with the new API
+  const handleSendMessage = async () => {
+    await handleSend();
   };
 
   // Method: menungguBalasan
