@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Send, MoreVertical, Paperclip, Smile, ArrowLeft, User, MessageSquare, Clock, Check, CheckCheck, X, Image, File, Car } from 'lucide-react';
+import { Send, MoreVertical, Paperclip, Smile, ArrowLeft, User, MessageSquare, Clock, Check, CheckCheck, X, Image, File, Car, Flag } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   fetchRoomsForUser,
@@ -13,7 +13,8 @@ import {
   sendAttachmentMessage,
   fetchLatestMessageForRoom,
   deleteRoomHistory,
-  sendTextWithCarInfoMessage
+  sendTextWithCarInfoMessage,
+  canEscalateRoom
 } from '../services/chatService';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -31,6 +32,7 @@ interface Pesan {
   fileName?: string;
   fileSize?: number;
   replyTo?: string;
+  chatType?: 'user' | 'admin' | 'system';
   carInfo?: {
     carId: string;
     title: string;
@@ -144,6 +146,16 @@ function HalamanChat() {
   const getPeerRole = useCallback((room: ChatRoomDb): 'buyer' | 'seller' => {
     return myRole === 'buyer' ? 'seller' : 'buyer';
   }, [myRole]);
+
+  // Deteksi chat dengan admin showroom (user_to_admin)
+  const isAdminShowroomRoom = useCallback(
+    (room?: ChatRoomDb | null) => !!room && room.room_type === 'user_to_admin',
+    []
+  );
+  const canEscalateActiveRoom = useMemo(
+    () => !isAdminShowroomRoom(activeRoom),
+    [activeRoom, isAdminShowroomRoom]
+  );
 
   // Helper: deteksi room self-chat
   const isSelfRoom = useCallback(
@@ -365,6 +377,7 @@ function HalamanChat() {
       fileName: attachment?.file_name,
       fileSize: attachment?.file_size || undefined,
       replyTo: m.reply_to_message_id || undefined,
+      chatType: m.chat_type as Pesan['chatType'],
       carInfo: carInfoParsed
     };
   };
@@ -526,6 +539,70 @@ function HalamanChat() {
     } catch (e) {
       console.error('Gagal mengirim pesan', e);
       setState(prev => ({ ...prev, error: 'Gagal mengirim pesan' }));
+    }
+  };
+
+  const handleEscalateReport = async () => {
+    try {
+      if (!activeRoom || !user?.id) return;
+
+      // Gunakan helper function untuk cek apakah bisa dieskalasi
+      if (!canEscalateRoom(activeRoom)) {
+        setState(prev => ({ ...prev, showHeaderMenu: false }));
+        
+        if (isAdminShowroomRoom(activeRoom)) {
+          alert('Percakapan dengan admin showroom tidak dapat dieskalasikan.');
+        } else if (activeRoom.escalation_history > 0) {
+          alert('Percakapan ini sudah pernah dieskalasi sebelumnya dan tidak dapat dieskalasi lagi.');
+        } else {
+          alert('Percakapan ini tidak dapat dieskalasikan.');
+        }
+        return;
+      }
+
+      console.log('🚨 Starting escalation for room:', activeRoom.id);
+
+      // Tandai room sebagai eskalasi dan increment escalation_history
+      const { error: updErr } = await supabase
+        .from('chat_rooms')
+        .update({ 
+          is_escalated: true,
+          escalation_history: (activeRoom.escalation_history || 0) + 1,
+          resolved_at: null, // Reset resolved status jika ada
+          resolved_by: null
+        })
+        .eq('id', activeRoom.id);
+      if (updErr) throw updErr;
+
+      console.log('✅ Room marked as escalated successfully');
+
+      // Kirim notifikasi teks ke thread
+      const peerId = getRoomPeerId(activeRoom, user.id);
+      console.log('📤 Sending escalation notification message');
+      const { error: msgErr } = await supabase
+        .from('chat_messages')
+        .insert({
+          room_id: activeRoom.id,
+          sender_id: user.id,
+          receiver_id: peerId,
+          message_text: 'Percakapan dilaporkan untuk eskalasi ke Admin.',
+          message_type: 'text',
+          chat_type: 'user'
+        });
+      if (msgErr) throw msgErr;
+
+      console.log('✅ Escalation notification sent successfully');
+
+      // Refresh pesan di UI
+      const ms = await fetchMessages(activeRoom.id);
+      setMessages(ms);
+
+      setState(prev => ({ ...prev, showHeaderMenu: false }));
+      alert('Percakapan berhasil dieskalasi/laporkan ke Admin.');
+    } catch (e) {
+      console.error('Gagal melakukan eskalasi/laporan', e);
+      setState(prev => ({ ...prev, showHeaderMenu: false }));
+      alert('Gagal mengirim eskalasi. Coba lagi.');
     }
   };
 
@@ -1120,6 +1197,11 @@ function HalamanChat() {
                           {getPeerRole(activeRoom) === 'seller' ? 'Penjual' : 'Pembeli'}
                         </span>
                       )}
+                      {activeRoom?.is_escalated && (
+                        <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-600 rounded">
+                          🚨 Eskalasi
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-gray-500">
                       {state.kontakList.find(k => 
@@ -1148,6 +1230,17 @@ function HalamanChat() {
                         >
                           Info Chat
                         </button>
+                        <div className="border-t border-gray-100 my-1"></div>
+                        {canEscalateActiveRoom && (
+                          <button
+                            onClick={handleEscalateReport}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                            title="Eskalasi/Laporkan ke Admin"
+                          >
+                            <Flag className="inline w-4 h-4 mr-2" />
+                            Laporkan ke Admin
+                          </button>
+                        )}
                         <div className="border-t border-gray-100 my-1"></div>
                         <button
                           onClick={async () => {
@@ -1208,63 +1301,141 @@ function HalamanChat() {
               </div>
             </div>
             
-            {/* Menghapus tampilan informasi mobil di bagian atas */}
+            {/* Banner Eskalasi */}
+            {activeRoom?.is_escalated && (
+              <div className={`border rounded-lg p-3 mb-4 ${
+                (activeRoom as any).resolved_at 
+                  ? 'bg-green-50 border-green-200' 
+                  : 'bg-red-50 border-red-200'
+              }`}>
+                <div className="flex items-center">
+                  <Flag className={`w-4 h-4 mr-2 ${
+                    (activeRoom as any).resolved_at ? 'text-green-500' : 'text-red-500'
+                  }`} />
+                  <div>
+                    <p className={`text-sm font-medium ${
+                      (activeRoom as any).resolved_at ? 'text-green-800' : 'text-red-800'
+                    }`}>
+                      {(activeRoom as any).resolved_at 
+                        ? '✅ Eskalasi telah diselesaikan oleh admin'
+                        : '🚨 Chat ini telah dieskalasi ke admin'
+                      }
+                    </p>
+                    <p className={`text-xs mt-1 ${
+                      (activeRoom as any).resolved_at ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {(activeRoom as any).resolved_at 
+                        ? 'Masalah Anda telah ditangani. Percakapan ini tidak dapat dieskalasi lagi.'
+                        : 'Admin akan membantu menyelesaikan masalah Anda. Mohon tunggu respons dari admin.'
+                      }
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Banner untuk room yang pernah dieskalasi tapi tidak sedang aktif eskalasi */}
+            {activeRoom && !activeRoom.is_escalated && activeRoom.escalation_history > 0 && (
+              <div className="border rounded-lg p-3 mb-4 bg-yellow-50 border-yellow-200">
+                <div className="flex items-center">
+                  <Flag className="w-4 h-4 mr-2 text-yellow-500" />
+                  <div>
+                    <p className="text-sm font-medium text-yellow-800">
+                      ℹ️ Percakapan ini pernah dieskalasi sebelumnya
+                    </p>
+                    <p className="text-xs mt-1 text-yellow-600">
+                      Fitur eskalasi tidak tersedia lagi untuk percakapan ini.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {/* Messages Area */}
             <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
-              {state.pesanList.map(pesan => (
-                <div
-                  key={pesan.id}
-                  className={`flex ${pesan.pengirimId === user?.id ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div className={`max-w-xs lg:max-w-sm ${pesan.pengirimId === user?.id ? 'order-2' : 'order-1'}`}>
-                    {/* Reply indicator */}
-                    {pesan.replyTo && (
-                      <div className="text-xs text-gray-500 mb-1 px-2">
-                        Membalas pesan
-                      </div>
-                    )}
-                    
-                    <div
-                      className={`rounded-2xl ${
-                        pesan.pengirimId === user?.id
-                          ? 'bg-blue-500 text-white rounded-br-none'
-                          : 'bg-gray-200 text-gray-900 rounded-bl-none'
-                      } ${pesan.tipePesan === 'image' ? 'p-1' : 'p-3'}`}
-                    >
-                      {pesan.tipePesan === 'text' && (
-                        <>
-                          {pesan.carInfo && (
-                            <div className={`mb-2 flex items-center justify-between ${pesan.pengirimId === user?.id ? 'bg-blue-400/30' : 'bg-white'} border ${pesan.pengirimId === user?.id ? 'border-blue-200/50' : 'border-gray-200'} rounded-lg p-2`}>
-                              <div className="flex items-center space-x-2">
-                                <div className="w-10 h-10 rounded overflow-hidden bg-gray-100">
-                                  {pesan.carInfo.imageUrl ? (
-                                    <img src={pesan.carInfo.imageUrl} alt="Mobil" className="w-full h-full object-cover" />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-400">
-                                      <Car className="w-5 h-5" />
-                                    </div>
-                                  )}
+              {/* Banner Eskalasi */}
+              {activeRoom?.is_escalated && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                  <div className="flex items-center">
+                    <Flag className="w-4 h-4 text-red-500 mr-2" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800">
+                        Chat ini telah dieskalasi ke admin
+                      </p>
+                      <p className="text-xs text-red-600 mt-1">
+                        Admin akan membantu menyelesaikan masalah Anda. Mohon tunggu respons dari admin.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {state.pesanList.map(pesan => {
+                const isOwn = pesan.pengirimId === user?.id;
+                const isAdminMsg = pesan.chatType === 'admin';
+
+                return (
+                  <div
+                    key={pesan.id}
+                    className={`flex ${isAdminMsg ? 'justify-center' : isOwn ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className={`max-w-xs lg:max-w-sm ${isAdminMsg ? '' : isOwn ? 'order-2' : 'order-1'}`}>
+                      {/* Reply indicator */}
+                      {pesan.replyTo && (
+                        <div className="text-xs text-gray-500 mb-1 px-2">
+                          Membalas pesan
+                        </div>
+                      )}
+                      
+                      <div
+                        className={`rounded-2xl ${
+                          isAdminMsg
+                            ? 'bg-green-100 text-green-800 border border-green-200'
+                            : isOwn
+                              ? 'bg-blue-500 text-white rounded-br-none'
+                              : 'bg-gray-200 text-gray-900 rounded-bl-none'
+                        } ${pesan.tipePesan === 'image' ? 'p-1' : 'p-3'}`}
+                      >
+                        {/* Label Admin */}
+                        {isAdminMsg && (
+                          <div className="text-xs font-semibold text-green-700 mb-1">
+                            👨‍💼 Admin
+                          </div>
+                        )}
+
+                        {pesan.tipePesan === 'text' && (
+                          <>
+                            {pesan.carInfo && (
+                              <div className={`mb-2 flex items-center justify-between ${isOwn ? 'bg-blue-400/30' : 'bg-white'} border ${isOwn ? 'border-blue-200/50' : 'border-gray-200'} rounded-lg p-2`}>
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-10 h-10 rounded overflow-hidden bg-gray-100">
+                                    {pesan.carInfo.imageUrl ? (
+                                      <img src={pesan.carInfo.imageUrl} alt="Mobil" className="w-full h-full object-cover" />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center text-gray-400">
+                                        <Car className="w-5 h-5" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-sm font-medium">
+                                    {pesan.carInfo.title}
+                                  </div>
                                 </div>
-                                <div className="text-sm font-medium">
-                                  {pesan.carInfo.title}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                          <p className="text-sm">{pesan.isiPesan}</p>
-                          <div className={`flex items-center justify-between mt-1 ${
-                            pesan.pengirimId === user?.id ? 'text-blue-100' : 'text-gray-500'
-                          }`}>
-                            <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
-                            {pesan.pengirimId === user?.id && (
-                              <div className="ml-2">
-                                {getStatusIcon(pesan.statusBaca)}
                               </div>
                             )}
-                          </div>
-                        </>
-                      )}
+                            <p className="text-sm">{pesan.isiPesan}</p>
+                            <div className={`flex items-center justify-between mt-1 ${
+                              isAdminMsg ? 'text-green-600' : isOwn ? 'text-blue-100' : 'text-gray-500'
+                            }`}>
+                              <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
+                              {isOwn && !isAdminMsg && (
+                                <div className="ml-2">
+                                  {getStatusIcon(pesan.statusBaca)}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
                       
                       {pesan.tipePesan === 'car_info' && (
                         <div className="relative">
@@ -1336,35 +1507,36 @@ function HalamanChat() {
                             )}
                           </div>
                         </div>
-                      )}
-                      
-                      {pesan.tipePesan === 'file' && (
-                        <>
-                          <div className="flex items-center space-x-2">
-                            <File className="w-5 h-5" />
-                            <div>
-                              <p className="text-xs font-medium">{pesan.fileName}</p>
-                              <p className="text-xs opacity-75">
-                                {pesan.fileSize && (pesan.fileSize / 1024).toFixed(1)} KB
-                              </p>
-                            </div>
-                          </div>
-                          <div className={`flex items-center justify-between mt-1 ${
-                            pesan.pengirimId === user?.id ? 'text-blue-100' : 'text-gray-500'
-                          }`}>
-                            <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
-                            {pesan.pengirimId === user?.id && (
-                              <div className="ml-2">
-                                {getStatusIcon(pesan.statusBaca)}
+                        )}
+                        
+                        {pesan.tipePesan === 'file' && (
+                          <>
+                            <div className="flex items-center space-x-2">
+                              <File className="w-5 h-5" />
+                              <div>
+                                <p className="text-xs font-medium">{pesan.fileName}</p>
+                                <p className="text-xs opacity-75">
+                                  {pesan.fileSize && (pesan.fileSize / 1024).toFixed(1)} KB
+                                </p>
                               </div>
-                            )}
-                          </div>
-                        </>
-                      )}
+                            </div>
+                            <div className={`flex items-center justify-between mt-1 ${
+                              isAdminMsg ? 'text-green-600' : isOwn ? 'text-blue-100' : 'text-gray-500'
+                            }`}>
+                              <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
+                              {isOwn && !isAdminMsg && (
+                                <div className="ml-2">
+                                  {getStatusIcon(pesan.statusBaca)}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               
               {/* Upload Progress */}
               {state.isUploading && (

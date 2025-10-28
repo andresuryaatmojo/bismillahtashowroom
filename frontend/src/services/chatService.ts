@@ -18,6 +18,9 @@ export type ChatRoomDb = {
   sla_time: number;
   is_muted_by_user1: boolean;
   is_muted_by_user2: boolean;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  escalation_history: number; // Jumlah kali room ini pernah dieskalasi
   created_at: string;
   updated_at: string;
 };
@@ -221,60 +224,18 @@ export async function sendTextWithCarInfoMessage(
   return data as ChatMessageDb;
 }
 
-export async function createChatRoom(userId: string, sellerId: string, carId: string | null = null) {
-  // Blokir pembuatan room dengan diri sendiri
-  if (userId === sellerId) {
-    throw new Error('Tidak dapat membuat room dengan diri sendiri');
-  }
-
-  // Cek apakah room sudah ada untuk peserta ini (tanpa memperhatikan carId)
-  const query = supabase
-    .from('chat_rooms')
-    .select('*')
-    .or(`and(user1_id.eq.${userId},user2_id.eq.${sellerId}),and(user1_id.eq.${sellerId},user2_id.eq.${userId})`)
-    .eq('status', 'active')
-    .order('last_message_at', { ascending: false })
-    .limit(1);
-
-  const { data: existingRooms, error: existingErr } = await query;
-  if (existingErr) throw existingErr;
-
-  if (existingRooms && existingRooms.length > 0) {
-    const existingRoom = existingRooms[0] as ChatRoomDb;
-    
-    if (carId && existingRoom.car_id !== carId) {
-      const { data: updatedRoom, error: updateErr } = await supabase
-        .from('chat_rooms')
-        .update({ car_id: carId })
-        .eq('id', existingRoom.id)
-        .select()
-        .single();
-        
-      if (updateErr) throw updateErr;
-      
-      // Tidak kirim pesan car_info otomatis di sini
-      return updatedRoom as ChatRoomDb;
-    }
-    
-    return existingRoom;
-  }
-
+// Helper: cek apakah user target adalah admin showroom
+async function isAdminUser(userId: string): Promise<boolean> {
   const { data, error } = await supabase
-    .from('chat_rooms')
-    .insert([{
-      user1_id: userId,
-      user2_id: sellerId,
-      car_id: carId,
-      room_type: 'user_to_user',
-      status: 'active'
-    }])
-    .select()
+    .from('users')
+    .select('id, role')
+    .eq('id', userId)
     .single();
-
-  if (error) throw error;
-  
-  // Tidak kirim pesan car_info otomatis di sini
-  return data as ChatRoomDb;
+  if (error) {
+    console.warn('Gagal cek role user:', error.message);
+    return false;
+  }
+  return (data?.role || '').toLowerCase() === 'admin';
 }
 
 function guessAttachmentType(mime: string): ChatAttachmentDb['attachment_type'] {
@@ -486,6 +447,7 @@ async function resetRoomMetadata(roomId: string) {
   if (error) throw error;
 }
 
+// Pertahankan implementasi archiveRoom di sini
 export async function archiveRoom(roomId: string) {
   const { error } = await supabase
     .from('chat_rooms')
@@ -499,4 +461,94 @@ export async function archiveRoom(roomId: string) {
     })
     .eq('id', roomId);
   if (error) throw error;
+}
+
+
+// Bagian akhir createChatRoom dan hapus duplikat archiveRoom
+export async function createChatRoom(userId: string, sellerId: string, carId: string | null = null) {
+  // Blokir pembuatan room dengan diri sendiri
+  if (userId === sellerId) {
+    throw new Error('Tidak dapat membuat room dengan diri sendiri');
+  }
+
+  // Tentukan apakah lawan bicara adalah admin showroom
+  const targetIsAdmin = await isAdminUser(sellerId);
+
+  // Cek apakah room sudah ada untuk peserta ini (tanpa memperhatikan carId)
+  const query = supabase
+    .from('chat_rooms')
+    .select('*')
+    .or(`and(user1_id.eq.${userId},user2_id.eq.${sellerId}),and(user1_id.eq.${sellerId},user2_id.eq.${userId})`)
+    .eq('status', 'active')
+    .order('last_message_at', { ascending: false })
+    .limit(1);
+
+  const { data: existingRooms, error: existingErr } = await query;
+  if (existingErr) throw existingErr;
+
+  if (existingRooms && existingRooms.length > 0) {
+    const existingRoom = existingRooms[0] as ChatRoomDb;
+
+    // Jika carId berbeda, update car_id agar kontekstual ke mobil yang dipilih
+    if (carId && existingRoom.car_id !== carId) {
+      const { data: updatedRoom, error: updateErr } = await supabase
+        .from('chat_rooms')
+        .update({ car_id: carId })
+        .eq('id', existingRoom.id)
+        .select()
+        .single();
+      if (updateErr) throw updateErr;
+      
+      // Tidak kirim pesan car_info otomatis di sini
+      return updatedRoom as ChatRoomDb;
+    }
+
+    // PERBAIKAN: jika lawan bicara admin tapi room_type masih user_to_user, koreksi ke user_to_admin
+    if (targetIsAdmin && existingRoom.room_type !== 'user_to_admin') {
+      const { data: fixedRoom, error: fixErr } = await supabase
+        .from('chat_rooms')
+        .update({ room_type: 'user_to_admin' })
+        .eq('id', existingRoom.id)
+        .select()
+        .single();
+      if (fixErr) throw fixErr;
+      return fixedRoom as ChatRoomDb;
+    }
+
+    return existingRoom;
+  }
+
+  // Insert room baru dengan room_type yang benar
+  const { data, error } = await supabase
+    .from('chat_rooms')
+    .insert([{
+      user1_id: userId,
+      user2_id: sellerId,
+      car_id: carId,
+      room_type: targetIsAdmin ? 'user_to_admin' : 'user_to_user',
+      status: 'active'
+    }])
+    .select()
+    .single();
+
+  if (error) throw error;
+  
+  // Tidak kirim pesan car_info otomatis di sini
+  return data as ChatRoomDb;
+}
+
+// Hapus definisi archiveRoom yang duplikat di sini
+
+export function canEscalateRoom(room: ChatRoomDb): boolean {
+  // Tidak bisa eskalasi jika chat adalah user-to-admin showroom terkait mobil
+  if (room.room_type === 'user_to_admin' && !!room.car_id) {
+    return false;
+  }
+  
+  // Tidak bisa eskalasi jika sudah pernah dieskalasi sebelumnya
+  if (room.escalation_history > 0) {
+    return false;
+  }
+  
+  return true;
 }

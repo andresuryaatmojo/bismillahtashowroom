@@ -136,6 +136,8 @@ export default function HalamanChatAdmin() {
 
         const { data, error: err } = await query.order('last_message_at', { ascending: false });
         if (err) throw err;
+        console.log(`🔍 Admin filter: ${adminFilter}, Rooms loaded:`, data?.length || 0);
+        console.log('📊 Rooms data:', data);
         setRooms((data || []) as ChatRoomDb[]);
       } catch (e) {
         console.error('Gagal memuat rooms admin', e);
@@ -144,6 +146,38 @@ export default function HalamanChatAdmin() {
         setLoading(false);
       }
     })();
+  }, [adminFilter]);
+
+  // Subscribe ke perubahan chat_rooms agar daftar auto-refresh saat ada UPDATE/INSERT
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-chat-rooms')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms' }, async () => {
+        try {
+          setLoading(true);
+          let query = supabase.from('chat_rooms').select('*');
+          if (adminFilter === 'eskalasi') {
+            query = query.eq('is_escalated', true);
+          } else if (adminFilter === 'chatbot') {
+            query = query.eq('room_type', 'user_to_bot');
+          }
+          const { data, error } = await query.order('last_message_at', { ascending: false });
+          if (error) {
+            console.warn('Refresh rooms gagal:', error.message);
+            return;
+          }
+          console.log(`🔄 Real-time update - Filter: ${adminFilter}, Rooms:`, data?.length || 0);
+          console.log('📊 Updated rooms data:', data);
+          setRooms((data || []) as ChatRoomDb[]);
+        } finally {
+          setLoading(false);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [adminFilter]);
 
   // Filter rooms berdasarkan kategori dan pencarian
@@ -266,10 +300,14 @@ export default function HalamanChatAdmin() {
   // Profil admin yang login
   const { user: profile } = useAuth();
 
-  // Admin bisa membalas hanya jika menjadi peserta room aktif
+  // Admin bisa membalas jika:
+  // 1. Menjadi peserta room aktif, ATAU
+  // 2. Room sudah dieskalasi (is_escalated = true)
   const isAdminParticipant =
       !!(activeRoom && profile?.id && (activeRoom.user1_id === profile.id || activeRoom.user2_id === profile.id));
-  const canReply = isAdminParticipant;
+  const isEscalatedRoom = !!(activeRoom && activeRoom.is_escalated);
+  const isResolvedEscalation = !!(activeRoom && (activeRoom as any).resolved_at);
+  const canReply = (isAdminParticipant || isEscalatedRoom) && !isResolvedEscalation;
 
   // Kirim pesan dari admin pada room aktif
   const handleSendSupport = async () => {
@@ -277,16 +315,26 @@ export default function HalamanChatAdmin() {
       const text = input.trim();
       if (!text) return;
 
-      const peerId = profile.id === activeRoom.user1_id ? activeRoom.user2_id : activeRoom.user1_id;
+      // Untuk escalated chat, admin mengirim ke kedua participant
+      // Pilih receiver_id sebagai user yang bukan admin (biasanya user1_id atau user2_id)
+      let receiverId;
+      if (isAdminParticipant) {
+          // Jika admin adalah participant, gunakan logika lama
+          receiverId = profile.id === activeRoom.user1_id ? activeRoom.user2_id : activeRoom.user1_id;
+      } else {
+          // Jika escalated chat, kirim ke user1_id (biasanya pelapor)
+          receiverId = activeRoom.user1_id;
+      }
 
       const { error } = await supabase
           .from('chat_messages')
           .insert({
               room_id: activeRoom.id,
               sender_id: profile.id,
-              receiver_id: peerId,
+              receiver_id: receiverId,
               message_text: text,
-              message_type: 'text'
+              message_type: 'text',
+              chat_type: 'admin'
           });
 
       if (error) {
@@ -298,6 +346,61 @@ export default function HalamanChatAdmin() {
       const msgs = await fetchMessages(activeRoom.id);
       setMessages(msgs);
       endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Fungsi untuk menyelesaikan eskalasi
+  const handleResolveEscalation = async () => {
+    if (!activeRoom || !profile?.id || !activeRoom.is_escalated) return;
+
+    const confirmResolve = window.confirm(
+      'Apakah Anda yakin ingin menyelesaikan eskalasi ini? Chat akan ditandai sebagai selesai.'
+    );
+    if (!confirmResolve) return;
+
+    try {
+      const { error: updateError } = await supabase
+        .from('chat_rooms')
+        .update({
+          resolved_at: new Date().toISOString(),
+          resolved_by: profile.id
+        })
+        .eq('id', activeRoom.id);
+
+      if (updateError) {
+        console.error('Gagal menyelesaikan eskalasi:', updateError.message);
+        alert('Gagal menyelesaikan eskalasi. Silakan coba lagi.');
+        return;
+      }
+
+      // Kirim pesan sistem TANPA chat_type (agar tidak melanggar constraint)
+      const { error: messageError } = await supabase
+        .from('chat_messages')
+        .insert({
+          room_id: activeRoom.id,
+          sender_id: profile.id,
+          receiver_id: activeRoom.user1_id,
+          message_text: '✅ Eskalasi telah diselesaikan oleh admin. Terima kasih atas kesabaran Anda.',
+          message_type: 'system'
+        });
+
+      if (messageError) {
+        console.error('Gagal kirim pesan sistem:', messageError.message);
+      }
+
+      const msgs = await fetchMessages(activeRoom.id);
+      setMessages(msgs);
+
+      setActiveRoom(prev => prev ? {
+        ...prev,
+        resolved_at: new Date().toISOString(),
+        resolved_by: profile.id
+      } : null);
+
+      alert('Eskalasi berhasil diselesaikan!');
+    } catch (error) {
+      console.error('Error menyelesaikan eskalasi:', error);
+      alert('Terjadi kesalahan. Silakan coba lagi.');
+    }
   };
 
   // Ref untuk input file tersembunyi
@@ -361,8 +464,10 @@ export default function HalamanChatAdmin() {
         {/* Daftar room pakai filteredRooms */}
         <div className="flex-1 overflow-y-auto">
           {filteredRooms.map((room) => {
-            const meId = profile?.id || '';
-            const peerId = meId ? getRoomPeerId(room, meId) : room.user2_id;
+            const user1Name = namaPengguna(room.user1_id);
+            const user2Name = namaPengguna(room.user2_id);
+            const threadTitle = `${user1Name} ↔ ${user2Name}`;
+            
             return (
               <button
                 key={room.id}
@@ -370,7 +475,12 @@ export default function HalamanChatAdmin() {
                 className={`w-full text-left px-3 py-2 border-b hover:bg-gray-50 ${activeRoom?.id === room.id ? 'bg-blue-50' : ''}`}
               >
                 <div className="font-medium truncate">
-                  {namaPengguna(peerId)}
+                  {threadTitle}
+                  {room.is_escalated && (
+                    <span className="ml-2 px-1.5 py-0.5 text-xs bg-red-100 text-red-600 rounded">
+                      Eskalasi
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-gray-500 truncate">
                   {room.car_id
@@ -392,8 +502,17 @@ export default function HalamanChatAdmin() {
           <div className="flex-1">
             <div className="font-semibold">
               {activeRoom
-                ? namaPengguna(profile?.id ? getRoomPeerId(activeRoom, profile.id) : activeRoom.user2_id)
+                ? `${namaPengguna(activeRoom.user1_id)} ↔ ${namaPengguna(activeRoom.user2_id)}`
                 : 'Pilih percakapan'}
+              {activeRoom?.is_escalated && (
+                <span className={`ml-2 px-2 py-1 text-xs rounded ${
+                  (activeRoom as any).resolved_at 
+                    ? 'bg-green-100 text-green-600' 
+                    : 'bg-red-100 text-red-600'
+                }`}>
+                  {(activeRoom as any).resolved_at ? '✅ Eskalasi Selesai' : '🚨 Eskalasi'}
+                </span>
+              )}
             </div>
             <div className="text-xs text-gray-500">
               {activeRoom?.car_id
@@ -401,14 +520,28 @@ export default function HalamanChatAdmin() {
                 : activeRoom
                 ? activeRoom.room_type === 'user_to_bot'
                 ? 'Chatbot'
+                : activeRoom.room_type === 'user_to_admin'
+                ? 'User-to-Admin'
                 : 'User-to-User'
               : ''}
             </div>
           </div>
+          
+          {/* Untuk room user-to-admin showroom, hanya “Join” (tanpa eskalasi) */}
           <button onClick={joinPercakapan} className="px-3 py-2 text-sm bg-blue-600 text-white rounded">
             <ShieldCheck className="inline w-4 h-4 mr-1" />
-            Join/Eskalasi
+            {activeRoom?.room_type === 'user_to_admin' ? 'Join' : 'Join/Eskalasi'}
           </button>
+          
+          {activeRoom?.is_escalated && !(activeRoom as any).resolved_at && (
+            <button 
+              onClick={handleResolveEscalation} 
+              className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              <CheckCircle className="inline w-4 h-4 mr-1" />
+              Selesaikan Eskalasi
+            </button>
+          )}
           <button onClick={tutupPercakapan} className="px-3 py-2 text-sm bg-gray-200 rounded">
             <XCircle className="inline w-4 h-4 mr-1" />
             Tutup
@@ -427,10 +560,20 @@ export default function HalamanChatAdmin() {
             <>
               {messages.map(m => {
                 const isUser2 = activeRoom && m.sender_id === activeRoom.user2_id;
-                const rowCls = isUser2 ? 'justify-end' : 'justify-start';
-                const bubbleCls = isUser2
-                  ? 'bg-blue-600 text-white rounded-br-none'
-                  : 'bg-gray-100 text-gray-900 rounded-bl-none';
+                const isAdmin = m.chat_type === 'admin' || (profile?.id && m.sender_id === profile.id && (isEscalatedRoom || isAdminParticipant));
+                
+                let rowCls, bubbleCls;
+                if (isAdmin) {
+                  // Admin messages - center aligned with special styling
+                  rowCls = 'justify-center';
+                  bubbleCls = 'bg-green-100 text-green-800 border border-green-200 rounded-lg';
+                } else {
+                  // Regular user messages
+                  rowCls = isUser2 ? 'justify-end' : 'justify-start';
+                  bubbleCls = isUser2
+                    ? 'bg-blue-600 text-white rounded-br-none'
+                    : 'bg-gray-100 text-gray-900 rounded-bl-none';
+                }
 
                 const attachments = (m as any).chat_attachments;
                 const att = Array.isArray(attachments) ? attachments[0] : attachments;
@@ -525,6 +668,13 @@ export default function HalamanChatAdmin() {
                             </div>
                           )}
 
+                          {/* Label admin jika pesan dari admin */}
+                          {isAdmin && (
+                            <div className="text-xs font-semibold text-green-700 mb-1">
+                              👨‍💼 Admin
+                            </div>
+                          )}
+
                           {/* Teks atau nama file untuk non-image */}
                           <div className="text-sm break-words">
                             {isiPesan}
@@ -533,13 +683,13 @@ export default function HalamanChatAdmin() {
                           {/* Link file jika ada dan bukan gambar */}
                           {att?.file_url && m.message_type !== 'text' && !(att?.file_name && isImage(att.file_name)) && (
                             <div className="mt-1">
-                              <a href={att.file_url} target="_blank" rel="noreferrer" className={isUser2 ? 'text-blue-100 underline' : 'text-blue-600 underline'}>
+                              <a href={att.file_url} target="_blank" rel="noreferrer" className={isAdmin ? 'text-green-600 underline' : isUser2 ? 'text-blue-100 underline' : 'text-blue-600 underline'}>
                                 Buka lampiran
                               </a>
                             </div>
                           )}
                           {/* Timestamp untuk non-image */}
-                          <div className={`text-[11px] mt-1 ${isUser2 ? 'text-blue-100' : 'text-gray-500'}`}>
+                          <div className={`text-[11px] mt-1 ${isAdmin ? 'text-green-600' : isUser2 ? 'text-blue-100' : 'text-gray-500'}`}>
                             {new Date(m.sent_at || m.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </>
@@ -553,11 +703,34 @@ export default function HalamanChatAdmin() {
           )}
         </section>
 
-        {/* Footer: aktif hanya bila admin peserta room */}
+        {/* Footer: aktif untuk escalated chat atau jika admin adalah participant */}
         <footer className="p-3 border-t bg-white flex gap-2">
+          {/* Status indicator */}
+          {activeRoom && (
+            <div className="flex items-center px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">
+              {isResolvedEscalation ? (
+                <span className="flex items-center text-green-600">
+                  ✅ <span className="ml-1">Eskalasi Selesai</span>
+                </span>
+              ) : isEscalatedRoom ? (
+                <span className="flex items-center">
+                  🚨 <span className="ml-1">Eskalasi</span>
+                </span>
+              ) : isAdminParticipant ? (
+                <span className="flex items-center">
+                  👨‍💼 <span className="ml-1">Participant</span>
+                </span>
+              ) : (
+                <span className="flex items-center">
+                  👁️ <span className="ml-1">Read-only</span>
+                </span>
+              )}
+            </div>
+          )}
+          
           {/* Tombol klip untuk lampiran */}
           <button
-            className={`px-3 py-2 rounded ${canReply ? 'bg-gray-200' : 'bg-gray-300 text-white'}`}
+            className={`px-3 py-2 rounded ${canReply ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
             disabled={!canReply}
             onClick={handleAttachClick}
             title="Lampirkan file/foto"
@@ -573,14 +746,28 @@ export default function HalamanChatAdmin() {
             accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/zip,application/x-zip-compressed,video/*,audio/*"
           />
           <input
-            className="flex-1 border rounded px-3 py-2"
+            className={`flex-1 border rounded px-3 py-2 ${canReply ? 'border-gray-300 focus:border-blue-500' : 'border-gray-200 bg-gray-50'}`}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={canReply ? 'Tulis pesan ke pengguna' : 'Mode baca: admin tidak mengirim pesan pada chat user-to-user'}
+            placeholder={
+              isResolvedEscalation
+                ? 'Eskalasi sudah selesai - tidak dapat membalas'
+                : canReply 
+                  ? isEscalatedRoom 
+                    ? 'Balas sebagai Admin...' 
+                    : 'Tulis pesan...'
+                  : 'Mode baca saja - tidak dapat membalas'
+            }
             disabled={!canReply}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendSupport();
+              }
+            }}
           />
           <button
-            className={`px-4 py-2 rounded ${canReply ? 'bg-blue-600 text-white' : 'bg-gray-300 text-white'}`}
+            className={`px-4 py-2 rounded ${canReply ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
             disabled={!canReply}
             onClick={handleSendSupport}
           >
