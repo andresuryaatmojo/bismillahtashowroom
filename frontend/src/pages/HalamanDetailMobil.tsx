@@ -20,6 +20,8 @@ import { carService } from '../services/carService';
 import { testDriveService } from '../services/testDriveService';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { createChatRoom } from '../services/chatService';
+import { useToast } from 'components/ui/use-toast';
 
 interface BookingForm {
   fullName: string;
@@ -36,6 +38,7 @@ const HalamanDetailMobil: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { toast } = useToast();
   const [car, setCar] = useState<any>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -400,28 +403,19 @@ const HalamanDetailMobil: React.FC = () => {
               </p>
               
               {/* 3. Harga */}
-              <div className="mb-5">
-                <div className="text-3xl font-bold text-red-600">
-                  Rp {car.price?.toLocaleString() || '0'}
-                </div>
-                {car.market_price && car.market_price > car.price && (
-                  <div className="text-lg text-gray-500 line-through">
-                    Rp {car.market_price?.toLocaleString() || '0'}{car.is_negotiable ? '(Cash)' : ''}
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <div className="text-3xl font-bold text-red-600">
+                    Rp {car.price?.toLocaleString() || '0'}
                   </div>
-                )}
-              </div>
-              
-              {/* 4. Simulasi Kredit, Wishlist, Share */}
-              <div className="flex items-center justify-between mt-4">
-                <Button 
-                  variant="outline" 
-                  className="flex items-center gap-2 text-blue-600 border-blue-600"
-                  onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  Simulasi Kredit
-                </Button>
+                  {car.market_price && car.market_price > car.price && (
+                    <div className="text-lg text-gray-500 line-through">
+                      Rp {car.market_price?.toLocaleString() || '0'}{car.is_negotiable ? '(Cash)' : ''}
+                    </div>
+                  )}
+                </div>
                 
+                {/* Wishlist dan Share di samping kanan harga */}
                 <div className="flex items-center gap-3">
                   <Button 
                     variant="ghost" 
@@ -455,34 +449,72 @@ const HalamanDetailMobil: React.FC = () => {
                 </div>
               </div>
               
+              {/* 4. Simulasi Kredit sebagai link teks */}
+              <div className="mt-4">
+                <a 
+                  className="text-blue-600 hover:underline flex items-center gap-2 cursor-pointer"
+                  onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  Simulasi Kredit
+                </a>
+              </div>
+              
               {/* Pembatas horizontal */}
               <div className="w-full h-px bg-gray-200 my-6"></div>
               
-              {/* Tombol Kontak dan Booking */}
-              <div className="grid grid-cols-5 gap-4 mt-4">
+              {/* Tombol Pesan Mobil dengan latar biru */}
+              <div className="mb-4">
                 <Button 
-                  variant="outline" 
-                  className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
-                  onClick={() => navigate('/chat')}
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  <span>Chat</span>
-                </Button>
-                
-                <Button 
-                  variant="outline" 
-                  className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 col-span-2"
+                  variant="default" 
+                  className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
                   onClick={() => id && navigate('/pembelian', { state: { mobilId: id } })}
                 >
                   Pesan Mobil
                 </Button>
-                
+              </div>
+              
+              {/* Tombol Test Drive dan Chat Penjual dengan proporsi 50% 50% */}
+              <div className="grid grid-cols-2 gap-4 mt-4">
                 <Button 
-                  variant="default" 
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white col-span-2"
+                  variant="outline" 
+                  className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
                   onClick={() => setShowBookingModal(true)}
                 >
                   Tes Drive Gratis
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
+                  onClick={async () => {
+                    if (!user?.id || !car?.seller_id) {
+                      toast({
+                        title: "Perhatian",
+                        description: "Anda harus login terlebih dahulu untuk chat dengan penjual",
+                        variant: "warning"
+                      });
+                      return;
+                    }
+                    
+                    try {
+                      // Buat atau dapatkan chat room
+                      const chatRoom = await createChatRoom(user.id, car.seller_id, car.id);
+                      
+                      // Navigasi ke halaman chat dengan parameter room ID
+                      navigate('/chat', { state: { activeRoomId: chatRoom.id } });
+                    } catch (error) {
+                      console.error("Gagal membuat chat room:", error);
+                      toast({
+                        title: "Error",
+                        description: "Gagal memulai chat dengan penjual. Silakan coba lagi.",
+                        variant: "destructive"
+                      });
+                    }
+                  }}
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Chat Penjual</span>
                 </Button>
               </div>
               

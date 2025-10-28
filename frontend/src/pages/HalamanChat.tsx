@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, Phone, Video, MoreVertical, Paperclip, Smile, Search, ArrowLeft, User, MessageSquare, Clock, Check, CheckCheck, X, Plus, Image, File } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Send, MoreVertical, Paperclip, Smile, ArrowLeft, User, MessageSquare, Clock, Check, CheckCheck, X, Image, File } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   fetchRoomsForUser,
@@ -10,8 +10,12 @@ import {
   getRoomPeerId,
   type ChatRoomDb,
   type ChatMessageDb,
-  sendAttachmentMessage
+  sendAttachmentMessage,
+  fetchLatestMessageForRoom,
+  deleteRoomHistory
 } from '../services/chatService';
+import { useLocation } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 // Interfaces
 interface Pesan {
@@ -61,13 +65,12 @@ interface StateHalaman {
   isTyping: boolean;
   showEmojiPicker: boolean;
   showAttachmentMenu: boolean;
-  searchQuery: string;
-  filteredChats: ChatRoom[];
   selectedMessages: string[];
   showChatInfo: boolean;
   uploadProgress: number;
   isUploading: boolean;
   replyingTo: Pesan | null;
+  showHeaderMenu: boolean;
 }
 
 // HalamanChat component
@@ -78,6 +81,7 @@ function HalamanChat() {
   const [messages, setMessages] = useState<ChatMessageDb[]>([]);
   const [inputText, setInputText] = useState('');
   const [fileToSend, setFileToSend] = useState<File | null>(null);
+  const [roleFilter, setRoleFilter] = useState<'all' | 'buyer' | 'seller'>('all');
   const unsubscribeRef = useRef<null | (() => void)>(null);
   
   const [state, setState] = useState<StateHalaman>({
@@ -100,18 +104,54 @@ function HalamanChat() {
     isTyping: false,
     showEmojiPicker: false,
     showAttachmentMenu: false,
-    searchQuery: '',
-    filteredChats: [],
     selectedMessages: [],
     showChatInfo: false,
     uploadProgress: 0,
     isUploading: false,
-    replyingTo: null
+    replyingTo: null,
+    showHeaderMenu: false
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const headerMenuRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const peerProfileCacheRef = useRef<Map<string, any>>(new Map());
+  
+  // Asumsi role user saat ini. Ganti dengan sumber role nyata (mis. dari context/profil).
+  const myRole: 'buyer' | 'seller' = 'buyer';
+
+  const getPeerRole = useCallback((room: ChatRoomDb): 'buyer' | 'seller' => {
+    return myRole === 'buyer' ? 'seller' : 'buyer';
+  }, [myRole]);
+
+  // Helper: deteksi room self-chat
+  const isSelfRoom = useCallback(
+    (room: ChatRoomDb) => {
+      const me = user?.id || '';
+      return room.user1_id === me && room.user2_id === me;
+    },
+    [user?.id]
+  );
+
+  const filteredRooms = useMemo(() => {
+    const base = rooms.filter(r => !isSelfRoom(r));
+    if (roleFilter === 'all') return base;
+    return base.filter((r) => getPeerRole(r) === roleFilter);
+  }, [rooms, roleFilter, getPeerRole, isSelfRoom]);
+
+  const roleCounts = useMemo(() => {
+    const base = rooms.filter(r => !isSelfRoom(r));
+    let seller = 0, buyer = 0;
+    base.forEach((r) => {
+      if (getPeerRole(r) === 'seller') seller++;
+      else buyer++;
+    });
+    return { all: base.length, seller, buyer };
+  }, [rooms, getPeerRole, isSelfRoom]);
+  
+  // Bangun base chat list (nama/avatar) hanya saat rooms/user berubah
   
   useEffect(() => {
     if (!user?.id) return;
@@ -126,7 +166,29 @@ function HalamanChat() {
     })();
   }, [user?.id]);
 
+  // Preselect room jika datang dari "Chat Penjual" (navigate state.activeRoomId)
   useEffect(() => {
+    const activeRoomId = (location.state as any)?.activeRoomId;
+    if (activeRoomId && rooms.length) {
+      const r = rooms.find(x => x.id === activeRoomId);
+      if (r) {
+        setActiveRoom(r);
+      }
+    }
+  }, [rooms, location.state]);
+
+  // Sinkronkan activeRoom (Supabase) ke activeChat (UI) agar panel terbuka
+  useEffect(() => {
+    if (!activeRoom) return;
+    const uiChat = state.chatList.find(c => c.id === activeRoom.id);
+    if (uiChat) {
+      setState(prev => ({ ...prev, activeChat: uiChat }));
+    }
+  }, [activeRoom?.id, state.chatList]);
+
+  useEffect(() => {
+    // Kosongkan pesan sebelum fetch agar preview tidak salah menempel
+    setMessages([]);
     (async () => {
       if (!activeRoom) return;
       try {
@@ -155,28 +217,77 @@ function HalamanChat() {
     };
   }, [activeRoom?.id, user?.id]);
 
+  // Normalisasi tipe pesan DB ke tipe UI
+  const normalizeMessageType = (t: ChatMessageDb['message_type']): Pesan['tipePesan'] => {
+    if (t === 'text') return 'text';
+    if (t === 'image') return 'image';
+    if (t === 'file' || t === 'audio' || t === 'video') return 'file';
+    return 'system';
+  };
+
+  const toPesanFromDb = (m: ChatMessageDb): Pesan => {
+    const attachments = (m as any).chat_attachments;
+    const attachment = Array.isArray(attachments) ? attachments[0] : attachments;
+    
+    return {
+      id: m.id,
+      pengirimId: m.sender_id,
+      penerimaId: m.receiver_id,
+      isiPesan: m.message_text,
+      tipePesan: normalizeMessageType(m.message_type),
+      waktuKirim: m.sent_at || m.created_at,
+      statusBaca: m.is_read ? 'read' : 'delivered',
+      fileUrl: attachment?.file_url,
+      fileName: attachment?.file_name,
+      fileSize: attachment?.file_size || undefined,
+      replyTo: m.reply_to_message_id || undefined
+    };
+  };
+
+  // Tampilkan pesan dari Supabase ke UI (state.pesanList) agar area chat memakai data real
+  useEffect(() => {
+    if (!activeRoom) return;
+    const list: Pesan[] = messages.map(toPesanFromDb);
+    setState(prev => ({ ...prev, pesanList: list }));
+  }, [messages, activeRoom?.id]);
+
   const handleSelectRoom = (room: ChatRoomDb) => {
     setActiveRoom(room);
+    // Reset pesan agar efek berikutnya tidak memakai pesan dari room sebelumnya
+    setMessages([]);
+    const uiChat = state.chatList.find(c => c.id === room.id);
+    if (uiChat) {
+      setState(prev => ({ ...prev, activeChat: uiChat }));
+    }
   };
 
   const handleSend = async () => {
     if (!user?.id || !activeRoom) return;
     const receiverId = getRoomPeerId(activeRoom, user.id);
+
+    // Cegah kirim pesan ke diri sendiri
+    if (receiverId === user.id) {
+      setState(prev => ({ ...prev, error: 'Tidak dapat mengirim pesan ke diri sendiri.' }));
+      return;
+    }
+
     try {
       if (fileToSend) {
         const { message, attachment } = await sendAttachmentMessage(activeRoom.id, user.id, receiverId, fileToSend);
-        // gabungkan attachment ke message untuk render langsung
         const withAtt = { ...message, chat_attachments: [attachment] } as ChatMessageDb & { chat_attachments: any[] };
         setMessages(prev => [...prev, withAtt]);
         setFileToSend(null);
         setInputText('');
+        setState(prev => ({ ...prev, pesanBaru: '' }));
       } else if (inputText.trim()) {
         const sent = await sendTextMessage(activeRoom.id, user.id, receiverId, inputText.trim());
         setMessages(prev => [...prev, sent]);
         setInputText('');
+        setState(prev => ({ ...prev, pesanBaru: '' }));
       }
     } catch (e) {
       console.error('Gagal mengirim pesan', e);
+      setState(prev => ({ ...prev, error: 'Gagal mengirim pesan' }));
     }
   };
 
@@ -243,6 +354,7 @@ function HalamanChat() {
   // Method: tulisPesan
   const tulisPesan = (isiPesan: string) => {
     setState(prev => ({ ...prev, pesanBaru: isiPesan }));
+    setInputText(isiPesan);
     
     // Show typing indicator
     if (!state.isTyping) {
@@ -335,86 +447,18 @@ function HalamanChat() {
     }
   };
   
-  // New method to handle sending messages with the new API
+  // Method to handle sending messages with Supabase
   const handleSendMessage = async () => {
     await handleSend();
   };
 
-  // Method: menungguBalasan
+  // Method: menungguBalasan - Tidak digunakan lagi karena menggunakan data real dari Supabase
+  // Fungsi ini dipertahankan untuk kompatibilitas tapi tidak lagi menghasilkan pesan dummy
   const menungguBalasan = async () => {
-    // Simulate waiting for reply with typing indicator from other user
-    if (state.activeChat) {
-      const otherUserId = state.activeChat.participants.find(p => p !== state.currentUser.id);
-      if (otherUserId) {
-        setState(prev => ({
-          ...prev,
-          kontakList: prev.kontakList.map(kontak =>
-            kontak.id === otherUserId
-              ? { ...kontak, isTyping: true }
-              : kontak
-          )
-        }));
-        
-        // Simulate reply after 2-5 seconds
-        setTimeout(() => {
-          const replies = [
-            'Terima kasih atas pertanyaannya. Saya akan membantu Anda.',
-            'Baik, saya akan cek informasi tersebut untuk Anda.',
-            'Mohon tunggu sebentar, saya sedang memproses permintaan Anda.',
-            'Apakah ada yang bisa saya bantu lagi?'
-          ];
-          
-          const randomReply = replies[Math.floor(Math.random() * replies.length)];
-          
-          const balasan: Pesan = {
-            id: `msg_${Date.now()}`,
-            pengirimId: otherUserId!,
-            penerimaId: state.currentUser.id,
-            isiPesan: randomReply,
-            tipePesan: 'text',
-            waktuKirim: new Date().toISOString(),
-            statusBaca: 'delivered'
-          };
-          
-          setState(prev => ({
-            ...prev,
-            pesanList: [...prev.pesanList, balasan],
-            kontakList: prev.kontakList.map(kontak =>
-              kontak.id === otherUserId
-                ? { ...kontak, isTyping: false }
-                : kontak
-            ),
-            chatList: prev.chatList.map(chat =>
-              chat.id === state.activeChat!.id
-                ? {
-                    ...chat,
-                    pesanTerakhir: balasan,
-                    jumlahPesanBelumBaca: chat.jumlahPesanBelumBaca + 1,
-                    updatedAt: new Date().toISOString()
-                  }
-                : chat
-            )
-          }));
-        }, Math.random() * 3000 + 2000);
-      }
-    }
+    // Tidak melakukan apa-apa, karena sekarang menggunakan Supabase realtime
   };
 
-  // Method: putuskanLanjutkanChat
-  const putuskanLanjutkanChat = (lanjutkan: boolean) => {
-    if (lanjutkan) {
-      // Continue chat - focus on input
-      const inputElement = document.querySelector('input[placeholder="Ketik pesan..."]') as HTMLInputElement;
-      if (inputElement) {
-        inputElement.focus();
-      }
-    } else {
-      // End chat - show confirmation
-      if (window.confirm('Apakah Anda yakin ingin mengakhiri chat ini?')) {
-        keluarDariChat();
-      }
-    }
-  };
+
 
   // Method: tulisPesanBaru
   const tulisPesanBaru = (isiPesan: string) => {
@@ -514,226 +558,329 @@ function HalamanChat() {
   };
 
   const handleFileUpload = async (file: File) => {
+    if (!activeRoom || !user) {
+      setState(prev => ({ ...prev, error: 'Tidak ada room aktif atau user tidak login' }));
+      return;
+    }
+
     setState(prev => ({ ...prev, isUploading: true, uploadProgress: 0 }));
     
     try {
-      // Simulate file upload progress
-      for (let i = 0; i <= 100; i += 10) {
-        setState(prev => ({ ...prev, uploadProgress: i }));
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      // Get receiver ID
+      const receiverId = getRoomPeerId(activeRoom, user.id);
       
-      const fileMessage: Pesan = {
-        id: `msg_${Date.now()}`,
-        pengirimId: state.currentUser.id,
-        penerimaId: state.activeChat!.participants.find(p => p !== state.currentUser.id) || '',
-        isiPesan: `File: ${file.name}`,
-        tipePesan: file.type.startsWith('image/') ? 'image' : 'file',
-        waktuKirim: new Date().toISOString(),
+      // Upload file using sendAttachmentMessage
+      const { message, attachment } = await sendAttachmentMessage(
+        activeRoom.id, 
+        user.id, 
+        receiverId, 
+        file
+      );
+      
+      console.log('File berhasil diupload:', { message, attachment });
+      
+      // Langsung tambahkan pesan ke state lokal untuk update UI instant
+      const newPesan: Pesan = {
+        id: message.id,
+        pengirimId: message.sender_id,
+        penerimaId: message.receiver_id,
+        isiPesan: message.message_text,
+        tipePesan: normalizeMessageType(message.message_type),
+        waktuKirim: message.sent_at || message.created_at,
         statusBaca: 'sent',
-        fileUrl: URL.createObjectURL(file),
-        fileName: file.name,
-        fileSize: file.size
+        fileUrl: attachment.file_url,
+        fileName: attachment.file_name,
+        fileSize: attachment.file_size || undefined
       };
       
+      // Update state dengan pesan baru
       setState(prev => ({
         ...prev,
-        pesanList: [...prev.pesanList, fileMessage],
+        pesanList: [...prev.pesanList, newPesan],
         isUploading: false,
         uploadProgress: 0,
         showAttachmentMenu: false
       }));
       
+      // Update messages state juga untuk konsistensi
+      setMessages(prev => [...prev, { ...message, chat_attachments: [attachment] }]);
+      
     } catch (error) {
+      console.error('Error uploading file:', error);
       setState(prev => ({
         ...prev,
-        error: 'Gagal mengupload file',
+        error: `Gagal mengupload file: ${error instanceof Error ? error.message : 'Unknown error'}`,
         isUploading: false,
         uploadProgress: 0
       }));
     }
   };
 
-  const searchChats = (query: string) => {
-    setState(prev => ({ ...prev, searchQuery: query }));
-    
-    if (!query.trim()) {
-      setState(prev => ({ ...prev, filteredChats: prev.chatList }));
-      return;
-    }
-    
-    const filtered = state.chatList.filter(chat =>
-      chat.nama.toLowerCase().includes(query.toLowerCase()) ||
-      chat.pesanTerakhir?.isiPesan.toLowerCase().includes(query.toLowerCase())
-    );
-    
-    setState(prev => ({ ...prev, filteredChats: filtered }));
-  };
+
 
   // Auto scroll to bottom when new message arrives
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.pesanList]);
 
-  // Load initial data
+  // Fetch profil berdasarkan peerId (cocokkan ke users.id atau users.auth_user_id)
+  const fetchPeerProfile = async (peerId: string) => {
+    const cache = peerProfileCacheRef.current;
+    if (cache.has(peerId)) return cache.get(peerId);
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('id,auth_user_id,full_name,username,profile_picture')
+      .or(`id.eq.${peerId},auth_user_id.eq.${peerId}`)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Gagal fetch profil peer:', error.message);
+      return null;
+    }
+    cache.set(peerId, data);
+    return data;
+  };
+
+  // Bangun base chat list (nama/avatar) hanya saat rooms/user berubah
   useEffect(() => {
-    const mockChats: ChatRoom[] = [
-      {
-        id: 'chat_001',
-        nama: 'Toyota Dealer',
-        avatar: '/images/avatars/toyota-dealer.jpg',
-        pesanTerakhir: {
-          id: 'msg_last_001',
-          pengirimId: 'dealer_001',
-          penerimaId: state.currentUser.id,
-          isiPesan: 'Baik, saya akan kirimkan brosur lengkapnya',
-          tipePesan: 'text',
-          waktuKirim: new Date(Date.now() - 1800000).toISOString(),
-          statusBaca: 'delivered'
-        },
-        jumlahPesanBelumBaca: 2,
-        participants: [state.currentUser.id, 'dealer_001'],
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        updatedAt: new Date(Date.now() - 1800000).toISOString()
-      },
-      {
-        id: 'chat_002',
-        nama: 'Honda Support',
-        avatar: '/images/avatars/honda-dealer.jpg',
-        pesanTerakhir: {
-          id: 'msg_last_002',
-          pengirimId: state.currentUser.id,
-          penerimaId: 'dealer_002',
-          isiPesan: 'Terima kasih atas informasinya',
-          tipePesan: 'text',
-          waktuKirim: new Date(Date.now() - 7200000).toISOString(),
-          statusBaca: 'read'
-        },
-        jumlahPesanBelumBaca: 0,
-        participants: [state.currentUser.id, 'dealer_002'],
-        createdAt: new Date(Date.now() - 172800000).toISOString(),
-        updatedAt: new Date(Date.now() - 7200000).toISOString()
-      }
-    ];
+    if (!user?.id) return;
     
-    setState(prev => ({
-      ...prev,
-      chatList: mockChats,
-      filteredChats: mockChats
-    }));
-  }, []);
+    const buildBaseChatList = async () => {
+      if (!rooms.length) return;
+      
+      const chatRooms: ChatRoom[] = await Promise.all(
+        rooms.map(async (room) => {
+          const peerId = getRoomPeerId(room, user.id);
+          const profile = await fetchPeerProfile(peerId);
+
+          const displayName =
+            profile?.full_name ||
+            profile?.username ||
+            'Penjual';
+
+          const avatarUrl =
+            profile?.profile_picture ||
+            '/images/avatars/dealer.jpg';
+          
+          return {
+            id: room.id,
+            nama: displayName,
+            avatar: avatarUrl,
+            pesanTerakhir: null, // isi di-update terpisah saat messages berubah
+            jumlahPesanBelumBaca: (user.id === room.user1_id ? room.unread_count_user1 : room.unread_count_user2) || 0,
+            participants: [user.id, peerId],
+            createdAt: room.created_at,
+            updatedAt: room.updated_at
+          };
+        })
+      );
+      
+      setState(prev => ({
+        ...prev,
+        chatList: chatRooms,
+        filteredChats: chatRooms
+      }));
+    };
+    
+    buildBaseChatList();
+  }, [rooms, user?.id]);
+  
+  // Saat messages berubah, update pesanTerakhir hanya untuk room aktif (hindari rebuild avatar/nama)
+  useEffect(() => {
+    if (!activeRoom) return;
+    const lastMessage = messages.length ? messages[messages.length - 1] : null;
+
+    // Selalu set pesanTerakhir: null jika tidak ada pesan
+    const last = lastMessage ? toPesanFromDb(lastMessage) : null;
+
+    setState((prev) => {
+      const updated = prev.chatList.map((chat) =>
+        chat.id === activeRoom.id ? { ...chat, pesanTerakhir: last } : chat
+      );
+      return { ...prev, chatList: updated };
+    });
+  }, [messages, activeRoom?.id]);
+
+  // Close header menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
+        setState(prev => ({ ...prev, showHeaderMenu: false }));
+      }
+    };
+
+    if (state.showHeaderMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [state.showHeaderMenu]);
 
   return (
-    <div className="h-screen bg-gray-100 flex">
+    <div 
+      className="container mx-auto max-w-6xl px-4 bg-gray-100/50 backdrop-blur-sm flex overflow-hidden"
+      style={{ height: 'calc(100vh - 64px)' }}
+    >
       {/* Sidebar - Chat List */}
-      <div className={`w-80 bg-white border-r border-gray-200 flex flex-col ${state.activeChat ? 'hidden lg:flex' : 'flex'}`}>
+      <div className={`w-72 bg-white/70 backdrop-blur-sm border-r border-gray-200 flex flex-col ${state.activeChat ? 'hidden lg:flex' : 'flex'}`}>
         {/* Header */}
-        <div className="p-4 border-b border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-xl font-semibold text-gray-900">Chat</h1>
-            <button
-              onClick={() => {/* Open new chat modal */}}
-              className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
+        <div className="sticky top-0 z-10 bg-white/70 backdrop-blur-sm p-3 border-b border-gray-200">
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-lg font-semibold text-gray-900">Chat</h1>
           </div>
-          
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Cari chat..."
-              value={state.searchQuery}
-              onChange={(e) => searchChats(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
+        </div>
+        
+        {/* Dropdown filter di bawah header */}
+        <div className="border-b bg-white/70 backdrop-blur-sm px-3 py-2">
+          <select
+            className="text-sm px-3 py-1 rounded-md border border-gray-300 bg-white w-48 sm:w-56 md:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value as 'all' | 'buyer' | 'seller')}
+          >
+            <option value="all">Semua ({roleCounts.all})</option>
+            <option value="seller">Penjual ({roleCounts.seller})</option>
+            <option value="buyer">Pembeli ({roleCounts.buyer})</option>
+          </select>
         </div>
         
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto">
-          {state.filteredChats.length === 0 ? (
-            <div className="p-4 text-center text-gray-500">
-              <MessageSquare className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-              <p>Belum ada chat</p>
+          {state.chatList.length === 0 ? (
+            <div className="p-3 text-center text-gray-500">
+              <MessageSquare className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+              <p className="text-sm">Belum ada chat</p>
             </div>
           ) : (
-            state.filteredChats.map(chat => (
-              <div
-                key={chat.id}
-                onClick={() => bukaInterfaceChat(chat.participants.find(p => p !== state.currentUser.id) || '')}
-                className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
-                  state.activeChat?.id === chat.id ? 'bg-blue-50 border-blue-200' : ''
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="relative">
-                    <img
-                      src={chat.avatar}
-                      alt={chat.nama}
-                      className="w-12 h-12 rounded-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = '/images/avatars/default.jpg';
-                      }}
-                    />
-                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-medium text-gray-900 truncate">{chat.nama}</h3>
-                      <span className="text-xs text-gray-500">
-                        {chat.pesanTerakhir && formatTime(chat.pesanTerakhir.waktuKirim)}
-                      </span>
+            state.chatList
+              .filter(chat => {
+                const roomToCheck = rooms.find(r => r.id === chat.id);
+                // Wajib punya room asli, dan bukan self-room
+                if (!roomToCheck || (roomToCheck && (roomToCheck.user1_id === user?.id && roomToCheck.user2_id === user?.id))) {
+                  return false;
+                }
+                if (roleFilter === 'all') return true;
+                return getPeerRole(roomToCheck) === roleFilter;
+              })
+              .map(chat => {
+                const roomToCheck = rooms.find(r => r.id === chat.id);
+                const peerRole = roomToCheck ? getPeerRole(roomToCheck) : 'seller';
+                
+                return (
+                  <div
+                    key={chat.id}
+                    onClick={() => {
+                      // Gunakan handleSelectRoom dari Supabase
+                      const roomToSelect = rooms.find(r => r.id === chat.id);
+                      if (roomToSelect) {
+                        handleSelectRoom(roomToSelect);
+                      }
+                    }}
+                    className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
+                      state.activeChat?.id === chat.id ? 'bg-blue-50 border-blue-200' : ''
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                    <div className="relative">
+                      <img
+                        src={chat.avatar}
+                        alt={chat.nama}
+                        className="w-10 h-10 rounded-full object-cover"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          const img = e.target as HTMLImageElement;
+                          if (img.dataset.fallbackApplied === '1') return;
+                          img.src = '/images/avatars/default.jpg';
+                          img.dataset.fallbackApplied = '1';
+                        }}
+                      />
+                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
                     </div>
                     
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-gray-600 truncate">
-                        {chat.pesanTerakhir?.isiPesan || 'Belum ada pesan'}
-                      </p>
-                      {chat.jumlahPesanBelumBaca > 0 && (
-                        <span className="bg-blue-500 text-white text-xs rounded-full px-2 py-1 min-w-[20px] text-center">
-                          {chat.jumlahPesanBelumBaca}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <h3 className="font-medium text-sm text-gray-900 truncate">{chat.nama}</h3>
+                          <span
+                            className={`ml-2 px-2 py-0.5 text-xs rounded ${
+                              peerRole === 'seller'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-amber-100 text-amber-700'
+                            }`}
+                          >
+                            {peerRole === 'seller' ? 'penjual' : 'pembeli'}
+                          </span>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {chat.pesanTerakhir && formatTime(chat.pesanTerakhir.waktuKirim)}
                         </span>
-                      )}
+                      </div>
+                        
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-gray-600 truncate">
+                            {chat.pesanTerakhir?.isiPesan || 'Belum ada pesan'}
+                          </p>
+                          {chat.jumlahPesanBelumBaca > 0 && (
+                            <span className="bg-blue-500 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[16px] text-center">
+                              {chat.jumlahPesanBelumBaca}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            ))
+                );
+              })
           )}
         </div>
       </div>
       
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {state.activeChat ? (
           <>
             {/* Chat Header */}
-            <div className="bg-white border-b border-gray-200 p-4">
+            <div className="bg-white/70 backdrop-blur-sm border-b border-gray-200 p-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <button
                     onClick={keluarDariChat}
-                    className="lg:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    className="lg:hidden p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg"
                   >
-                    <ArrowLeft className="w-5 h-5" />
+                    <ArrowLeft className="w-4 h-4" />
                   </button>
                   
                   <img
                     src={state.activeChat?.avatar || '/images/avatars/default.jpg'}
                     alt={state.activeChat?.nama || 'Avatar'}
-                    className="w-10 h-10 rounded-full object-cover"
+                    className="w-8 h-8 rounded-full object-cover"
+                    loading="lazy"
+                    decoding="async"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/images/avatars/default.jpg';
+                      const img = e.target as HTMLImageElement;
+                      if (img.dataset.fallbackApplied === '1') return;
+                      img.src = '/images/avatars/default.jpg';
+                      img.dataset.fallbackApplied = '1';
                     }}
                   />
                   
                   <div>
-                    <h2 className="font-semibold text-gray-900">{state.activeChat?.nama || 'Unknown'}</h2>
-                    <p className="text-sm text-gray-500">
+                    <div className="flex items-center">
+                      <h2 className="font-semibold text-sm text-gray-900">{state.activeChat?.nama || 'Unknown'}</h2>
+                      {activeRoom && (
+                        <span
+                          className={`ml-2 px-2 py-0.5 text-xs rounded ${
+                            getPeerRole(activeRoom) === 'seller' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {getPeerRole(activeRoom) === 'seller' ? 'Penjual' : 'Pembeli'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500">
                       {state.kontakList.find(k => 
                         state.activeChat!.participants.includes(k.id) && k.id !== state.currentUser.id
                       )?.isTyping ? 'Sedang mengetik...' : 'Online'}
@@ -741,43 +888,105 @@ function HalamanChat() {
                   </div>
                 </div>
                 
-                <div className="flex items-center space-x-2">
-                  <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-                    <Phone className="w-5 h-5" />
-                  </button>
-                  <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-                    <Video className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={() => setState(prev => ({ ...prev, showChatInfo: !prev.showChatInfo }))}
-                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-                  >
-                    <MoreVertical className="w-5 h-5" />
-                  </button>
+                <div className="flex items-center space-x-1">
+                  <div className="relative" ref={headerMenuRef}>
+                    <button
+                      onClick={() => setState(prev => ({ ...prev, showHeaderMenu: !prev.showHeaderMenu }))}
+                      className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                    
+                    {state.showHeaderMenu && (
+                      <div className="absolute right-0 top-full mt-2 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20">
+                        <button
+                          onClick={() => {
+                            setState(prev => ({ ...prev, showChatInfo: !prev.showChatInfo, showHeaderMenu: false }));
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                        >
+                          Info Chat
+                        </button>
+                        <div className="border-t border-gray-100 my-1"></div>
+                        <button
+                          onClick={async () => {
+                            if (!activeRoom) return;
+                            if (window.confirm('Hapus semua pesan dalam obrolan ini? Tindakan tidak dapat dibatalkan.')) {
+                              try {
+                                if (!activeRoom?.id) {
+                                  console.warn('No active room id');
+                                  return;
+                                }
+
+                                // Cek jumlah pesan sebelum delete
+                                const beforeMsgs = await fetchMessages(activeRoom.id);
+                                console.log('Messages before delete:', beforeMsgs?.length ?? 0);
+
+                                const res = await deleteRoomHistory(activeRoom.id);
+                                console.log('deleteRoomHistory result:', res);
+
+                                // Cek jumlah pesan sesudah delete
+                                const afterMsgs = await fetchMessages(activeRoom.id);
+                                console.log('Messages after delete:', afterMsgs?.length ?? 0);
+
+                                if (!res || res.deletedMessageCount === 0) {
+                                  // Tidak ada baris terhapus. Bisa jadi RLS menolak atau fungsi tidak dieksekusi.
+                                  alert('Tidak ada pesan yang terhapus. Cek kebijakan RLS Supabase atau duplikasi fungsi.');
+                                } else {
+                                  alert(`Berhasil menghapus ${res.deletedMessageCount} pesan dan ${res.deletedAttachmentCount} lampiran.`);
+                                }
+                                
+                                // Hapus semua pesan dari state
+                                setMessages([]);
+                                // Update chat list untuk menghapus preview pesan terakhir
+                                setState(prev => {
+                                  const updated = prev.chatList.map(c => 
+                                    c.id === activeRoom.id ? { ...c, pesanTerakhir: null } : c
+                                  );
+                                  return { ...prev, chatList: updated, showHeaderMenu: false };
+                                });
+                                
+                                console.log('Chat berhasil dihapus');
+                              } catch (e) {
+                                console.error('Gagal hapus chat', e);
+                                alert('Terjadi kesalahan saat menghapus obrolan. Lihat console untuk detail.');
+                                setState(prev => ({ ...prev, showHeaderMenu: false }));
+                              }
+                            } else {
+                              setState(prev => ({ ...prev, showHeaderMenu: false }));
+                            }
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100"
+                        >
+                          Hapus Obrolan
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
             
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
               {state.pesanList.map(pesan => (
                 <div
                   key={pesan.id}
-                  className={`flex ${pesan.pengirimId === state.currentUser.id ? 'justify-end' : 'justify-start'}`}
+                  className={`flex ${pesan.pengirimId === user?.id ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div className={`max-w-xs lg:max-w-md ${pesan.pengirimId === state.currentUser.id ? 'order-2' : 'order-1'}`}>
+                  <div className={`max-w-xs lg:max-w-sm ${pesan.pengirimId === user?.id ? 'order-2' : 'order-1'}`}>
                     {/* Reply indicator */}
                     {pesan.replyTo && (
-                      <div className="text-xs text-gray-500 mb-1 px-3">
+                      <div className="text-xs text-gray-500 mb-1 px-2">
                         Membalas pesan
                       </div>
                     )}
                     
                     <div
-                      className={`rounded-lg p-3 ${
-                        pesan.pengirimId === state.currentUser.id
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-gray-200 text-gray-900'
+                      className={`p-3 rounded-2xl ${
+                        pesan.pengirimId === user?.id
+                          ? 'bg-blue-500 text-white rounded-br-none'
+                          : 'bg-gray-200 text-gray-900 rounded-bl-none'
                       }`}
                     >
                       {pesan.tipePesan === 'text' && (
@@ -797,9 +1006,9 @@ function HalamanChat() {
                       
                       {pesan.tipePesan === 'file' && (
                         <div className="flex items-center space-x-2">
-                          <File className="w-6 h-6" />
+                          <File className="w-5 h-5" />
                           <div>
-                            <p className="text-sm font-medium">{pesan.fileName}</p>
+                            <p className="text-xs font-medium">{pesan.fileName}</p>
                             <p className="text-xs opacity-75">
                               {pesan.fileSize && (pesan.fileSize / 1024).toFixed(1)} KB
                             </p>
@@ -808,10 +1017,10 @@ function HalamanChat() {
                       )}
                       
                       <div className={`flex items-center justify-between mt-1 ${
-                        pesan.pengirimId === state.currentUser.id ? 'text-blue-100' : 'text-gray-500'
+                        pesan.pengirimId === user?.id ? 'text-blue-100' : 'text-gray-500'
                       }`}>
                         <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
-                        {pesan.pengirimId === state.currentUser.id && (
+                        {pesan.pengirimId === user?.id && (
                           <div className="ml-2">
                             {getStatusIcon(pesan.statusBaca)}
                           </div>
@@ -819,29 +1028,18 @@ function HalamanChat() {
                       </div>
                     </div>
                   </div>
-                  
-                  {pesan.pengirimId !== state.currentUser.id && (
-                    <img
-                      src={state.activeChat?.avatar || '/images/avatars/default.jpg'}
-                      alt="Avatar"
-                      className="w-8 h-8 rounded-full object-cover order-1 mr-2"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = '/images/avatars/default.jpg';
-                      }}
-                    />
-                  )}
                 </div>
               ))}
               
               {/* Upload Progress */}
               {state.isUploading && (
                 <div className="flex justify-end">
-                  <div className="max-w-xs bg-blue-500 text-white rounded-lg p-3">
+                  <div className="max-w-xs bg-blue-500 text-white rounded-lg p-2">
                     <div className="flex items-center space-x-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                      <span className="text-sm">Mengupload... {state.uploadProgress}%</span>
+                      <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                      <span className="text-xs">Mengupload... {state.uploadProgress}%</span>
                     </div>
-                    <div className="w-full bg-blue-400 rounded-full h-1 mt-2">
+                    <div className="w-full bg-blue-400 rounded-full h-1 mt-1">
                       <div
                         className="bg-white h-1 rounded-full transition-all duration-300"
                         style={{ width: `${state.uploadProgress}%` }}
@@ -856,58 +1054,58 @@ function HalamanChat() {
             
             {/* Reply indicator */}
             {state.replyingTo && (
-              <div className="bg-gray-100 border-t border-gray-200 p-3">
+              <div className="bg-gray-100 border-t border-gray-200 p-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <div className="w-1 h-8 bg-blue-500 rounded"></div>
+                    <div className="w-1 h-6 bg-blue-500 rounded"></div>
                     <div>
                       <p className="text-xs text-gray-500">Membalas</p>
-                      <p className="text-sm text-gray-700 truncate">{state.replyingTo.isiPesan}</p>
+                      <p className="text-xs text-gray-700 truncate">{state.replyingTo.isiPesan}</p>
                     </div>
                   </div>
                   <button
                     onClick={() => setState(prev => ({ ...prev, replyingTo: null }))}
                     className="p-1 text-gray-400 hover:text-gray-600"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-3 h-3" />
                   </button>
                 </div>
               </div>
             )}
             
             {/* Message Input */}
-            <div className="bg-white border-t border-gray-200 p-4">
+            <div className="bg-white/70 backdrop-blur-sm border-t border-gray-200 p-3 sticky bottom-0 z-10">
               <div className="flex items-end space-x-2">
                 {/* Attachment Menu */}
                 <div className="relative">
                   <button
                     onClick={() => setState(prev => ({ ...prev, showAttachmentMenu: !prev.showAttachmentMenu }))}
-                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg"
                   >
-                    <Paperclip className="w-5 h-5" />
+                    <Paperclip className="w-4 h-4" />
                   </button>
                   
                   {state.showAttachmentMenu && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg p-2">
+                    <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg p-1">
                       <button
                         onClick={() => {
                           fileInputRef.current?.click();
                           setState(prev => ({ ...prev, showAttachmentMenu: false }));
                         }}
-                        className="flex items-center space-x-2 w-full p-2 text-left hover:bg-gray-100 rounded"
+                        className="flex items-center space-x-2 w-full p-1.5 text-left hover:bg-gray-100 rounded"
                       >
-                        <Image className="w-4 h-4" />
-                        <span className="text-sm">Gambar</span>
+                        <Image className="w-3.5 h-3.5" />
+                        <span className="text-xs">Gambar</span>
                       </button>
                       <button
                         onClick={() => {
                           fileInputRef.current?.click();
                           setState(prev => ({ ...prev, showAttachmentMenu: false }));
                         }}
-                        className="flex items-center space-x-2 w-full p-2 text-left hover:bg-gray-100 rounded"
+                        className="flex items-center space-x-2 w-full p-1.5 text-left hover:bg-gray-100 rounded"
                       >
-                        <File className="w-4 h-4" />
-                        <span className="text-sm">File</span>
+                        <File className="w-3.5 h-3.5" />
+                        <span className="text-xs">File</span>
                       </button>
                     </div>
                   )}
@@ -918,52 +1116,35 @@ function HalamanChat() {
                   <input
                     type="text"
                     value={state.pesanBaru}
-                    onChange={(e) => tulisPesan(e.target.value)}
+                    onChange={(e) => {
+                      setState(prev => ({ ...prev, pesanBaru: e.target.value }));
+                      setInputText(e.target.value);
+                    }}
                     onKeyPress={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        kirimPesan(state.pesanBaru);
-                        menungguBalasan();
+                        handleSend();
                       }
                     }}
                     placeholder="Ketik pesan..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   
                   <button
                     onClick={() => setState(prev => ({ ...prev, showEmojiPicker: !prev.showEmojiPicker }))}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
-                    <Smile className="w-5 h-5" />
+                    <Smile className="w-4 h-4" />
                   </button>
                 </div>
                 
                 {/* Send Button */}
                 <button
-                  onClick={() => {
-                    kirimPesan(state.pesanBaru);
-                    menungguBalasan();
-                  }}
-                  disabled={!state.pesanBaru.trim() || state.loading}
-                  className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleSend}
+                  disabled={!state.pesanBaru.trim() || state.loading || !activeRoom}
+                  className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Send className="w-5 h-5" />
-                </button>
-              </div>
-              
-              {/* Chat Actions */}
-              <div className="flex justify-center space-x-4 mt-3">
-                <button
-                  onClick={() => putuskanLanjutkanChat(true)}
-                  className="text-sm text-blue-600 hover:text-blue-700"
-                >
-                  Lanjutkan Chat
-                </button>
-                <button
-                  onClick={() => putuskanLanjutkanChat(false)}
-                  className="text-sm text-red-600 hover:text-red-700"
-                >
-                  Akhiri Chat
+                  <Send className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -972,9 +1153,9 @@ function HalamanChat() {
           /* No Chat Selected */
           <div className="flex-1 flex items-center justify-center bg-gray-50">
             <div className="text-center">
-              <MessageSquare className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Pilih Chat</h3>
-              <p className="text-gray-600">Pilih chat dari daftar untuk mulai percakapan</p>
+              <MessageSquare className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <h3 className="text-base font-medium text-gray-900 mb-2">Pilih Chat</h3>
+              <p className="text-sm text-gray-600">Pilih chat dari daftar untuk mulai percakapan</p>
             </div>
           </div>
         )}

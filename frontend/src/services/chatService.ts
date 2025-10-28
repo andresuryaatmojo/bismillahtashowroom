@@ -66,7 +66,9 @@ export async function fetchRoomsForUser(userId: string) {
     .or(`user1_id.eq.${userId},user2_id.eq.${userId}`)
     .order('last_message_at', { ascending: false, nullsFirst: false });
   if (error) throw error;
-  return (data || []) as ChatRoomDb[];
+  const rooms = (data || []) as ChatRoomDb[];
+  // Buang room yang peserta 1 dan 2 adalah diri sendiri
+  return rooms.filter(r => !(r.user1_id === userId && r.user2_id === userId));
 }
 
 export async function fetchMessages(roomId: string) {
@@ -80,6 +82,9 @@ export async function fetchMessages(roomId: string) {
 }
 
 export async function sendTextMessage(roomId: string, senderId: string, receiverId: string, text: string) {
+  if (senderId === receiverId) {
+    throw new Error('Tidak bisa mengirim pesan ke diri sendiri');
+  }
   const { data, error } = await supabase
     .from('chat_messages')
     .insert([{
@@ -109,7 +114,22 @@ export async function markIncomingAsRead(roomId: string, userId: string) {
   // Trigger 'reset_unread_count_on_read' akan mereset unread_count_* di chat_rooms.
 }
 
-export function subscribeRoomMessages(roomId: string, cb: (m: ChatMessageDb) => void) {
+// Fungsi helper untuk fetch attachment data
+async function fetchMessageAttachments(messageId: string): Promise<ChatAttachmentDb[]> {
+  const { data, error } = await supabase
+    .from('chat_attachments')
+    .select('*')
+    .eq('message_id', messageId);
+  
+  if (error) {
+    console.error('Error fetching attachments:', error);
+    return [];
+  }
+  
+  return data || [];
+}
+
+export function subscribeRoomMessages(roomId: string, cb: (m: ChatMessageDb & { chat_attachments?: ChatAttachmentDb[] }) => void) {
   const channel = supabase
     .channel(`room:${roomId}`)
     .on('postgres_changes', {
@@ -117,8 +137,20 @@ export function subscribeRoomMessages(roomId: string, cb: (m: ChatMessageDb) => 
       schema: 'public',
       table: 'chat_messages',
       filter: `room_id=eq.${roomId}`,
-    }, (payload) => {
-      cb(payload.new as ChatMessageDb);
+    }, async (payload) => {
+      const message = payload.new as ChatMessageDb;
+      
+      // Jika pesan adalah attachment, fetch data attachment-nya
+      if (message.message_type === 'image' || message.message_type === 'file' || 
+          message.message_type === 'audio' || message.message_type === 'video') {
+        // Tunggu sebentar untuk memastikan attachment sudah tersimpan
+        setTimeout(async () => {
+          const attachments = await fetchMessageAttachments(message.id);
+          cb({ ...message, chat_attachments: attachments });
+        }, 100);
+      } else {
+        cb(message);
+      }
     })
     .subscribe();
 
@@ -127,6 +159,47 @@ export function subscribeRoomMessages(roomId: string, cb: (m: ChatMessageDb) => 
 
 export function getRoomPeerId(room: ChatRoomDb, meId: string) {
   return room.user1_id === meId ? room.user2_id : room.user1_id;
+}
+
+export async function createChatRoom(userId: string, sellerId: string, carId: string | null = null) {
+  // Blokir pembuatan room dengan diri sendiri
+  if (userId === sellerId) {
+    throw new Error('Tidak dapat membuat room dengan diri sendiri');
+  }
+  // Cek apakah room sudah ada untuk peserta dan carId ini
+  let query = supabase
+    .from('chat_rooms')
+    .select('*')
+    .or(`and(user1_id.eq.${userId},user2_id.eq.${sellerId}),and(user1_id.eq.${sellerId},user2_id.eq.${userId})`)
+    .limit(1);
+
+  if (carId === null) {
+    query = query.is('car_id', null);
+  } else {
+    query = query.eq('car_id', carId);
+  }
+
+  const { data: existingRooms, error: existingErr } = await query;
+  if (existingErr) throw existingErr;
+  if (existingRooms && existingRooms.length > 0) {
+    return existingRooms[0] as ChatRoomDb;
+  }
+
+  // Insert kolom minimal; default/trigger akan mengisi sisanya
+  const { data, error } = await supabase
+    .from('chat_rooms')
+    .insert([{
+      user1_id: userId,
+      user2_id: sellerId,
+      car_id: carId,
+      room_type: 'user_to_user',
+      status: 'active'
+    }])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as ChatRoomDb;
 }
 
 function guessAttachmentType(mime: string): ChatAttachmentDb['attachment_type'] {
@@ -145,15 +218,43 @@ export async function sendAttachmentMessage(
   receiverId: string,
   file: File
 ) {
-  // 1) Insert pesan bertipe sesuai file
-  const messageType: ChatMessageDb['message_type'] = file.type.startsWith('image/')
-    ? 'image'
-    : file.type.startsWith('audio/')
-    ? 'audio'
-    : file.type.startsWith('video/')
-    ? 'video'
-    : 'file';
+  const messageType: ChatMessageDb['message_type'] =
+    file.type?.startsWith('image/')
+      ? 'image'
+      : file.type?.startsWith('audio/')
+      ? 'audio'
+      : file.type?.startsWith('video/')
+      ? 'video'
+      : 'file';
 
+  const bucket = 'chat-attachments';
+  const objectPath = `${roomId}/${Date.now()}-${Math.random().toString(36).slice(2)}-${encodeURIComponent(file.name)}`;
+
+  // 1) Upload ke Storage terlebih dulu
+  const { error: uploadErr } = await supabase.storage.from(bucket).upload(objectPath, file, {
+    upsert: false,
+    contentType: file.type || undefined
+  });
+  if (uploadErr) {
+    throw new Error(`Upload gagal: ${uploadErr.message}`);
+  }
+
+  // 2) Ambil URL file
+  const { data: pub } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+  let fileUrl = pub.publicUrl;
+
+  // Jika bucket private dan ingin signed URL, aktifkan blok ini:
+  // const { data: signed, error: signedErr } = await supabase.storage
+  //   .from(bucket)
+  //   .createSignedUrl(objectPath, 60 * 60 * 24 * 7); // 7 hari
+  // if (signedErr) {
+  //   // cleanup file jika gagal signed
+  //   await supabase.storage.from(bucket).remove([objectPath]);
+  //   throw new Error(`Gagal buat signed URL: ${signedErr.message}`);
+  // }
+  // fileUrl = signed.signedUrl;
+
+  // 3) Insert pesan
   const { data: msg, error: msgErr } = await supabase
     .from('chat_messages')
     .insert([{
@@ -166,20 +267,12 @@ export async function sendAttachmentMessage(
     }])
     .select()
     .single();
-  if (msgErr) throw msgErr;
 
-  // 2) Upload ke Supabase Storage
-  const bucket = 'chat-attachments';
-  const path = `${roomId}/${msg.id}/${Date.now()}-${encodeURIComponent(file.name)}`;
-  const { error: uploadErr } = await supabase.storage.from(bucket).upload(path, file, {
-    upsert: false,
-    contentType: file.type || undefined,
-  });
-  if (uploadErr) throw uploadErr;
-
-  // 3) Dapatkan public URL (atau signed URL jika bucket non-public)
-  const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
-  const fileUrl = pub.publicUrl;
+  if (msgErr) {
+    // Hapus file yang sudah terupload agar tidak orphan
+    await supabase.storage.from(bucket).remove([objectPath]).catch(() => {});
+    throw new Error(`Insert message gagal: ${msgErr.message}`);
+  }
 
   // 4) Insert attachment row
   const attachmentType = guessAttachmentType(file.type || '');
@@ -195,12 +288,140 @@ export async function sendAttachmentMessage(
       thumbnail_url: null,
       duration: null,
       width: null,
-      height: null,
+      height: null
     }])
     .select()
     .single();
-  if (attErr) throw attErr;
+
+  if (attErr) {
+    // Cleanup file dan usahakan hapus pesan agar konsisten
+    await supabase.storage.from(bucket).remove([objectPath]).catch(() => {});
+    try {
+      await supabase.from('chat_messages').delete().eq('id', msg.id);
+    } catch (e) {}
+    throw new Error(`Insert attachment gagal: ${attErr.message}`);
+  }
 
   // Trigger `update_chat_room_on_new_message` akan update last_message_* dan unread.
   return { message: msg as ChatMessageDb, attachment: att as ChatAttachmentDb };
+}
+
+export async function fetchLatestMessageForRoom(roomId: string) {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select('*, chat_attachments(*)')
+    .eq('room_id', roomId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('fetchLatestMessageForRoom error', error);
+    return null;
+  }
+  return data as ChatMessageDb | null;
+}
+
+// Bagian helper dan fungsi deleteRoomHistory
+function extractStoragePathFromPublicUrl(url: string, bucket = 'chat-attachments') {
+  try {
+    const marker = `/object/public/${bucket}/`;
+    const altMarker = `/${bucket}/`;
+    const idx = url.indexOf(marker) >= 0
+      ? url.indexOf(marker) + marker.length
+      : url.indexOf(altMarker) + altMarker.length;
+    if (idx < altMarker.length) return null;
+    const path = url.substring(idx);
+    return decodeURIComponent(path);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteRoomHistory(roomId: string) {
+  // 1) Ambil semua pesan id di room
+  const { data: msgs, error: msgErr } = await supabase
+    .from('chat_messages')
+    .select('id')
+    .eq('room_id', roomId);
+  if (msgErr) throw msgErr;
+
+  const messageIds = (msgs || []).map(m => m.id);
+  if (messageIds.length === 0) {
+    await resetRoomMetadata(roomId);
+    return { deletedMessageCount: 0, deletedAttachmentCount: 0 };
+  }
+
+  const { data: atts, error: attErr } = await supabase
+    .from('chat_attachments')
+    .select('id,file_url,message_id')
+    .in('message_id', messageIds);
+  if (attErr) throw attErr;
+
+  const bucket = 'chat-attachments';
+  const objectPaths = (atts || [])
+    .map(a => extractStoragePathFromPublicUrl(a.file_url, bucket))
+    .filter((p): p is string => !!p);
+
+  if (objectPaths.length) {
+    try {
+      await supabase.storage.from(bucket).remove(objectPaths);
+    } catch {
+      // abaikan error storage agar proses DB tetap lanjut
+    }
+  }
+
+  let deletedAttachmentCount = 0;
+  if ((atts || []).length) {
+    const { data: deletedAtts, error: delAttErr } = await supabase
+      .from('chat_attachments')
+      .delete()
+      .in('message_id', messageIds)
+      .select('id');
+    if (delAttErr) throw delAttErr;
+    deletedAttachmentCount = (deletedAtts || []).length;
+  }
+
+  const { data: deletedMsgs, error: delMsgErr } = await supabase
+    .from('chat_messages')
+    .delete()
+    .eq('room_id', roomId)
+    .select('id');
+  if (delMsgErr) throw delMsgErr;
+
+  const deletedMessageCount = (deletedMsgs || []).length;
+
+  await resetRoomMetadata(roomId);
+
+  return { deletedMessageCount, deletedAttachmentCount };
+}
+
+// Tambahkan fungsi ini
+async function resetRoomMetadata(roomId: string) {
+  const { error } = await supabase
+    .from('chat_rooms')
+    .update({
+      last_message_id: null,
+      last_message_preview: null,
+      last_message_at: null,
+      unread_count_user1: 0,
+      unread_count_user2: 0
+    })
+    .eq('id', roomId);
+  if (error) throw error;
+}
+
+export async function archiveRoom(roomId: string) {
+  const { error } = await supabase
+    .from('chat_rooms')
+    .update({
+      status: 'archived',
+      last_message_id: null,
+      last_message_preview: null,
+      last_message_at: null,
+      unread_count_user1: 0,
+      unread_count_user2: 0
+    })
+    .eq('id', roomId);
+  if (error) throw error;
 }
