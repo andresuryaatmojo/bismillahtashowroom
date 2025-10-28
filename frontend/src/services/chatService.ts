@@ -28,7 +28,7 @@ export type ChatMessageDb = {
   sender_id: string;
   receiver_id: string;
   message_text: string;
-  message_type: 'text' | 'image' | 'file' | 'audio' | 'video' | 'system';
+  message_type: 'text' | 'image' | 'file' | 'audio' | 'video' | 'system' | 'car_info';
   chat_type: 'user' | 'bot' | 'admin';
   is_read: boolean | null;
   read_at: string | null;
@@ -161,31 +161,104 @@ export function getRoomPeerId(room: ChatRoomDb, meId: string) {
   return room.user1_id === meId ? room.user2_id : room.user1_id;
 }
 
+// Fungsi untuk mengirim pesan 'car_info' sebagai user
+export async function sendTextWithCarInfoMessage(
+  roomId: string,
+  senderId: string,
+  receiverId: string,
+  text: string,
+  carId: string
+) {
+  // Ambil info mobil
+  const { data: carInfo, error: carError } = await supabase
+    .from('cars')
+    .select(`
+      id, title, price, year, mileage, color,
+      car_brands (name),
+      car_models (name),
+      car_images (image_url)
+    `)
+    .eq('id', carId)
+    .single();
+
+  if (carError || !carInfo) throw carError || new Error('Car info not found');
+
+  const carTitle =
+    carInfo.title ||
+    `${carInfo.car_brands?.[0]?.name || ''} ${carInfo.car_models?.[0]?.name || ''}`.trim();
+  const carPrice = carInfo.price ? `Rp ${carInfo.price.toLocaleString('id-ID')}` : 'Harga tidak tersedia';
+  const carImage =
+    carInfo.car_images && carInfo.car_images.length > 0 ? carInfo.car_images[0].image_url : null;
+
+  const payload = {
+    room_id: roomId,
+    sender_id: senderId,
+    receiver_id: receiverId,
+    message_text: JSON.stringify({
+      text,
+      carInfo: {
+        carId: carInfo.id,
+        title: carTitle,
+        price: carPrice,
+        year: carInfo.year,
+        mileage: carInfo.mileage,
+        color: carInfo.color,
+        imageUrl: carImage
+      }
+    }),
+    message_type: 'text' as ChatMessageDb['message_type'],
+    chat_type: 'user' as ChatMessageDb['chat_type'],
+    is_read: false
+  };
+
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .insert([payload])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as ChatMessageDb;
+}
+
 export async function createChatRoom(userId: string, sellerId: string, carId: string | null = null) {
   // Blokir pembuatan room dengan diri sendiri
   if (userId === sellerId) {
     throw new Error('Tidak dapat membuat room dengan diri sendiri');
   }
-  // Cek apakah room sudah ada untuk peserta dan carId ini
-  let query = supabase
+
+  // Cek apakah room sudah ada untuk peserta ini (tanpa memperhatikan carId)
+  const query = supabase
     .from('chat_rooms')
     .select('*')
     .or(`and(user1_id.eq.${userId},user2_id.eq.${sellerId}),and(user1_id.eq.${sellerId},user2_id.eq.${userId})`)
+    .eq('status', 'active')
+    .order('last_message_at', { ascending: false })
     .limit(1);
-
-  if (carId === null) {
-    query = query.is('car_id', null);
-  } else {
-    query = query.eq('car_id', carId);
-  }
 
   const { data: existingRooms, error: existingErr } = await query;
   if (existingErr) throw existingErr;
+
   if (existingRooms && existingRooms.length > 0) {
-    return existingRooms[0] as ChatRoomDb;
+    const existingRoom = existingRooms[0] as ChatRoomDb;
+    
+    if (carId && existingRoom.car_id !== carId) {
+      const { data: updatedRoom, error: updateErr } = await supabase
+        .from('chat_rooms')
+        .update({ car_id: carId })
+        .eq('id', existingRoom.id)
+        .select()
+        .single();
+        
+      if (updateErr) throw updateErr;
+      
+      // Tidak kirim pesan car_info otomatis di sini
+      return updatedRoom as ChatRoomDb;
+    }
+    
+    return existingRoom;
   }
 
-  // Insert kolom minimal; default/trigger akan mengisi sisanya
   const { data, error } = await supabase
     .from('chat_rooms')
     .insert([{
@@ -199,6 +272,8 @@ export async function createChatRoom(userId: string, sellerId: string, carId: st
     .single();
 
   if (error) throw error;
+  
+  // Tidak kirim pesan car_info otomatis di sini
   return data as ChatRoomDb;
 }
 

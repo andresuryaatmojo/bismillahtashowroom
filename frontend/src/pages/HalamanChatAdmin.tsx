@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Filter, CheckCircle, XCircle, User, MessageSquare, ShieldCheck, Send } from 'lucide-react';
+import { Search, Filter, CheckCircle, XCircle, User, MessageSquare, ShieldCheck, Send, Paperclip, Car } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { fetchMessages, type ChatRoomDb, type ChatMessageDb, getRoomPeerId, sendAttachmentMessage } from '../services/chatService';
+import { useAuth } from '../contexts/AuthContext';
 
 type Role = 'buyer' | 'seller' | 'admin';
 type StatusPercakapan = 'open' | 'escalated' | 'closed';
@@ -105,69 +108,302 @@ export default function HalamanChatAdmin() {
     setInput('');
   };
 
+  // State Supabase mirip HalamanChat
+  const [rooms, setRooms] = useState<ChatRoomDb[]>([]);
+  const [activeRoom, setActiveRoom] = useState<ChatRoomDb | null>(null);
+  const [messages, setMessages] = useState<ChatMessageDb[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // State UI: gunakan kategori seperti halaman chat: semua | eskalasi | chatbot
+  const [adminFilter, setAdminFilter] = useState<'semua' | 'eskalasi' | 'chatbot'>('semua');
+  const [adminQuery, setAdminQuery] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        let query = supabase.from('chat_rooms').select('*');
+
+        // Terapkan filter kategori
+        if (adminFilter === 'eskalasi') {
+          query = query.eq('is_escalated', true);
+        } else if (adminFilter === 'chatbot') {
+          query = query.eq('room_type', 'user_to_bot');
+        }
+        // 'semua' -> tanpa filter tambahan
+
+        const { data, error: err } = await query.order('last_message_at', { ascending: false });
+        if (err) throw err;
+        setRooms((data || []) as ChatRoomDb[]);
+      } catch (e) {
+        console.error('Gagal memuat rooms admin', e);
+        setError('Gagal memuat daftar percakapan');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [adminFilter]);
+
+  // Filter rooms berdasarkan kategori dan pencarian
+  const filteredRooms = rooms.filter((r) => {
+    const byCategory =
+      adminFilter === 'semua'
+        ? true
+        : adminFilter === 'eskalasi'
+        ? r.is_escalated === true
+        : adminFilter === 'chatbot'
+        ? r.room_type === 'user_to_bot'
+        : true;
+
+    const q = adminQuery.trim().toLowerCase();
+    const text = `${r.user1_id} ${r.user2_id} ${r.car_id ?? ''}`.toLowerCase();
+    return byCategory && (q === '' || text.includes(q));
+  });
+
+  // Ketika room aktif berubah: muat pesan
+  useEffect(() => {
+    (async () => {
+      if (!activeRoom) return;
+      try {
+        setLoading(true);
+        const ms = await fetchMessages(activeRoom.id);
+        setMessages(ms);
+      } catch (e) {
+        console.error('Gagal memuat pesan room admin', e);
+        setError('Gagal memuat pesan');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [activeRoom?.id]);
+
+  // Handler pilih room
+  const handleSelectRoom = (room: ChatRoomDb) => {
+    setActiveRoom(room);
+  };
+
+  // Cache nama pengguna dari Supabase (id -> full_name/username)
+  const [userNameMap, setUserNameMap] = useState<Record<string, string>>({});
+
+  // Muat nama pengguna saat rooms berubah
+  useEffect(() => {
+    const loadUserNames = async () => {
+      const ids = Array.from(
+        new Set(
+          rooms
+            .flatMap(r => [r.user1_id, r.user2_id])
+            .filter(Boolean)
+        )
+      ) as string[];
+
+      if (ids.length === 0) return;
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, full_name, username')
+        .in('id', ids);
+
+      if (error) {
+        console.warn('Gagal memuat nama pengguna:', error.message);
+        return;
+      }
+
+      const map: Record<string, string> = {};
+      (data || []).forEach(u => {
+        map[u.id] = u.full_name?.trim() || u.username?.trim() || u.id;
+      });
+      setUserNameMap(prev => ({ ...prev, ...map }));
+    };
+
+    loadUserNames();
+  }, [rooms]);
+
+  // Helper untuk mengambil nama tampilan
+  const namaPengguna = (id?: string | null) => {
+    if (!id) return '';
+    return userNameMap[id] || id;
+  };
+
+  // Cache judul mobil (id -> title/brand+model)
+  const [carTitleMap, setCarTitleMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const loadCarTitles = async () => {
+      const ids = Array.from(
+        new Set(
+          rooms
+            .map(r => r.car_id)
+            .filter((cId): cId is string => !!cId)
+        )
+      );
+      if (ids.length === 0) return;
+  
+      const { data, error } = await supabase
+        .from('cars')
+        .select('id, title, car_brands(name), car_models(name)')
+        .in('id', ids);
+  
+      if (error) {
+        console.warn('Gagal memuat judul mobil:', error.message);
+        return;
+      }
+  
+      const map: Record<string, string> = {};
+      (data || []).forEach((c: any) => {
+        const brand = c?.car_brands?.name || '';
+        const model = c?.car_models?.name || '';
+        const composed = c?.title?.trim() || [brand, model].filter(Boolean).join(' ').trim();
+        map[c.id] = composed || c.id;
+      });
+      setCarTitleMap(prev => ({ ...prev, ...map }));
+    };
+  
+    loadCarTitles();
+  }, [rooms]);
+
+  // Profil admin yang login
+  const { user: profile } = useAuth();
+
+  // Admin bisa membalas hanya jika menjadi peserta room aktif
+  const isAdminParticipant =
+      !!(activeRoom && profile?.id && (activeRoom.user1_id === profile.id || activeRoom.user2_id === profile.id));
+  const canReply = isAdminParticipant;
+
+  // Kirim pesan dari admin pada room aktif
+  const handleSendSupport = async () => {
+      if (!canReply || !activeRoom || !profile?.id) return;
+      const text = input.trim();
+      if (!text) return;
+
+      const peerId = profile.id === activeRoom.user1_id ? activeRoom.user2_id : activeRoom.user1_id;
+
+      const { error } = await supabase
+          .from('chat_messages')
+          .insert({
+              room_id: activeRoom.id,
+              sender_id: profile.id,
+              receiver_id: peerId,
+              message_text: text,
+              message_type: 'text'
+          });
+
+      if (error) {
+          console.error('Gagal kirim pesan admin:', error.message);
+          return;
+      }
+
+      setInput('');
+      const msgs = await fetchMessages(activeRoom.id);
+      setMessages(msgs);
+      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Ref untuk input file tersembunyi
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAttachClick = () => {
+      if (!canReply) return;
+      fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      try {
+          const file = e.target.files?.[0];
+          if (!file || !canReply || !activeRoom || !profile?.id) return;
+  
+          const peerId = profile.id === activeRoom.user1_id ? activeRoom.user2_id : activeRoom.user1_id;
+  
+          // Kirim attachment via service
+          await sendAttachmentMessage(activeRoom.id, profile.id, peerId, file);
+  
+          // Refresh thread
+          const msgs = await fetchMessages(activeRoom.id);
+          setMessages(msgs);
+          endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  
+          // Reset input file agar bisa pilih file yang sama lagi jika perlu
+          e.target.value = '';
+      } catch (err: any) {
+          console.error('Gagal kirim lampiran:', err?.message || err);
+      }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 flex">
-      {/* Sidebar */}
-      <aside className="w-96 bg-white border-r flex flex-col">
-        <div className="p-3 border-b">
-          <div className="font-semibold mb-2">Chat Admin</div>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                className="w-full pl-9 pr-3 py-2 border rounded"
-                placeholder="Cari percakapan..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
-            <select
-              className="border rounded px-2"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-            >
-              <option value="all">Semua</option>
-              <option value="open">Open</option>
-              <option value="escalated">Escalated</option>
-              <option value="closed">Closed</option>
-            </select>
-          </div>
+    <div className="flex h-screen bg-white">
+      {/* Sidebar percakapan */}
+      <aside className="w-80 border-r flex flex-col">
+        <div className="p-3 border-b flex items-center gap-2">
+          <Search className="w-4 h-4 text-gray-500" />
+          <input
+            className="flex-1 border rounded px-2 py-1 text-sm"
+            value={adminQuery}
+            onChange={(e) => setAdminQuery(e.target.value)}
+            placeholder="Cari pengguna atau mobil"
+          />
+          <Filter className="w-4 h-4 text-gray-500" />
         </div>
+
+        {/* Dropdown kategori: Semua | Eskalasi | Chatbot */}
+        <div className="px-3 py-2 border-b">
+          <select
+            className="w-full border rounded px-2 py-1 text-sm"
+            value={adminFilter}
+            onChange={(e) => setAdminFilter(e.target.value as 'semua' | 'eskalasi' | 'chatbot')}
+          >
+            <option value="semua">Semua</option>
+            <option value="eskalasi">Eskalasi</option>
+            <option value="chatbot">Chatbot</option>
+          </select>
+        </div>
+
+        {/* Daftar room pakai filteredRooms */}
         <div className="flex-1 overflow-y-auto">
-          {filtered.map(p => (
-            <button
-              key={p.id}
-              className={`w-full text-left p-3 border-b hover:bg-gray-50 ${aktif?.id === p.id ? 'bg-blue-50' : ''}`}
-              onClick={() => setAktif(p)}
-            >
-              <div className="flex justify-between">
-                <div className="font-medium">{p.title}</div>
-                {p.unreadCount > 0 && (
-                  <span className="text-xs bg-blue-600 text-white px-2 rounded">{p.unreadCount}</span>
-                )}
-              </div>
-              <div className="text-xs text-gray-500">{p.context} • {new Date(p.updatedAt).toLocaleString()}</div>
-              <div className="mt-1">
-                <span className={`text-xs px-2 py-0.5 rounded ${
-                  p.status === 'open' ? 'bg-green-100 text-green-700' :
-                  p.status === 'escalated' ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-gray-200 text-gray-700'
-                }`}>
-                  {p.status}
-                </span>
-              </div>
+          {filteredRooms.map((room) => {
+            const meId = profile?.id || '';
+            const peerId = meId ? getRoomPeerId(room, meId) : room.user2_id;
+            return (
+              <button
+                key={room.id}
+                onClick={() => setActiveRoom(room)}
+                className={`w-full text-left px-3 py-2 border-b hover:bg-gray-50 ${activeRoom?.id === room.id ? 'bg-blue-50' : ''}`}
+              >
+                <div className="font-medium truncate">
+                  {namaPengguna(peerId)}
+                </div>
+                <div className="text-xs text-gray-500 truncate">
+                  {room.car_id
+                    ? `Mobil • ${carTitleMap[room.car_id] || room.car_id}`
+                    : room.room_type === 'user_to_bot'
+                    ? 'Chatbot'
+                    : 'User-to-User'}
+                </div>
             </button>
-          ))}
+          );
+        })}
         </div>
       </aside>
 
-      {/* Thread */}
+      {/* Thread percakapan */}
       <main className="flex-1 flex flex-col">
-        <header className="p-4 bg-white border-b flex items-center gap-3">
+        <header className="p-4 border-b flex items-center gap-3">
           <User className="w-5 h-5 text-blue-600" />
           <div className="flex-1">
-            <div className="font-semibold">{aktif?.title || 'Pilih percakapan'}</div>
-            <div className="text-xs text-gray-500">{aktif?.context}</div>
+            <div className="font-semibold">
+              {activeRoom
+                ? namaPengguna(profile?.id ? getRoomPeerId(activeRoom, profile.id) : activeRoom.user2_id)
+                : 'Pilih percakapan'}
+            </div>
+            <div className="text-xs text-gray-500">
+              {activeRoom?.car_id
+                ? `Mobil • ${carTitleMap[activeRoom.car_id] || activeRoom.car_id}`
+                : activeRoom
+                ? activeRoom.room_type === 'user_to_bot'
+                ? 'Chatbot'
+                : 'User-to-User'
+              : ''}
+            </div>
           </div>
           <button onClick={joinPercakapan} className="px-3 py-2 text-sm bg-blue-600 text-white rounded">
             <ShieldCheck className="inline w-4 h-4 mr-1" />
@@ -180,7 +416,7 @@ export default function HalamanChatAdmin() {
         </header>
 
         <section className="flex-1 overflow-y-auto p-4 space-y-2">
-          {!aktif ? (
+          {!activeRoom ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center text-gray-500">
                 <MessageSquare className="w-12 h-12 mx-auto mb-2 text-gray-300" />
@@ -189,36 +425,164 @@ export default function HalamanChatAdmin() {
             </div>
           ) : (
             <>
-              {aktif.messages.map(m => (
-                <div
-                  key={m.id}
-                  className={`max-w-[70%] p-3 rounded ${
-                    m.role === 'admin' ? 'ml-auto bg-blue-50' : 'bg-gray-50'
-                  }`}
-                >
-                  <div className="text-sm">{m.text}</div>
-                  <div className="text-[11px] text-gray-500 mt-1">
-                    {new Date(m.createdAt).toLocaleTimeString()} • {m.role}
+              {messages.map(m => {
+                const isUser2 = activeRoom && m.sender_id === activeRoom.user2_id;
+                const rowCls = isUser2 ? 'justify-end' : 'justify-start';
+                const bubbleCls = isUser2
+                  ? 'bg-blue-600 text-white rounded-br-none'
+                  : 'bg-gray-100 text-gray-900 rounded-bl-none';
+
+                const attachments = (m as any).chat_attachments;
+                const att = Array.isArray(attachments) ? attachments[0] : attachments;
+
+                // Helper function to check if file is an image
+                const isImage = (fileName: string) => {
+                  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+                  return imageExtensions.some(ext => fileName.toLowerCase().endsWith(ext));
+                };
+
+                // Parse teks + carInfo untuk pesan text/car_info
+                let isiPesan = m.message_type === 'text' ? m.message_text : (att?.file_name || m.message_text);
+                let carInfoData: { carId: string; title: string; imageUrl: string | null } | null = null;
+
+                if (m.message_type === 'text') {
+                  try {
+                    const parsed = JSON.parse(m.message_text || '{}');
+                    if (parsed && typeof parsed === 'object') {
+                      if (typeof parsed.text === 'string') {
+                        isiPesan = parsed.text;
+                      }
+                      if (parsed.carInfo) {
+                        carInfoData = {
+                          carId: parsed.carInfo.carId,
+                          title: parsed.carInfo.title,
+                          imageUrl: parsed.carInfo.imageUrl ?? null
+                        };
+                      }
+                    }
+                  } catch {
+                    // biarkan sebagai teks biasa jika bukan JSON
+                  }
+                } else if (m.message_type === 'car_info') {
+                  try {
+                    const parsed = JSON.parse(m.message_text || '{}');
+                    carInfoData = {
+                      carId: parsed.carId,
+                      title: parsed.title,
+                      imageUrl: parsed.imageUrl ?? null
+                    };
+                    isiPesan = parsed.title || 'Informasi mobil';
+                  } catch {
+                    // fallback ke teks mentah bila parsing gagal
+                  }
+                }
+
+                return (
+                  <div key={m.id} className={`flex ${rowCls}`}>
+                    <div className={`max-w-[75%] rounded-2xl ${bubbleCls} ${m.message_type === 'image' || (att?.file_name && isImage(att.file_name)) ? 'p-1' : 'px-3 py-2'}`}>
+                      {/* Tampilkan gambar langsung jika tipe image */}
+                      {(m.message_type === 'image' || (att?.file_name && isImage(att.file_name))) && att?.file_url ? (
+                        <div className="relative">
+                          <img 
+                            src={att.file_url} 
+                            alt="Gambar"
+                            className="max-w-full h-auto rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
+                            style={{ maxHeight: '300px', minWidth: '150px' }}
+                            onClick={() => window.open(att.file_url, '_blank')}
+                          />
+                          <div className="absolute bottom-1 right-2 bg-black bg-opacity-50 text-white text-[10px] px-1.5 py-0.5 rounded">
+                            {new Date(m.sent_at || m.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Preview mobil di dalam bubble jika ada carInfo */}
+                          {carInfoData && (
+                            <div className="mb-2 bg-white border border-gray-200 rounded-lg p-2 flex items-center">
+                              <div className="flex-shrink-0 mr-2">
+                                {carInfoData.imageUrl ? (
+                                  <img
+                                    src={carInfoData.imageUrl}
+                                    alt={carInfoData.title}
+                                    className="w-10 h-10 object-cover rounded-md"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                      const next = e.currentTarget.nextElementSibling as HTMLElement;
+                                      if (next) next.style.display = 'flex';
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 bg-gray-200 rounded-md flex items-center justify-center">
+                                    <Car className="w-5 h-5 text-gray-400" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate">
+                                  {carInfoData.title}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Teks atau nama file untuk non-image */}
+                          <div className="text-sm break-words">
+                            {isiPesan}
+                          </div>
+
+                          {/* Link file jika ada dan bukan gambar */}
+                          {att?.file_url && m.message_type !== 'text' && !(att?.file_name && isImage(att.file_name)) && (
+                            <div className="mt-1">
+                              <a href={att.file_url} target="_blank" rel="noreferrer" className={isUser2 ? 'text-blue-100 underline' : 'text-blue-600 underline'}>
+                                Buka lampiran
+                              </a>
+                            </div>
+                          )}
+                          {/* Timestamp untuk non-image */}
+                          <div className={`text-[11px] mt-1 ${isUser2 ? 'text-blue-100' : 'text-gray-500'}`}>
+                            {new Date(m.sent_at || m.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               <div ref={endRef} />
             </>
           )}
         </section>
 
+        {/* Footer: aktif hanya bila admin peserta room */}
         <footer className="p-3 border-t bg-white flex gap-2">
+          {/* Tombol klip untuk lampiran */}
+          <button
+            className={`px-3 py-2 rounded ${canReply ? 'bg-gray-200' : 'bg-gray-300 text-white'}`}
+            disabled={!canReply}
+            onClick={handleAttachClick}
+            title="Lampirkan file/foto"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+          {/* Input file tersembunyi */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileSelected}
+            accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/zip,application/x-zip-compressed,video/*,audio/*"
+          />
           <input
             className="flex-1 border rounded px-3 py-2"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Tulis pesan sebagai Admin..."
-            disabled={!aktif}
+            placeholder={canReply ? 'Tulis pesan ke pengguna' : 'Mode baca: admin tidak mengirim pesan pada chat user-to-user'}
+            disabled={!canReply}
           />
           <button
-            className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
-            onClick={kirimPesanAdmin}
-            disabled={!aktif || !input.trim()}
+            className={`px-4 py-2 rounded ${canReply ? 'bg-blue-600 text-white' : 'bg-gray-300 text-white'}`}
+            disabled={!canReply}
+            onClick={handleSendSupport}
           >
             <Send className="inline w-4 h-4 mr-1" />
             Kirim

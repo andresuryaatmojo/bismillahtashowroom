@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Send, MoreVertical, Paperclip, Smile, ArrowLeft, User, MessageSquare, Clock, Check, CheckCheck, X, Image, File } from 'lucide-react';
+import { Send, MoreVertical, Paperclip, Smile, ArrowLeft, User, MessageSquare, Clock, Check, CheckCheck, X, Image, File, Car } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   fetchRoomsForUser,
@@ -12,9 +12,10 @@ import {
   type ChatMessageDb,
   sendAttachmentMessage,
   fetchLatestMessageForRoom,
-  deleteRoomHistory
+  deleteRoomHistory,
+  sendTextWithCarInfoMessage
 } from '../services/chatService';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 // Interfaces
@@ -23,13 +24,22 @@ interface Pesan {
   pengirimId: string;
   penerimaId: string;
   isiPesan: string;
-  tipePesan: 'text' | 'image' | 'file' | 'system';
+  tipePesan: 'text' | 'image' | 'file' | 'system' | 'car_info';
   waktuKirim: string;
   statusBaca: 'sent' | 'delivered' | 'read';
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
   replyTo?: string;
+  carInfo?: {
+    carId: string;
+    title: string;
+    price: string;
+    year: string;
+    mileage: number;
+    color: string;
+    imageUrl: string | null;
+  };
 }
 
 interface Kontak {
@@ -76,13 +86,18 @@ interface StateHalaman {
 // HalamanChat component
 function HalamanChat() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [rooms, setRooms] = useState<ChatRoomDb[]>([]);
   const [activeRoom, setActiveRoom] = useState<ChatRoomDb | null>(null);
   const [messages, setMessages] = useState<ChatMessageDb[]>([]);
   const [inputText, setInputText] = useState('');
   const [fileToSend, setFileToSend] = useState<File | null>(null);
   const [roleFilter, setRoleFilter] = useState<'all' | 'buyer' | 'seller'>('all');
+  const [carInfo, setCarInfo] = useState<any>(null);
+  const [carInfoMap, setCarInfoMap] = useState<Record<string, any>>({});
   const unsubscribeRef = useRef<null | (() => void)>(null);
+  const [pendingCarId, setPendingCarId] = useState<string | null>(null);
   
   const [state, setState] = useState<StateHalaman>({
     loading: false,
@@ -116,11 +131,15 @@ function HalamanChat() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
   const headerMenuRef = useRef<HTMLDivElement>(null);
-  const location = useLocation();
   const peerProfileCacheRef = useRef<Map<string, any>>(new Map());
   
   // Asumsi role user saat ini. Ganti dengan sumber role nyata (mis. dari context/profil).
   const myRole: 'buyer' | 'seller' = 'buyer';
+
+  // Handler untuk klik card mobil
+  const handleCarClick = (carId: string) => {
+    navigate(`/detail-mobil/${carId}`);
+  };
 
   const getPeerRole = useCallback((room: ChatRoomDb): 'buyer' | 'seller' => {
     return myRole === 'buyer' ? 'seller' : 'buyer';
@@ -160,6 +179,23 @@ function HalamanChat() {
         const rs = await fetchRoomsForUser(user.id);
         setRooms(rs);
         if (!activeRoom && rs.length) setActiveRoom(rs[0]);
+        
+        // Fetch car info untuk rooms yang memiliki car_id
+        const carIds = rs.filter(r => r.car_id).map(r => r.car_id);
+        if (carIds.length > 0) {
+          const { data: cars } = await supabase
+            .from('cars')
+            .select('id, title, price, car_brands(name), car_models(name)')
+            .in('id', carIds);
+          
+          if (cars) {
+            const carMap = cars.reduce((acc, car) => {
+              acc[car.id] = car;
+              return acc;
+            }, {} as Record<string, any>);
+            setCarInfoMap(carMap);
+          }
+        }
       } catch (e) {
         console.error('Gagal memuat rooms', e);
       }
@@ -185,6 +221,49 @@ function HalamanChat() {
       setState(prev => ({ ...prev, activeChat: uiChat }));
     }
   }, [activeRoom?.id, state.chatList]);
+
+  // Ambil informasi mobil untuk semua room yang memiliki car_id
+  useEffect(() => {
+    const fetchAllCarInfo = async () => {
+      const roomsWithCars = rooms.filter(room => room.car_id);
+      if (roomsWithCars.length === 0) return;
+
+      const carIds = [...new Set(roomsWithCars.map(room => room.car_id))];
+      
+      try {
+        const { data, error } = await supabase
+          .from('cars')
+          .select(`
+            id,
+            title,
+            price,
+            year,
+            color,
+            mileage,
+            car_brands(name),
+            car_models(name),
+            car_images(image_url)
+          `)
+          .in('id', carIds);
+
+        if (error) {
+          console.error('Error fetching cars info:', error);
+          return;
+        }
+
+        const carMap: Record<string, any> = {};
+        data?.forEach(car => {
+          carMap[car.id] = car;
+        });
+        
+        setCarInfoMap(carMap);
+      } catch (error) {
+        console.error('Error fetching cars info:', error);
+      }
+    };
+
+    fetchAllCarInfo();
+  }, [rooms]);
 
   useEffect(() => {
     // Kosongkan pesan sebelum fetch agar preview tidak salah menempel
@@ -222,6 +301,7 @@ function HalamanChat() {
     if (t === 'text') return 'text';
     if (t === 'image') return 'image';
     if (t === 'file' || t === 'audio' || t === 'video') return 'file';
+    if (t === 'car_info') return 'car_info';
     return 'system';
   };
 
@@ -229,20 +309,135 @@ function HalamanChat() {
     const attachments = (m as any).chat_attachments;
     const attachment = Array.isArray(attachments) ? attachments[0] : attachments;
     
+    const tipe = normalizeMessageType(m.message_type);
+    let isiPesan = m.message_text;
+    let carInfoParsed: Pesan['carInfo'] | undefined;
+
+    if (tipe === 'text') {
+      try {
+        const parsed = JSON.parse(m.message_text || '{}');
+        if (parsed && typeof parsed === 'object' && (parsed.text || parsed.carInfo)) {
+          if (parsed.text) {
+            isiPesan = String(parsed.text);
+          }
+          if (parsed.carInfo) {
+            carInfoParsed = {
+              carId: parsed.carInfo.carId,
+              title: parsed.carInfo.title,
+              price: parsed.carInfo.price,
+              year: String(parsed.carInfo.year ?? ''),
+              mileage: Number(parsed.carInfo.mileage ?? 0),
+              color: String(parsed.carInfo.color ?? ''),
+              imageUrl: parsed.carInfo.imageUrl ?? null
+            };
+          }
+        }
+      } catch {
+        // biarkan sebagai teks biasa jika bukan JSON
+      }
+    } else if (tipe === 'car_info') {
+      try {
+        const parsed = JSON.parse(m.message_text || '{}');
+        carInfoParsed = {
+          carId: parsed.carId,
+          title: parsed.title,
+          price: parsed.price,
+          year: String(parsed.year ?? ''),
+          mileage: Number(parsed.mileage ?? 0),
+          color: String(parsed.color ?? ''),
+          imageUrl: parsed.imageUrl ?? null
+        };
+        isiPesan = parsed.title || 'Informasi mobil';
+      } catch {
+        // fallback ke teks mentah bila parsing gagal
+      }
+    }
+
     return {
       id: m.id,
       pengirimId: m.sender_id,
       penerimaId: m.receiver_id,
-      isiPesan: m.message_text,
-      tipePesan: normalizeMessageType(m.message_type),
+      isiPesan,
+      tipePesan: tipe,
       waktuKirim: m.sent_at || m.created_at,
       statusBaca: m.is_read ? 'read' : 'delivered',
       fileUrl: attachment?.file_url,
       fileName: attachment?.file_name,
       fileSize: attachment?.file_size || undefined,
-      replyTo: m.reply_to_message_id || undefined
+      replyTo: m.reply_to_message_id || undefined,
+      carInfo: carInfoParsed
     };
   };
+
+  // Ambil informasi mobil berdasarkan car_id dari room yang aktif
+  useEffect(() => {
+    const fetchCarInfo = async () => {
+      if (!activeRoom?.car_id) {
+        setCarInfo(null);
+        setPendingCarId(null);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('cars')
+          .select(`
+            id,
+            title,
+            price,
+            year,
+            color,
+            mileage,
+            car_brands(name),
+            car_models(name),
+            car_images(image_url)
+          `)
+          .eq('id', activeRoom.car_id)
+          .single();
+
+        if (error) {
+          console.error('Error fetching car info:', error);
+          setCarInfo(null);
+          setPendingCarId(null);
+          return;
+        }
+
+        setCarInfo(data);
+
+        // DETEKSI: jika sudah ada lampiran mobil (car_info atau text+carInfo), jangan tampilkan bubble composer lagi
+        const hasCarAttachmentForRoom = messages.some((mm) => {
+          // Pesan car_info: coba cocokkan carId dari payload, jika gagal parse anggap sudah ada lampiran
+          if (mm.message_type === 'car_info') {
+            try {
+              const parsed = JSON.parse(mm.message_text);
+              const carIdInMsg = parsed?.carId || parsed?.carInfo?.carId;
+              return carIdInMsg === activeRoom.car_id;
+            } catch {
+              return true; // format lama: tetap anggap lampiran sudah dikirim
+            }
+          }
+          // Pesan text: cek apakah ada carInfo di payload JSON
+          if (mm.message_type === 'text') {
+            try {
+              const parsed = JSON.parse(mm.message_text);
+              return parsed?.carInfo?.carId === activeRoom.car_id;
+            } catch {
+              return false;
+            }
+          }
+          return false;
+        });
+
+        setPendingCarId(hasCarAttachmentForRoom ? null : activeRoom.car_id);
+      } catch (error) {
+        console.error('Error fetching car info:', error);
+        setCarInfo(null);
+        setPendingCarId(null);
+      }
+    };
+
+    fetchCarInfo();
+  }, [activeRoom?.car_id, messages]);
 
   // Tampilkan pesan dari Supabase ke UI (state.pesanList) agar area chat memakai data real
   useEffect(() => {
@@ -261,6 +456,19 @@ function HalamanChat() {
     }
   };
 
+  const sendCarInfoMessage = async (roomId: string, senderId: string, receiverId: string, carId: string) => {
+    if (!carInfo) return null;
+    
+    try {
+      // Kirim bubble lampiran mobil saja (tanpa teks) sebagai pesan 'text' berisi JSON dengan carInfo
+      const sent = await sendTextWithCarInfoMessage(roomId, senderId, receiverId, '', carId);
+      return sent;
+    } catch (e) {
+      console.error('Gagal mengirim info mobil', e);
+      return null;
+    }
+  };
+
   const handleSend = async () => {
     if (!user?.id || !activeRoom) return;
     const receiverId = getRoomPeerId(activeRoom, user.id);
@@ -272,6 +480,36 @@ function HalamanChat() {
     }
 
     try {
+      // Jika ada lampiran mobil dan ada teks, kirim gabungan dalam satu pesan
+      if (pendingCarId && state.pesanBaru.trim()) {
+        const sentCombined = await sendTextWithCarInfoMessage(
+          activeRoom.id,
+          user.id,
+          receiverId,
+          state.pesanBaru.trim(),
+          pendingCarId
+        );
+        setMessages(prev => [...prev, sentCombined]);
+        setPendingCarId(null);
+        setInputText('');
+        setState(prev => ({ ...prev, pesanBaru: '' }));
+        return;
+      }
+
+      // Jika ada lampiran mobil tapi tidak ada teks, kirim sebagai car_info saja
+      if (pendingCarId && !state.pesanBaru.trim()) {
+        const sentCar = await sendTextWithCarInfoMessage(
+          activeRoom.id,
+          user.id,
+          receiverId,
+          '',
+          pendingCarId
+        );
+        if (sentCar) setMessages(prev => [...prev, sentCar]);
+        setPendingCarId(null);
+        return;
+      }
+
       if (fileToSend) {
         const { message, attachment } = await sendAttachmentMessage(activeRoom.id, user.id, receiverId, fileToSend);
         const withAtt = { ...message, chat_attachments: [attachment] } as ChatMessageDb & { chat_attachments: any[] };
@@ -829,6 +1067,9 @@ function HalamanChat() {
                             </span>
                           )}
                         </div>
+                        
+                        {/* Car Information in Sidebar */}
+                        {/* Dihapus: tidak lagi menampilkan keterangan mobil di thread */}
                       </div>
                     </div>
                   </div>
@@ -967,6 +1208,8 @@ function HalamanChat() {
               </div>
             </div>
             
+            {/* Menghapus tampilan informasi mobil di bagian atas */}
+            
             {/* Messages Area */}
             <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
               {state.pesanList.map(pesan => (
@@ -983,49 +1226,141 @@ function HalamanChat() {
                     )}
                     
                     <div
-                      className={`p-3 rounded-2xl ${
+                      className={`rounded-2xl ${
                         pesan.pengirimId === user?.id
                           ? 'bg-blue-500 text-white rounded-br-none'
                           : 'bg-gray-200 text-gray-900 rounded-bl-none'
-                      }`}
+                      } ${pesan.tipePesan === 'image' ? 'p-1' : 'p-3'}`}
                     >
                       {pesan.tipePesan === 'text' && (
-                        <p className="text-sm">{pesan.isiPesan}</p>
+                        <>
+                          {pesan.carInfo && (
+                            <div className={`mb-2 flex items-center justify-between ${pesan.pengirimId === user?.id ? 'bg-blue-400/30' : 'bg-white'} border ${pesan.pengirimId === user?.id ? 'border-blue-200/50' : 'border-gray-200'} rounded-lg p-2`}>
+                              <div className="flex items-center space-x-2">
+                                <div className="w-10 h-10 rounded overflow-hidden bg-gray-100">
+                                  {pesan.carInfo.imageUrl ? (
+                                    <img src={pesan.carInfo.imageUrl} alt="Mobil" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-gray-400">
+                                      <Car className="w-5 h-5" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-sm font-medium">
+                                  {pesan.carInfo.title}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          <p className="text-sm">{pesan.isiPesan}</p>
+                          <div className={`flex items-center justify-between mt-1 ${
+                            pesan.pengirimId === user?.id ? 'text-blue-100' : 'text-gray-500'
+                          }`}>
+                            <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
+                            {pesan.pengirimId === user?.id && (
+                              <div className="ml-2">
+                                {getStatusIcon(pesan.statusBaca)}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      
+                      {pesan.tipePesan === 'car_info' && (
+                        <div className="relative">
+                          <div 
+                            className="bg-white border border-gray-200 rounded-lg p-2 cursor-pointer hover:bg-gray-50 transition-colors duration-200 flex items-center"
+                            onClick={() => {
+                              if (pesan.carInfo?.carId) {
+                                handleCarClick(pesan.carInfo.carId);
+                              }
+                            }}
+                            title="Klik untuk melihat detail mobil"
+                          >
+                            <div className="flex-shrink-0 mr-2">
+                              {pesan.carInfo?.imageUrl ? (
+                                <img
+                                  src={pesan.carInfo.imageUrl}
+                                  alt={pesan.carInfo.title}
+                                  className="w-10 h-10 object-cover rounded-md"
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                                    if (nextElement) {
+                                      nextElement.style.display = 'flex';
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-10 h-10 bg-gray-200 rounded-md flex items-center justify-center">
+                                  <Car className="w-5 h-5 text-gray-400" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-medium text-gray-900 truncate">
+                                {pesan.carInfo?.title}
+                              </h4>
+                            </div>
+                            <Car className="w-4 h-4 text-gray-500 ml-2" />
+                          </div>
+                          <button 
+                            className="absolute -top-2 -right-2 bg-gray-100 rounded-full p-1 shadow-sm hover:bg-gray-200"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Tambahkan logika untuk menghapus lampiran jika diperlukan
+                            }}
+                            title="Hapus lampiran"
+                          >
+                            <X className="w-3 h-3 text-gray-500" />
+                          </button>
+                        </div>
                       )}
                       
                       {pesan.tipePesan === 'image' && (
-                        <div>
+                        <div className="relative">
                           <img
                             src={pesan.fileUrl}
-                            alt="Shared image"
-                            className="rounded-lg max-w-full h-auto mb-2"
+                            alt="Gambar"
+                            className="max-w-full h-auto rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
+                            style={{ maxHeight: '300px', minWidth: '150px' }}
+                            onClick={() => window.open(pesan.fileUrl, '_blank')}
                           />
-                          {pesan.isiPesan && <p className="text-sm">{pesan.isiPesan}</p>}
+                          {/* Timestamp overlay untuk gambar */}
+                          <div className="absolute bottom-1 right-2 bg-black bg-opacity-50 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
+                            <span>{formatTime(pesan.waktuKirim)}</span>
+                            {pesan.pengirimId === user?.id && (
+                              <div className="text-white">
+                                {getStatusIcon(pesan.statusBaca)}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                       
                       {pesan.tipePesan === 'file' && (
-                        <div className="flex items-center space-x-2">
-                          <File className="w-5 h-5" />
-                          <div>
-                            <p className="text-xs font-medium">{pesan.fileName}</p>
-                            <p className="text-xs opacity-75">
-                              {pesan.fileSize && (pesan.fileSize / 1024).toFixed(1)} KB
-                            </p>
+                        <>
+                          <div className="flex items-center space-x-2">
+                            <File className="w-5 h-5" />
+                            <div>
+                              <p className="text-xs font-medium">{pesan.fileName}</p>
+                              <p className="text-xs opacity-75">
+                                {pesan.fileSize && (pesan.fileSize / 1024).toFixed(1)} KB
+                              </p>
+                            </div>
                           </div>
-                        </div>
+                          <div className={`flex items-center justify-between mt-1 ${
+                            pesan.pengirimId === user?.id ? 'text-blue-100' : 'text-gray-500'
+                          }`}>
+                            <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
+                            {pesan.pengirimId === user?.id && (
+                              <div className="ml-2">
+                                {getStatusIcon(pesan.statusBaca)}
+                              </div>
+                            )}
+                          </div>
+                        </>
                       )}
-                      
-                      <div className={`flex items-center justify-between mt-1 ${
-                        pesan.pengirimId === user?.id ? 'text-blue-100' : 'text-gray-500'
-                      }`}>
-                        <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
-                        {pesan.pengirimId === user?.id && (
-                          <div className="ml-2">
-                            {getStatusIcon(pesan.statusBaca)}
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -1075,6 +1410,40 @@ function HalamanChat() {
             
             {/* Message Input */}
             <div className="bg-white/70 backdrop-blur-sm border-t border-gray-200 p-3 sticky bottom-0 z-10">
+              {/* Composer Car Attachment Bubble */}
+              {pendingCarId && carInfo && (
+                <div className="flex items-center justify-between mb-2 border border-blue-200 bg-blue-50 rounded-lg p-2">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-10 h-10 rounded overflow-hidden bg-gray-100">
+                      {carInfo.car_images?.[0]?.image_url ? (
+                        <img
+                          src={carInfo.car_images[0].image_url}
+                          alt="Mobil"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400">
+                          <Car className="w-5 h-5" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-sm">
+                      <div className="font-medium text-gray-900">
+                        {carInfo.title ||
+                          `${carInfo.car_brands?.name || ''} ${carInfo.car_models?.name || ''}`.trim()}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPendingCarId(null)}
+                    className="p-1 text-gray-500 hover:text-gray-700"
+                    aria-label="Batalkan lampiran mobil"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-end space-x-2">
                 {/* Attachment Menu */}
                 <div className="relative">
@@ -1141,7 +1510,7 @@ function HalamanChat() {
                 {/* Send Button */}
                 <button
                   onClick={handleSend}
-                  disabled={!state.pesanBaru.trim() || state.loading || !activeRoom}
+                  disabled={(!state.pesanBaru.trim() && !pendingCarId && !fileToSend) || state.loading || !activeRoom}
                   className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Send className="w-4 h-4" />
