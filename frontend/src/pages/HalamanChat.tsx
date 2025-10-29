@@ -1395,12 +1395,14 @@ function HalamanChat() {
                 const isOwn = pesan.pengirimId === user?.id;
                 const isAdminMsg = pesan.chatType === 'admin';
 
-                return (
+                const isAdminEscalationMsg = !!activeRoom?.is_escalated && isAdminMsg;
+              
+              return (
                   <div
                     key={pesan.id}
-                    className={`flex ${isAdminMsg ? 'justify-center' : isOwn ? 'justify-end' : 'justify-start'}`}
+                    className={`flex ${isAdminEscalationMsg ? 'justify-center' : isOwn ? 'justify-end' : 'justify-start'}`}
                   >
-                    <div className={`max-w-xs lg:max-w-sm ${isAdminMsg ? '' : isOwn ? 'order-2' : 'order-1'}`}>
+                    <div className={`max-w-xs lg:max-w-sm ${isAdminEscalationMsg ? '' : isOwn ? 'order-2' : 'order-1'}`}>
                       {/* Reply indicator */}
                       {pesan.replyTo && (
                         <div className="text-xs text-gray-500 mb-1 px-2">
@@ -1410,19 +1412,20 @@ function HalamanChat() {
                       
                       <div
                         className={`rounded-2xl ${
-                          isAdminMsg
+                          isAdminEscalationMsg
                             ? 'bg-green-100 text-green-800 border border-green-200'
                             : isOwn
                               ? 'bg-blue-500 text-white rounded-br-none'
-                              : 'bg-gray-200 text-gray-900 rounded-bl-none'
+                              : 'bg-gray-200/80 text-gray-900 rounded-bl-none'
                         } ${pesan.tipePesan === 'image' ? 'p-1' : 'p-3'}`}
                       >
-                        {/* Label Admin */}
-                        {isAdminMsg && (
+                        {/* Label Admin hanya saat eskalasi */}
+                        {isAdminEscalationMsg && (
                           <div className="text-xs font-semibold text-green-700 mb-1">
                             👨‍💼 Admin
                           </div>
                         )}
+
 
                         {pesan.tipePesan === 'text' && (
                           <>
@@ -1446,10 +1449,10 @@ function HalamanChat() {
                             )}
                             <p className="text-sm">{pesan.isiPesan}</p>
                             <div className={`flex items-center justify-between mt-1 ${
-                              isAdminMsg ? 'text-green-600' : isOwn ? 'text-blue-100' : 'text-gray-500'
+                              isAdminEscalationMsg ? 'text-green-600' : isOwn ? 'text-blue-100' : 'text-gray-500'
                             }`}>
                               <span className="text-xs">{formatTime(pesan.waktuKirim)}</span>
-                              {isOwn && !isAdminMsg && (
+                              {isOwn && !isAdminEscalationMsg && (
                                 <div className="ml-2">
                                   {getStatusIcon(pesan.statusBaca)}
                                 </div>
