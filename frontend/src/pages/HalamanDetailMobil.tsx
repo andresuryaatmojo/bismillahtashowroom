@@ -468,7 +468,7 @@ const HalamanDetailMobil: React.FC = () => {
                 <Button 
                   variant="default" 
                   className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={() => id && navigate('/pembelian', { state: { mobilId: id } })}
+                  onClick={() => id && navigate('/transaksi', { state: { mobilId: id } })}
                 >
                   Pesan Mobil
                 </Button>

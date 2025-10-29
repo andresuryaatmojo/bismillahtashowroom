@@ -182,6 +182,14 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/transaksi/:id"
+            element={
+              <ProtectedRoute>
+                <HalamanTransaksi />
+              </ProtectedRoute>
+            }
+          />
           
           {/* PROTECTED SELLER ROUTES */}
           <Route

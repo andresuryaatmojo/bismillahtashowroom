@@ -23,6 +23,7 @@ export interface Car {
   description?: string;
   location_city: string;
   location_province?: string;
+  location_address?: string;
   status: 'pending' | 'available' | 'sold' | 'reserved' | 'rejected';
   seller_type: 'showroom' | 'external';
   is_verified: boolean;
@@ -66,6 +67,13 @@ export interface CarWithRelations extends Car {
     full_name: string;
     seller_rating: number;
     seller_type?: string;
+    phone_number?: string;
+    address?: string;
+    city?: string;
+    province?: string;
+    postal_code?: string;
+    seller_verification_status?: string;
+    seller_total_sales?: number;
   };
 }
 
@@ -283,7 +291,7 @@ class CarService {
         supabase.from('car_categories').select('*').eq('id', car.category_id).single(),
         supabase.from('car_images').select('*').eq('car_id', car.id).order('display_order'),
         supabase.from('car_specifications').select('*').eq('car_id', car.id).maybeSingle(),
-        supabase.from('users').select('id, username, full_name, seller_rating, seller_type').eq('id', car.seller_id).single()
+        supabase.from('users').select('id, username, full_name, phone_number, address, city, province, postal_code, seller_rating, seller_type, seller_verification_status, seller_total_sales').eq('id', car.seller_id).single()
       ]);
 
       // Combine all data
