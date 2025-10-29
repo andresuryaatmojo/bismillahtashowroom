@@ -137,8 +137,10 @@ export default function HalamanChatAdmin() {
             .eq('is_escalated', false)
             .eq('escalation_history', 0)
             .is('resolved_at', null);
+        } else if (adminFilter === 'semua') {
+          // HANYA tampilkan user_to_admin dan eskalasi
+          query = query.or('room_type.eq.user_to_admin,is_escalated.eq.true');
         }
-        // 'semua' -> tanpa filter tambahan
 
         const { data, error: err } = await query.order('last_message_at', { ascending: false });
         if (err) throw err;
@@ -170,6 +172,9 @@ export default function HalamanChatAdmin() {
               .eq('is_escalated', false)
               .eq('escalation_history', 0)
               .is('resolved_at', null);
+          } else if (adminFilter === 'semua') {
+            // Konsisten: hanya user_to_admin dan eskalasi
+            query = query.or('room_type.eq.user_to_admin,is_escalated.eq.true');
           }
           const { data, error } = await query.order('last_message_at', { ascending: false });
           if (!error) setRooms((data || []) as ChatRoomDb[]);
@@ -188,7 +193,7 @@ export default function HalamanChatAdmin() {
   const filteredRooms = rooms.filter((r) => {
     const byCategory =
       adminFilter === 'semua'
-        ? true
+        ? (r.room_type === 'user_to_admin' || r.is_escalated === true)
         : adminFilter === 'eskalasi'
         ? r.is_escalated === true
         : adminFilter === 'chatbot'
