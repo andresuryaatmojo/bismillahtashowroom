@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Filter, CheckCircle, XCircle, User, MessageSquare, ShieldCheck, Send, Paperclip, Car } from 'lucide-react';
+import { Search, Filter, CheckCircle, XCircle, User, MessageSquare, ShieldCheck, Send, Paperclip, Car, MoreVertical } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { fetchMessages, type ChatRoomDb, type ChatMessageDb, getRoomPeerId, sendAttachmentMessage } from '../services/chatService';
+import { fetchMessages, type ChatRoomDb, type ChatMessageDb, getRoomPeerId, sendAttachmentMessage, deleteRoomHistory } from '../services/chatService';
 import { useAuth } from '../contexts/AuthContext';
 
 type Role = 'buyer' | 'seller' | 'admin';
@@ -32,6 +32,10 @@ export default function HalamanChatAdmin() {
   const [aktif, setAktif] = useState<Percakapan | null>(null);
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
+  
+  // Tambahan: ref dan state untuk menu header
+  const headerMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
 
   useEffect(() => {
     const seed: Percakapan[] = [
@@ -233,6 +237,26 @@ export default function HalamanChatAdmin() {
         setLoading(false);
       }
     })();
+  }, [activeRoom?.id]);
+
+  // Tutup menu saat klik di luar
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
+        setShowHeaderMenu(false);
+      }
+    };
+    if (showHeaderMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showHeaderMenu]);
+
+  // Tutup menu saat pindah ke chat lain
+  useEffect(() => {
+    setShowHeaderMenu(false);
   }, [activeRoom?.id]);
 
   // Handler pilih room
@@ -588,8 +612,8 @@ export default function HalamanChatAdmin() {
             </div>
           </div>
           
-          {/* Untuk room user-to-admin showroom, hanya “Join” (tanpa eskalasi) */}
-          <button onClick={joinPercakapan} className="px-3 py-2 text-sm bg-blue-600 text-white rounded">
+          {/* Untuk room user-to-admin showroom, hanya "Join" (tanpa eskalasi) */}
+          <button onClick={joinPercakapan} className="px-3 py-2 text-sm bg-blue-600 text-white rounded" style={{ display: 'none' }}>
             <ShieldCheck className="inline w-4 h-4 mr-1" />
             {activeRoom?.room_type === 'user_to_admin' ? 'Join' : 'Join/Eskalasi'}
           </button>
@@ -603,10 +627,56 @@ export default function HalamanChatAdmin() {
               Selesaikan Eskalasi
             </button>
           )}
-          <button onClick={tutupPercakapan} className="px-3 py-2 text-sm bg-gray-200 rounded">
+          <button onClick={tutupPercakapan} className="px-3 py-2 text-sm bg-gray-200 rounded" style={{ display: 'none' }}>
             <XCircle className="inline w-4 h-4 mr-1" />
             Tutup
           </button>
+
+          {/* Tombol titik-tiga dengan dropdown */}
+          <div className="relative" ref={headerMenuRef}>
+            <button
+              onClick={() => setShowHeaderMenu(prev => !prev)}
+              className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg"
+              disabled={!activeRoom}
+              title="Menu"
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {showHeaderMenu && activeRoom && (
+              <div className="absolute right-0 top-full mt-2 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20">
+                <button
+                  onClick={async () => {
+                    if (!activeRoom?.id) return;
+                    const ok = window.confirm('Hapus semua pesan dalam obrolan ini? Tindakan tidak dapat dibatalkan.');
+                    if (!ok) {
+                      setShowHeaderMenu(false);
+                      return;
+                    }
+                    try {
+                      const beforeMsgs = await fetchMessages(activeRoom.id);
+                      console.log('Messages before delete:', beforeMsgs?.length ?? 0);
+
+                      const res = await deleteRoomHistory(activeRoom.id);
+                      console.log('deleteRoomHistory result:', res);
+
+                      const afterMsgs = await fetchMessages(activeRoom.id);
+                      setMessages(afterMsgs);
+
+                      setShowHeaderMenu(false);
+                    } catch (err) {
+                      console.error('Gagal menghapus obrolan:', err);
+                      alert('Terjadi kesalahan saat menghapus obrolan. Lihat console untuk detail.');
+                      setShowHeaderMenu(false);
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100"
+                >
+                  Hapus Obrolan
+                </button>
+              </div>
+            )}
+          </div>
         </header>
 
         <section className="flex-1 overflow-y-auto p-4 space-y-2">
