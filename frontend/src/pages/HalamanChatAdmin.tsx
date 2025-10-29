@@ -116,7 +116,7 @@ export default function HalamanChatAdmin() {
   const [error, setError] = useState<string | null>(null);
 
   // State UI: gunakan kategori seperti halaman chat: semua | eskalasi | chatbot
-  const [adminFilter, setAdminFilter] = useState<'semua' | 'eskalasi' | 'chatbot'>('semua');
+  const [adminFilter, setAdminFilter] = useState<'semua' | 'eskalasi' | 'chatbot' | 'mobil'>('semua');
   const [adminQuery, setAdminQuery] = useState('');
 
   useEffect(() => {
@@ -131,13 +131,17 @@ export default function HalamanChatAdmin() {
           query = query.eq('is_escalated', true);
         } else if (adminFilter === 'chatbot') {
           query = query.eq('room_type', 'user_to_bot');
+        } else if (adminFilter === 'mobil') {
+          query = query
+            .not('car_id', 'is', null)
+            .eq('is_escalated', false)
+            .eq('escalation_history', 0)
+            .is('resolved_at', null);
         }
         // 'semua' -> tanpa filter tambahan
 
         const { data, error: err } = await query.order('last_message_at', { ascending: false });
         if (err) throw err;
-        console.log(`🔍 Admin filter: ${adminFilter}, Rooms loaded:`, data?.length || 0);
-        console.log('📊 Rooms data:', data);
         setRooms((data || []) as ChatRoomDb[]);
       } catch (e) {
         console.error('Gagal memuat rooms admin', e);
@@ -160,15 +164,15 @@ export default function HalamanChatAdmin() {
             query = query.eq('is_escalated', true);
           } else if (adminFilter === 'chatbot') {
             query = query.eq('room_type', 'user_to_bot');
+          } else if (adminFilter === 'mobil') {
+            query = query
+              .not('car_id', 'is', null)
+              .eq('is_escalated', false)
+              .eq('escalation_history', 0)
+              .is('resolved_at', null);
           }
           const { data, error } = await query.order('last_message_at', { ascending: false });
-          if (error) {
-            console.warn('Refresh rooms gagal:', error.message);
-            return;
-          }
-          console.log(`🔄 Real-time update - Filter: ${adminFilter}, Rooms:`, data?.length || 0);
-          console.log('📊 Updated rooms data:', data);
-          setRooms((data || []) as ChatRoomDb[]);
+          if (!error) setRooms((data || []) as ChatRoomDb[]);
         } finally {
           setLoading(false);
         }
@@ -189,6 +193,8 @@ export default function HalamanChatAdmin() {
         ? r.is_escalated === true
         : adminFilter === 'chatbot'
         ? r.room_type === 'user_to_bot'
+        : adminFilter === 'mobil'
+        ? !!r.car_id && !r.is_escalated && (r.escalation_history || 0) === 0 && !(r as any).resolved_at
         : true;
 
     const q = adminQuery.trim().toLowerCase();
@@ -361,6 +367,7 @@ export default function HalamanChatAdmin() {
       const { error: updateError } = await supabase
         .from('chat_rooms')
         .update({
+          is_escalated: false, // pastikan flag eskalasi dimatikan
           resolved_at: new Date().toISOString(),
           resolved_by: profile.id
         })
@@ -372,7 +379,7 @@ export default function HalamanChatAdmin() {
         return;
       }
 
-      // Kirim pesan sistem TANPA chat_type (agar tidak melanggar constraint)
+      // Kirim pesan sistem
       const { error: messageError } = await supabase
         .from('chat_messages')
         .insert({
@@ -392,6 +399,7 @@ export default function HalamanChatAdmin() {
 
       setActiveRoom(prev => prev ? {
         ...prev,
+        is_escalated: false,
         resolved_at: new Date().toISOString(),
         resolved_by: profile.id
       } : null);
@@ -453,11 +461,12 @@ export default function HalamanChatAdmin() {
           <select
             className="w-full border rounded px-2 py-1 text-sm"
             value={adminFilter}
-            onChange={(e) => setAdminFilter(e.target.value as 'semua' | 'eskalasi' | 'chatbot')}
+            onChange={(e) => setAdminFilter(e.target.value as 'semua' | 'eskalasi' | 'chatbot' | 'mobil')}
           >
             <option value="semua">Semua</option>
             <option value="eskalasi">Eskalasi</option>
             <option value="chatbot">Chatbot</option>
+            <option value="mobil">Tanya</option>
           </select>
         </div>
 

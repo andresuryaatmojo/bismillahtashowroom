@@ -153,8 +153,8 @@ function HalamanChat() {
     []
   );
   const canEscalateActiveRoom = useMemo(
-    () => !isAdminShowroomRoom(activeRoom),
-    [activeRoom, isAdminShowroomRoom]
+    () => activeRoom ? canEscalateRoom(activeRoom) : false,
+    [activeRoom]
   );
 
   // Helper: deteksi room self-chat
@@ -212,6 +212,36 @@ function HalamanChat() {
         console.error('Gagal memuat rooms', e);
       }
     })();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel('user-chat-rooms')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms' }, (payload) => {
+        const newRoom = (payload as any).new as ChatRoomDb | undefined;
+        if (!newRoom) return;
+
+        // Hanya proses room yang melibatkan user ini
+        if (newRoom.user1_id !== user.id && newRoom.user2_id !== user.id) return;
+
+        // Update daftar rooms
+        setRooms(prev => {
+          const exists = prev.some(r => r.id === newRoom.id);
+          return exists
+            ? prev.map(r => r.id === newRoom.id ? newRoom : r)
+            : [...prev, newRoom];
+        });
+
+        // Jika room aktif, update juga activeRoom
+        setActiveRoom(prev => (prev && prev.id === newRoom.id) ? newRoom : prev);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user?.id]);
 
   // Preselect room jika datang dari "Chat Penjual" (navigate state.activeRoomId)
@@ -549,7 +579,6 @@ function HalamanChat() {
       // Gunakan helper function untuk cek apakah bisa dieskalasi
       if (!canEscalateRoom(activeRoom)) {
         setState(prev => ({ ...prev, showHeaderMenu: false }));
-        
         if (isAdminShowroomRoom(activeRoom)) {
           alert('Percakapan dengan admin showroom tidak dapat dieskalasikan.');
         } else if (activeRoom.escalation_history > 0) {
@@ -562,23 +591,34 @@ function HalamanChat() {
 
       console.log('🚨 Starting escalation for room:', activeRoom.id);
 
-      // Tandai room sebagai eskalasi dan increment escalation_history
+      // Tandai room sebagai eskalasi dan increment escalation_history di DB
       const { error: updErr } = await supabase
         .from('chat_rooms')
-        .update({ 
+        .update({
           is_escalated: true,
           escalation_history: (activeRoom.escalation_history || 0) + 1,
-          resolved_at: null, // Reset resolved status jika ada
+          resolved_at: null,
           resolved_by: null
         })
         .eq('id', activeRoom.id);
       if (updErr) throw updErr;
 
-      console.log('✅ Room marked as escalated successfully');
+      // Update state lokal segera supaya UI berubah tanpa refresh
+      setActiveRoom(prev => prev ? {
+        ...prev,
+        is_escalated: true,
+        escalation_history: (prev.escalation_history || 0) + 1,
+        resolved_at: null,
+        resolved_by: null
+      } : prev);
+      setRooms(prev => prev.map(r =>
+        r.id === activeRoom.id
+          ? { ...r, is_escalated: true, escalation_history: (r.escalation_history || 0) + 1, resolved_at: null, resolved_by: null }
+          : r
+      ));
 
       // Kirim notifikasi teks ke thread
       const peerId = getRoomPeerId(activeRoom, user.id);
-      console.log('📤 Sending escalation notification message');
       const { error: msgErr } = await supabase
         .from('chat_messages')
         .insert({
@@ -591,9 +631,7 @@ function HalamanChat() {
         });
       if (msgErr) throw msgErr;
 
-      console.log('✅ Escalation notification sent successfully');
-
-      // Refresh pesan di UI
+      // Refresh pesan di UI (opsional tapi menjaga konsistensi)
       const ms = await fetchMessages(activeRoom.id);
       setMessages(ms);
 
@@ -1197,7 +1235,7 @@ function HalamanChat() {
                           {getPeerRole(activeRoom) === 'seller' ? 'Penjual' : 'Pembeli'}
                         </span>
                       )}
-                      {activeRoom?.is_escalated && (
+                      {activeRoom?.is_escalated && !(activeRoom as any).resolved_at && (
                         <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-600 rounded">
                           🚨 Eskalasi
                         </span>
@@ -1302,7 +1340,7 @@ function HalamanChat() {
             </div>
             
             {/* Banner Eskalasi */}
-            {activeRoom?.is_escalated && (
+            {(activeRoom && ((activeRoom as any).resolved_at || activeRoom.is_escalated)) && (
               <div className={`border rounded-lg p-3 mb-4 ${
                 (activeRoom as any).resolved_at 
                   ? 'bg-green-50 border-green-200' 
@@ -1353,23 +1391,6 @@ function HalamanChat() {
             
             {/* Messages Area */}
             <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
-              {/* Banner Eskalasi */}
-              {activeRoom?.is_escalated && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                  <div className="flex items-center">
-                    <Flag className="w-4 h-4 text-red-500 mr-2" />
-                    <div>
-                      <p className="text-sm font-medium text-red-800">
-                        Chat ini telah dieskalasi ke admin
-                      </p>
-                      <p className="text-xs text-red-600 mt-1">
-                        Admin akan membantu menyelesaikan masalah Anda. Mohon tunggu respons dari admin.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
               {state.pesanList.map(pesan => {
                 const isOwn = pesan.pengirimId === user?.id;
                 const isAdminMsg = pesan.chatType === 'admin';

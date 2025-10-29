@@ -540,15 +540,26 @@ export async function createChatRoom(userId: string, sellerId: string, carId: st
 // Hapus definisi archiveRoom yang duplikat di sini
 
 export function canEscalateRoom(room: ChatRoomDb): boolean {
+  console.log('🔍 canEscalateRoom check:', {
+    roomId: room.id,
+    roomType: room.room_type,
+    carId: room.car_id,
+    escalationHistory: room.escalation_history,
+    isEscalated: room.is_escalated
+  });
+
   // Tidak bisa eskalasi jika chat adalah user-to-admin showroom terkait mobil
   if (room.room_type === 'user_to_admin' && !!room.car_id) {
+    console.log('❌ Cannot escalate: user-to-admin showroom chat');
     return false;
   }
   
   // Tidak bisa eskalasi jika sudah pernah dieskalasi sebelumnya
   if (room.escalation_history > 0) {
+    console.log('❌ Cannot escalate: escalation history exists:', room.escalation_history);
     return false;
   }
   
+  console.log('✅ Can escalate: all checks passed');
   return true;
 }
