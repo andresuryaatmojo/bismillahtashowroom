@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { carService } from '../services/carService';
+import { useAuth } from '../contexts/AuthContext';
+import { createTransaction } from '../services/transactionService';
 
 interface CarDetails {
   name: string;
@@ -20,6 +22,7 @@ const HalamanTransaksi: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const [selectedPayment, setSelectedPayment] = useState<'credit' | 'cash'>('credit');
   // Hapus state selectedPayment; hanya gunakan cash
   const [isTermsAccepted, setIsTermsAccepted] = useState(false);
@@ -32,6 +35,9 @@ const HalamanTransaksi: React.FC = () => {
   const [images, setImages] = useState<CarImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // State untuk proses pembayaran
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     const fetchCar = async () => {
@@ -112,6 +118,65 @@ const HalamanTransaksi: React.FC = () => {
     }
   };
 
+  // Handler klik "Bayar Sekarang"
+  // Di dalam komponen HalamanTransaksi
+  const handlePayNow = async () => {
+    if (!carId) return;
+    if (!isTermsAccepted) return;
+    if (!user?.id) {
+      window.alert('Silakan login terlebih dahulu untuk melanjutkan.');
+      return;
+    }
+  
+    try {
+      setIsProcessing(true);
+  
+      // Sesuaikan nilai amount dengan skema (gunakan booking fee atau harga mobil)
+      const buyerId = user.id;
+      const sellerId = car?.seller_id || car?.sellerId; // sesuaikan dengan data mobil Anda
+      const amount = prices.bookingFee;
+  
+      const result = await createTransaction({
+        buyer_id: buyerId,
+        seller_id: sellerId,
+        car_id: carId,
+        car_price: amount,
+        total_amount: amount,
+        payment_method: 'bank_transfer',
+        payment_status: 'pending',
+        down_payment: amount,
+        remaining_payment: 0,
+        status: 'pending',
+        notes: 'Booking fee transaksi'
+      });
+  
+      if (!result.success) {
+        console.error('Error saat membuat transaksi:', result.error);
+        window.alert('Gagal membuat transaksi: ' + (result.error || 'Unknown error'));
+        setIsProcessing(false);
+        return;
+      }
+  
+      // Lanjut ke halaman pembayaran setelah transaksi berhasil dibuat
+      const referenceId = `BOOK-${carId}-${Date.now()}`;
+      const transactionId = result.data?.id || `TXN-${carId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+      navigate('/pembayaran', {
+        state: {
+          amount: prices.bookingFee,
+          referenceId,
+          transactionId,
+          mobilId: carId,
+          paymentType: 'down_payment',
+        },
+      });
+    } catch (err: any) {
+      console.error('Error saat membuat transaksi:', err);
+      window.alert('Terjadi kesalahan saat membuat transaksi');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -191,7 +256,7 @@ const HalamanTransaksi: React.FC = () => {
                 <button className="w-full flex items-center justify-between p-3 bg-yellow-50 border border-yellow-200 rounded-lg hover:bg-yellow-100 transition-colors">
                   <div className="flex items-center gap-2">
                     <svg className="w-5 h-5 text-orange-500" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/>
+                      <path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 = 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/>
                     </svg>
                     <span className="font-medium text-gray-700">Gunakan Voucher</span>
                   </div>
@@ -367,8 +432,17 @@ const HalamanTransaksi: React.FC = () => {
               </div>
 
               <div className="mb-4">
-                <button className="w-full bg-gray-200 text-gray-500 py-3 rounded-lg font-semibold cursor-not-allowed">
-                  Bayar Sekarang
+                <button
+                  disabled={!isTermsAccepted || isProcessing}
+                  onClick={!isTermsAccepted || isProcessing ? undefined : handlePayNow}
+                  className={
+                    `w-full py-3 rounded-lg font-semibold ` +
+                    `${!isTermsAccepted || isProcessing
+                      ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'}`
+                  }
+                >
+                  {isProcessing ? 'Memproses...' : 'Bayar Sekarang'}
                 </button>
               </div>
 

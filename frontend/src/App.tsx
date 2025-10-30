@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { NextUIProvider } from '@nextui-org/react';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -36,6 +36,7 @@ import HalamanTestDrive from './pages/HalamanTestDrive';
 import HalamanTradeIn from './pages/HalamanTradeIn';
 import HalamanTransaksi from './pages/HalamanTransaksi';
 import HalamanWishlist from './pages/HalamanWishlist';
+import HalamanPembayaran from './pages/HalamanPembayaran';
 
 // ADMIN PAGES
 import HalamanAdmin from './pages/HalamanAdmin';
@@ -190,7 +191,74 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
-          
+
+          {/* Halaman Pembayaran */}
+          <Route
+            path="/pembayaran"
+            element={
+              <ProtectedRoute>
+                {/* Wrapper agar bisa membaca amount dari state */}
+                <HalamanPembayaranRoute />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <ProtectedRoute>
+                <HalamanChat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/wishlist"
+            element={
+              <ProtectedRoute>
+                <HalamanWishlist />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/riwayat"
+            element={
+              <ProtectedRoute>
+                <HalamanRiwayat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/riwayat-test-drive"
+            element={
+              <ProtectedRoute>
+                <HalamanRiwayatTestDrive />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pembelian"
+            element={
+              <ProtectedRoute>
+                <HalamanPembelian />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/transaksi"
+            element={
+              <ProtectedRoute>
+                <HalamanTransaksi />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/transaksi/:id"
+            element={
+              <ProtectedRoute>
+                <HalamanTransaksi />
+              </ProtectedRoute>
+            }
+          />
+
           {/* PROTECTED SELLER ROUTES */}
           <Route
             path="/iklan"
@@ -324,3 +392,30 @@ function App() {
 }
 
 export default App;
+
+// Wrapper component untuk halaman pembayaran
+const HalamanPembayaranRoute = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const state = (location.state as any) || {};
+  const amount = state?.amount ?? state?.bookingFee ?? 0;
+  const referenceId = state?.referenceId;
+  
+  // Generate transactionId jika tidak ada, atau gunakan referenceId, atau buat ID baru
+  const transactionId = state?.transactionId || referenceId || `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Tentukan payment type berdasarkan context
+  const paymentType = state?.paymentType || (state?.bookingFee ? 'down_payment' : 'full_payment');
+
+  return (
+    <HalamanPembayaran
+      amount={amount}
+      currency="IDR"
+      referenceId={referenceId}
+      transactionId={transactionId}
+      paymentType={paymentType}
+      onPaymentSuccess={() => navigate('/riwayat')}
+      onPaymentError={(err) => window.alert(err?.message || 'Pembayaran gagal')}
+    />
+  );
+};
