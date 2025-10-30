@@ -52,6 +52,7 @@ import HalamanChatAdmin from './pages/HalamanChatAdmin';
 import LoginForm from './components/LoginForm';
 import NotFound from './pages/NotFound';
 import './App.css';
+import HalamanKelolaTransaksi from './pages/HalamanKelolaTransaksi';
 
 // Komponen: AppContent
 const AppContent: React.FC = () => {
@@ -237,8 +238,8 @@ const AppContent: React.FC = () => {
           <Route
             path="/pembelian"
             element={
-              <ProtectedRoute>
-                <HalamanPembelian />
+              <ProtectedRoute requiredRole="admin">
+                <HalamanKelolaTransaksi />
               </ProtectedRoute>
             }
           />
@@ -331,6 +332,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="admin">
                 <HalamanModerasiIklan />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/pembelian"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanKelolaTransaksi />
               </ProtectedRoute>
             }
           />

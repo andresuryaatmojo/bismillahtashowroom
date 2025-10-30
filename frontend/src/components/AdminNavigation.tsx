@@ -67,7 +67,7 @@ function AdminNavigation() {
   const operasional = {
     label: 'Operasional',
     items: [
-      { path: '/admin/pembelian', label: 'Transaksi Pembelian', icon: Briefcase },
+      { path: '/admin/pembelian', label: 'Kelola Transaksi', icon: Briefcase },
       { path: '/admin/test-drive', label: 'Jadwal Test Drive', icon: Car },
       { path: '/admin/chat', label: 'Pesan / Chat User', icon: MessageCircle },
     ],
