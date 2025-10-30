@@ -519,3 +519,123 @@ export async function getPurchaseTransactionsWithPayments(
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
   }
 }
+
+// Tambahan: Konfirmasi DP (booking fee) dan tolak pembayaran
+export async function confirmBookingPayment(
+  transactionId: string,
+  paymentId: string,
+  adminId: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    // 1) Set payment -> success + verified
+    const { data: updatedPayment, error: paymentErr } = await supabase
+      .from('payments')
+      .update({
+        status: 'success',
+        verified_by: adminId,
+        verified_at: new Date().toISOString()
+      })
+      .eq('id', paymentId)
+      .select()
+      .single();
+    if (paymentErr) return { success: false, error: paymentErr.message };
+
+    // 2) Ambil transaksi
+    const { data: txn, error: txnErr } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('id', transactionId)
+      .single();
+    if (txnErr || !txn) return { success: false, error: txnErr?.message || 'Transaksi tidak ditemukan' };
+
+    // 3) Hitung total paid (success)
+    const { data: payments, error: paysErr } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('transaction_id', transactionId);
+    if (paysErr) return { success: false, error: paysErr.message };
+
+    const totalPaid = (payments || [])
+      .filter((p: any) => p.status === 'success')
+      .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+    const paymentStatus =
+      totalPaid >= Number(txn.total_amount) ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
+
+    // 4) Update transaksi: set confirmed jika sebelumnya pending dan DP sudah sukses
+    const shouldConfirm = (txn.status === 'pending');
+    const updates: any = {
+      payment_status: paymentStatus,
+      ...(shouldConfirm ? { status: 'confirmed', confirmed_at: new Date().toISOString() } : {})
+    };
+
+    const { error: updErr } = await supabase
+      .from('transactions')
+      .update(updates)
+      .eq('id', transactionId);
+    if (updErr) return { success: false, error: updErr.message };
+
+    return { success: true, message: 'Pembayaran booking fee telah dikonfirmasi' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Gagal konfirmasi pembayaran' };
+  }
+}
+
+export async function rejectPayment(
+  paymentId: string,
+  adminId: string,
+  reason?: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    // 1) Ambil payment untuk tahu transaction_id
+    const { data: pay, error: getPayErr } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .single();
+    if (getPayErr || !pay) return { success: false, error: getPayErr?.message || 'Payment tidak ditemukan' };
+
+    // 2) Update payment -> failed
+    const { error: updPayErr } = await supabase
+      .from('payments')
+      .update({
+        status: 'failed',
+        verified_by: adminId,
+        verified_at: new Date().toISOString(),
+        rejection_reason: reason || null
+      })
+      .eq('id', paymentId);
+    if (updPayErr) return { success: false, error: updPayErr.message };
+
+    // 3) Recompute status transaksi berdasarkan payments yang success
+    const { data: payments, error: paysErr } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('transaction_id', pay.transaction_id);
+    if (paysErr) return { success: false, error: paysErr.message };
+
+    const totalPaid = (payments || [])
+      .filter((p: any) => p.status === 'success')
+      .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+    const { data: txn, error: txnErr } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('id', pay.transaction_id)
+      .single();
+    if (txnErr || !txn) return { success: false, error: txnErr?.message || 'Transaksi tidak ditemukan' };
+
+    const paymentStatus =
+      totalPaid >= Number(txn.total_amount) ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
+
+    const { error: updTxnErr } = await supabase
+      .from('transactions')
+      .update({ payment_status: paymentStatus })
+      .eq('id', pay.transaction_id);
+    if (updTxnErr) return { success: false, error: updTxnErr.message };
+
+    return { success: true, message: 'Pembayaran ditolak' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Gagal menolak pembayaran' };
+  }
+}

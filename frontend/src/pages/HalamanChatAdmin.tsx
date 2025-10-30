@@ -3,6 +3,7 @@ import { Search, Filter, CheckCircle, XCircle, User, MessageSquare, ShieldCheck,
 import { supabase } from '../lib/supabase';
 import { fetchMessages, type ChatRoomDb, type ChatMessageDb, getRoomPeerId, sendAttachmentMessage, deleteRoomHistory } from '../services/chatService';
 import { useAuth } from '../contexts/AuthContext';
+import { useLocation } from 'react-router-dom';
 
 type Role = 'buyer' | 'seller' | 'admin';
 type StatusPercakapan = 'open' | 'escalated' | 'closed';
@@ -122,6 +123,7 @@ export default function HalamanChatAdmin() {
   // State UI: gunakan kategori seperti halaman chat: semua | eskalasi | chatbot | mobil | arsip
   const [adminFilter, setAdminFilter] = useState<'semua' | 'eskalasi' | 'chatbot' | 'mobil' | 'arsip'>('semua');
   const [adminQuery, setAdminQuery] = useState('');
+  const location = useLocation();
 
   useEffect(() => {
     (async () => {
@@ -221,6 +223,15 @@ export default function HalamanChatAdmin() {
     const text = `${r.user1_id} ${r.user2_id} ${r.car_id ?? ''}`.toLowerCase();
     return byCategory && (q === '' || text.includes(q));
   });
+
+  // Preselect room jika datang dari navigasi dengan state.activeRoomId
+  useEffect(() => {
+    const activeRoomId = (location.state as any)?.activeRoomId;
+    if (activeRoomId && rooms.length) {
+      const r = rooms.find(x => x.id === activeRoomId);
+      if (r) setActiveRoom(r);
+    }
+  }, [rooms, location.state]);
 
   // Ketika room aktif berubah: muat pesan
   useEffect(() => {
@@ -332,8 +343,8 @@ export default function HalamanChatAdmin() {
   
       const map: Record<string, string> = {};
       (data || []).forEach((c: any) => {
-        const brand = c?.car_brands?.name || '';
-        const model = c?.car_models?.name || '';
+        const brand = Array.isArray(c?.car_brands) ? (c.car_brands[0]?.name ?? '') : (c?.car_brands?.name ?? '');
+        const model = Array.isArray(c?.car_models) ? (c.car_models[0]?.name ?? '') : (c?.car_models?.name ?? '');
         const composed = c?.title?.trim() || [brand, model].filter(Boolean).join(' ').trim();
         map[c.id] = composed || c.id;
       });
@@ -355,24 +366,120 @@ export default function HalamanChatAdmin() {
   const isResolvedEscalation = !!(activeRoom && (activeRoom as any).resolved_at);
   const canReply = (isAdminParticipant || isEscalatedRoom) && !isResolvedEscalation;
 
+  // Referensi untuk rooms yang sudah diproses (tidak lagi mengirim lampiran otomatis)
+  const autoSentCarForRoomsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    // Nonaktifkan auto-kirim lampiran mobil; cukup reset marker saat pindah room
+    if (activeRoom?.id) {
+      autoSentCarForRoomsRef.current.delete(activeRoom.id);
+    }
+  }, [activeRoom?.id]);
+
   // Kirim pesan dari admin pada room aktif
   const handleSendSupport = async () => {
       if (!canReply || !activeRoom || !profile?.id) return;
       const text = input.trim();
       if (!text) return;
 
-      // Untuk escalated chat, admin mengirim ke kedua participant
-      // Pilih receiver_id sebagai user yang bukan admin (biasanya user1_id atau user2_id)
+      // Tentukan penerima
       let receiverId;
       if (isAdminParticipant) {
-          // Jika admin adalah participant, gunakan logika lama
           receiverId = profile.id === activeRoom.user1_id ? activeRoom.user2_id : activeRoom.user1_id;
       } else {
-          // Jika escalated chat, kirim ke user1_id (biasanya pelapor)
           receiverId = activeRoom.user1_id;
       }
 
-      const { error } = await supabase
+      // Cek apakah sudah ada lampiran mobil untuk room ini
+      const hasCarAttachmentForRoom = !!activeRoom.car_id && messages.some((mm) => {
+        if (mm.message_type === 'car_info') {
+          try {
+            const parsed = JSON.parse(mm.message_text);
+            const carIdInMsg = parsed?.carId || parsed?.carInfo?.carId;
+            return carIdInMsg === activeRoom.car_id;
+          } catch {
+            return true;
+          }
+        }
+        if (mm.message_type === 'text') {
+          try {
+            const parsed = JSON.parse(mm.message_text);
+            return parsed?.carInfo?.carId === activeRoom.car_id;
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      });
+
+      try {
+        // Jika room punya car_id dan belum ada lampiran, kirim gabungan teks + carInfo pada kiriman pertama
+        if (activeRoom.car_id && !hasCarAttachmentForRoom) {
+          const { data: carInfo, error: carError } = await supabase
+            .from('cars')
+            .select(`
+              id,
+              title,
+              price,
+              year,
+              color,
+              mileage,
+              car_brands(name),
+              car_models(name),
+              car_images(image_url)
+            `)
+            .eq('id', activeRoom.car_id)
+            .single();
+
+          if (!carError && carInfo) {
+            const brand = Array.isArray((carInfo as any)?.car_brands)
+              ? (carInfo as any).car_brands[0]?.name || ''
+              : (carInfo as any).car_brands?.name || '';
+            const model = Array.isArray((carInfo as any)?.car_models)
+              ? (carInfo as any).car_models[0]?.name || ''
+              : (carInfo as any).car_models?.name || '';
+            const carTitle = (carInfo.title?.trim() || `${brand} ${model}`.trim()) || carInfo.id;
+            const carPriceStr = carInfo.price ? `Rp ${carInfo.price.toLocaleString('id-ID')}` : 'Harga tidak tersedia';
+            const carImage = Array.isArray((carInfo as any)?.car_images) && (carInfo as any).car_images.length > 0
+              ? (carInfo as any).car_images[0].image_url
+              : null;
+
+            const payload = {
+              room_id: activeRoom.id,
+              sender_id: profile.id,
+              receiver_id: receiverId,
+              message_text: JSON.stringify({
+                text,
+                carInfo: {
+                  carId: carInfo.id,
+                  title: carTitle,
+                  price: carPriceStr,
+                  year: carInfo.year,
+                  mileage: carInfo.mileage,
+                  color: carInfo.color,
+                  imageUrl: carImage
+                }
+              }),
+              message_type: 'text' as ChatMessageDb['message_type'],
+              chat_type: 'admin' as ChatMessageDb['chat_type'],
+              is_read: false
+            };
+
+            const { error: insertErr } = await supabase.from('chat_messages').insert([payload]);
+            if (insertErr) {
+              console.error('Gagal kirim pesan gabungan teks+carInfo:', insertErr.message);
+              return;
+            }
+
+            setInput('');
+            const msgs = await fetchMessages(activeRoom.id);
+            setMessages(msgs);
+            endRef.current?.scrollIntoView({ behavior: 'smooth' });
+            return;
+          }
+        }
+
+        // Jika lampiran sudah ada atau tidak ada car_id, kirim teks biasa
+        const { error } = await supabase
           .from('chat_messages')
           .insert({
               room_id: activeRoom.id,
@@ -383,15 +490,18 @@ export default function HalamanChatAdmin() {
               chat_type: 'admin'
           });
 
-      if (error) {
-          console.error('Gagal kirim pesan admin:', error.message);
-          return;
-      }
+        if (error) {
+            console.error('Gagal kirim pesan admin:', error.message);
+            return;
+        }
 
-      setInput('');
-      const msgs = await fetchMessages(activeRoom.id);
-      setMessages(msgs);
-      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+        setInput('');
+        const msgs = await fetchMessages(activeRoom.id);
+        setMessages(msgs);
+        endRef.current?.scrollIntoView({ behavior: 'smooth' });
+      } catch (err) {
+        console.error('Gagal kirim pesan:', err);
+      }
   };
 
   // Fungsi untuk menyelesaikan eskalasi
@@ -793,8 +903,11 @@ export default function HalamanChatAdmin() {
                                 )}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">
+                                <div className="text-sm font-medium truncate text-black">
                                   {carInfoData.title}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Klik untuk detail
                                 </div>
                               </div>
                             </div>
@@ -839,6 +952,36 @@ export default function HalamanChatAdmin() {
             </>
           )}
         </section>
+
+        {/* Car attachment preview - shows when car will be sent with first message */}
+        {activeRoom?.car_id && (() => {
+          const hasCarAttachmentForRoom = messages.some((mm) => {
+            if (mm.message_type === 'car_info') return true;
+            if (mm.message_type === 'text') {
+              try {
+                const parsed = JSON.parse(mm.message_text);
+                const carIdInMsg = parsed?.carId || parsed?.carInfo?.carId;
+                return carIdInMsg === activeRoom.car_id;
+              } catch {
+                return false;
+              }
+            }
+            return false;
+          });
+          
+          return !hasCarAttachmentForRoom && canReply ? (
+            <div className="px-3 py-2 border-t bg-blue-50">
+              <div className="flex items-center gap-2 text-sm text-blue-700">
+                <Car className="w-4 h-4" />
+                <span>Lampiran mobil akan dikirim bersama pesan pertama</span>
+                <div className="flex-1" />
+                <div className="bg-white border border-blue-200 rounded px-2 py-1 text-xs">
+                  {carTitleMap[activeRoom.car_id] || activeRoom.car_id}
+                </div>
+              </div>
+            </div>
+          ) : null;
+        })()}
 
         {/* Footer: aktif untuk escalated chat atau jika admin adalah participant */}
         <footer className="p-3 border-t bg-white flex gap-2">

@@ -39,6 +39,10 @@ import {
 } from '../services/transactionService';
 import { Payment } from '../services/paymentService';
 import carService from '../services/carService';
+import { confirmBookingPayment, rejectPayment } from '../services/transactionService';
+
+import { MessageSquare } from 'lucide-react';
+import { createChatRoom, sendTextWithCarInfoMessage } from '../services/chatService';
 
 // Interface untuk filter transaksi
 interface TransactionFilter {
@@ -223,6 +227,104 @@ function HalamanKelolaTransaksi() {
       ...prev,
       showDetailModal: false,
     }));
+  };
+
+  // Fungsi untuk melihat bukti pembayaran
+  const handleOpenProof = (proof?: string) => {
+    if (!proof) return;
+    // proof bisa berupa full URL atau path; buka langsung
+    window.open(proof, '_blank', 'noopener,noreferrer');
+  };
+
+  // Fungsi untuk konfirmasi pembayaran booking
+  const handleConfirmBooking = async (payment: Payment) => {
+    if (!pageStatus.selectedTransaction || !user?.id) return;
+    try {
+      setPageStatus(prev => ({ ...prev, isLoading: true }));
+      const res = await confirmBookingPayment(
+        pageStatus.selectedTransaction.transaction.id,
+        payment.id,
+        user.id
+      );
+      if (!res.success) {
+        alert(res.error || 'Gagal konfirmasi pembayaran');
+      } else {
+        await loadTransactions();
+        // Refresh detail terpilih
+        const updated = transactions.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
+        setPageStatus(prev => ({
+          ...prev,
+          selectedTransaction: updated || prev.selectedTransaction,
+          isLoading: false
+        }));
+        alert('Pembayaran booking fee dikonfirmasi');
+      }
+    } catch (e) {
+      alert('Terjadi kesalahan saat konfirmasi');
+    } finally {
+      setPageStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  // Fungsi untuk menolak pembayaran
+  const handleRejectPayment = async (payment: Payment) => {
+    if (!user?.id) return;
+    const reason = prompt('Alasan penolakan (opsional):') || undefined;
+    try {
+      setPageStatus(prev => ({ ...prev, isLoading: true }));
+      const res = await rejectPayment(payment.id, user.id, reason);
+      if (!res.success) {
+        alert(res.error || 'Gagal menolak pembayaran');
+      } else {
+        await loadTransactions();
+        if (pageStatus.selectedTransaction) {
+          const updated = transactions.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
+          setPageStatus(prev => ({
+            ...prev,
+            selectedTransaction: updated || prev.selectedTransaction,
+            isLoading: false
+          }));
+        }
+        alert('Pembayaran ditolak');
+      }
+    } catch {
+      alert('Terjadi kesalahan saat menolak pembayaran');
+    } finally {
+      setPageStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  // Fungsi untuk chat dengan pembeli
+  const handleChatBuyer = async (tx: TransactionWithPayments['transaction']) => {
+    try {
+      if (!user?.id || !tx.buyer_id) {
+        alert('User belum login atau pembeli tidak valid');
+        return;
+      }
+      
+      // Buat atau ambil room chat
+      const room = await createChatRoom(tx.buyer_id, user.id, tx.car_id);
+      
+      // Jika ada car_id, kirim lampiran mobil secara otomatis
+      if (tx.car_id) {
+        try {
+          await sendTextWithCarInfoMessage(
+            room.id,
+            user.id,
+            tx.buyer_id,
+            'Halo! Saya ingin membahas transaksi mobil ini dengan Anda.',
+            tx.car_id
+          );
+        } catch (carError) {
+          console.error('Gagal mengirim lampiran mobil:', carError);
+          // Tetap lanjut ke chat meskipun gagal kirim lampiran
+        }
+      }
+      
+      navigate('/admin/chat', { state: { activeRoomId: room.id } });
+    } catch (e) {
+      alert('Gagal membuka chat');
+    }
   };
 
   // Fungsi untuk mengubah tab
@@ -722,6 +824,10 @@ function HalamanKelolaTransaksi() {
                         <Button variant="outline" onClick={() => showTransactionDetail(item)}>
                           Lihat Detail Transaksi
                         </Button>
+                        <Button variant="outline" onClick={() => handleChatBuyer(tx)}>
+                          <MessageSquare className="w-4 h-4 mr-2" />
+                          Chat Pembeli
+                        </Button>
                       </div>
                     </div>
                   );
@@ -923,6 +1029,9 @@ function HalamanKelolaTransaksi() {
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Status
                           </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Bukti
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -952,6 +1061,15 @@ function HalamanKelolaTransaksi() {
                                 {payment.status}
                               </span>
                             </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {payment.proof_of_payment ? (
+                                <Button variant="outline" size="sm" onClick={() => handleOpenProof(payment.proof_of_payment)}>
+                                  <Eye className="w-4 h-4 mr-1" /> Lihat
+                                </Button>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -959,8 +1077,36 @@ function HalamanKelolaTransaksi() {
                   </div>
                 )}
               </div>
-              
+
+              {/* Aksi Verifikasi Admin */}
+              {(() => {
+                const dp = pageStatus.selectedTransaction.payments.find(
+                  p => p.payment_type === 'down_payment' &&
+                       (p.status === 'pending' || p.status === 'processing') &&
+                       !!p.proof_of_payment
+                );
+                return dp ? (
+                  <div className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                    <div className="text-sm text-yellow-800">
+                      Bukti transfer DP telah diunggah. Konfirmasi pembayaran booking?
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => handleRejectPayment(dp)}>
+                        <XCircle className="w-4 h-4 mr-1" /> Tolak
+                      </Button>
+                      <Button onClick={() => handleConfirmBooking(dp)}>
+                        <CheckCircle className="w-4 h-4 mr-1" /> Konfirmasi Booking
+                      </Button>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
               <div className="flex justify-end space-x-3 pt-4">
+                <Button variant="outline" onClick={() => pageStatus.selectedTransaction && handleChatBuyer(pageStatus.selectedTransaction.transaction)}>
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Chat Pembeli
+                </Button>
                 <Button variant="outline" onClick={closeDetailModal}>
                   Tutup
                 </Button>
