@@ -208,13 +208,21 @@ const HalamanRiwayat: React.FC = () => {
       });
       
       // Mengambil data review untuk menentukan transaksi mana yang sudah direview
-      const { data: reviews } = await supabase
+      const { data: reviews, error: reviewsErr } = await supabase
         .from('reviews')
-        .select('transaction_id')
-        .eq('user_id', currentUserId);
+        .select('*') // Hindari pemilihan kolom yang tidak ada
+        .eq('reviewer_id', currentUserId); // Pakai kolom yang sesuai skema
       
-      // Set transaksi yang sudah direview
-      const reviewedTransactionIds = reviews ? reviews.map(r => r.transaction_id) : [];
+      if (reviewsErr) {
+        console.warn('Load reviews failed:', reviewsErr.message);
+      }
+      
+      // Set transaksi yang sudah direview (ambil transaction_id bila ada)
+      const reviewedTransactionIds = Array.isArray(reviews)
+        ? reviews
+            .map((r: any) => r.transaction_id)
+            .filter((id: any) => !!id)
+        : [];
       
       // Transformasi data ke format yang dibutuhkan aplikasi
       const formattedTransactions: DataTransaksi[] = transactions.map(t => {

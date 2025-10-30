@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import listingService from '../services/listingService';
+import PaymentProofViewer from '../components/PaymentProofViewer';
 import { 
   Briefcase, 
   Search, 
@@ -62,6 +64,8 @@ interface PageStatus {
   selectedTransaction: TransactionWithPayments | null;
   showDetailModal: boolean;
   currentTab: string;
+  showProofModal: boolean;
+  currentProofUrl: string | null;
 }
 
 function HalamanKelolaTransaksi() {
@@ -97,6 +101,8 @@ function HalamanKelolaTransaksi() {
     selectedTransaction: null,
     showDetailModal: false,
     currentTab: 'all',
+    showProofModal: false,
+    currentProofUrl: null,
   });
   
   // State untuk statistik
@@ -229,11 +235,62 @@ function HalamanKelolaTransaksi() {
     }));
   };
 
+  // Fungsi helper untuk mendapatkan URL publik dari path storage
+  const getPublicUrlFromPath = (proofPath: string): string => {
+    // Jika sudah berupa URL lengkap, return apa adanya
+    if (proofPath.startsWith('http')) {
+      return proofPath;
+    }
+    
+    // Ekstrak filename dari path
+    let fileName = proofPath;
+    if (proofPath.includes('/payment-proofs/')) {
+      const parts = proofPath.split('/payment-proofs/');
+      fileName = parts[parts.length - 1];
+    }
+    
+    // Generate URL publik
+    const { data } = supabase.storage
+      .from('payment-proofs')
+      .getPublicUrl(fileName);
+    
+    return data?.publicUrl || proofPath;
+  };
+
+  // Fungsi untuk membuka modal preview gambar
+  const openProofModal = (proofUrl: string) => {
+    const publicUrl = getPublicUrlFromPath(proofUrl);
+    setPageStatus(prev => ({
+      ...prev,
+      showProofModal: true,
+      currentProofUrl: publicUrl,
+    }));
+  };
+
+  // Fungsi untuk menutup modal preview gambar
+  const closeProofModal = () => {
+    setPageStatus(prev => ({
+      ...prev,
+      showProofModal: false,
+      currentProofUrl: null,
+    }));
+  };
+
   // Fungsi untuk melihat bukti pembayaran
-  const handleOpenProof = (proof?: string) => {
+  const handleOpenProof = async (proof?: string) => {
     if (!proof) return;
-    // proof bisa berupa full URL atau path; buka langsung
-    window.open(proof, '_blank', 'noopener,noreferrer');
+
+    try {
+      console.log('Membuka bukti pembayaran:', proof);
+
+      // Normalisasi path menjadi public URL Supabase sebelum membuka
+      const normalizedUrl = getPublicUrlFromPath(proof);
+      openProofModal(normalizedUrl);
+      
+    } catch (err) {
+      console.error('Error membuka bukti pembayaran:', err);
+      alert('Terjadi kesalahan saat membuka bukti pembayaran');
+    }
   };
 
   // Fungsi untuk konfirmasi pembayaran booking
@@ -905,7 +962,7 @@ function HalamanKelolaTransaksi() {
 
       {/* Detail Modal */}
       <Dialog open={pageStatus.showDetailModal} onOpenChange={closeDetailModal}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detail Transaksi</DialogTitle>
           </DialogHeader>
@@ -1063,8 +1120,14 @@ function HalamanKelolaTransaksi() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
                               {payment.proof_of_payment ? (
-                                <Button variant="outline" size="sm" onClick={() => handleOpenProof(payment.proof_of_payment)}>
-                                  <Eye className="w-4 h-4 mr-1" /> Lihat
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => handleOpenProof(payment.proof_of_payment)}
+                                  className="flex items-center gap-1"
+                                >
+                                  <Eye className="w-4 h-4" /> 
+                                  Lihat
                                 </Button>
                               ) : (
                                 <span className="text-gray-400">-</span>
@@ -1118,6 +1181,13 @@ function HalamanKelolaTransaksi() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Modal Preview Gambar Bukti Pembayaran */}
+      <PaymentProofViewer
+        isOpen={pageStatus.showProofModal}
+        onClose={closeProofModal}
+        proofUrl={pageStatus.currentProofUrl}
+      />
     </div>
   );
 };

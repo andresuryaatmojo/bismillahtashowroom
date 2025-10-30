@@ -313,7 +313,6 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
   };
 
   // Handle konfirmasi pembayaran
-  // Di dalam fungsi handleConfirmPayment
   const handleConfirmPayment = async () => {
       const selectedMethod = paymentMethods.find(m => m.id === selectedPaymentMethod);
       
@@ -344,6 +343,88 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
         const finalPaymentType: 'down_payment' | 'installment' | 'full_payment' | 'remaining_payment' =
           paymentType ?? 'down_payment';
   
+        // ===== PERBAIKAN: UPLOAD DULU SEBELUM CREATE PAYMENT =====
+        let proofUrl: string | undefined = undefined;
+        
+        if (selectedMethod.type === 'bank_transfer' && proofFile) {
+          try {
+            console.log('📤 Starting upload process...');
+            console.log('📁 File details:', {
+              name: proofFile.name,
+              size: proofFile.size,
+              type: proofFile.type,
+              constructor: proofFile.constructor.name
+            });
+            
+            // CRITICAL: Ensure we have a proper File object, not FormData
+            if (!(proofFile instanceof File)) {
+              throw new Error('Invalid file object. Expected File, got: ' + typeof proofFile);
+            }
+            
+            const fileExt = proofFile.name.split('.').pop();
+            const fileName = `${referenceCode}-${Date.now()}.${fileExt}`;
+            const objectKey = `${transactionId}/${fileName}`;
+
+            console.log('🔄 Uploading to:', objectKey);
+            console.log('📦 Content-Type:', proofFile.type);
+            
+            // Upload file ke Supabase Storage
+            const { data: uploadData, error: uploadError } = await supabase
+              .storage
+              .from('payment-proofs')
+              .upload(objectKey, proofFile, { 
+                upsert: true, 
+                contentType: proofFile.type,
+                cacheControl: '3600'
+              });
+
+            if (uploadError) {
+              console.error('❌ Upload error:', uploadError);
+              throw new Error(`Upload gagal: ${uploadError.message}`);
+            }
+
+            console.log('✅ Upload success:', uploadData);
+
+            // Dapatkan URL publik
+            const { data: publicUrlData } = supabase
+              .storage
+              .from('payment-proofs')
+              .getPublicUrl(objectKey);
+                
+            if (publicUrlData?.publicUrl) {
+              proofUrl = publicUrlData.publicUrl;
+              console.log('✅ Public URL generated:', proofUrl);
+              
+              // Verify file exists dengan HEAD request
+              try {
+                const verifyResponse = await fetch(proofUrl, { method: 'HEAD' });
+                console.log('🔍 Verification response:', {
+                  status: verifyResponse.status,
+                  statusText: verifyResponse.statusText,
+                  headers: {
+                    'content-type': verifyResponse.headers.get('content-type'),
+                    'content-length': verifyResponse.headers.get('content-length')
+                  }
+                });
+                
+                if (!verifyResponse.ok) {
+                  console.warn('⚠️ File uploaded but not accessible:', verifyResponse.status);
+                }
+              } catch (verifyError) {
+                console.warn('⚠️ Could not verify file accessibility:', verifyError);
+              }
+            } else {
+              throw new Error('Gagal mendapatkan URL publik');
+            }
+          } catch (uploadErr) {
+            console.error('❌ Upload process failed:', uploadErr);
+            alert(`Gagal upload bukti pembayaran: ${uploadErr instanceof Error ? uploadErr.message : 'Unknown error'}`);
+            setIsLoading(false);
+            return; // STOP jika upload gagal
+          }
+        }
+        // ===== END PERBAIKAN =====
+  
         // Prepare payment data
         const paymentData: CreatePaymentInput = {
           transaction_id: transactionId,
@@ -356,6 +437,11 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
             ? `Card payment with ${cardFormData.cardNumber.slice(-4)}` 
             : `Bank transfer to ${selectedMethod.name}`
         };
+        
+        // Tambahkan proof URL jika ada
+        if (proofUrl) {
+          paymentData.proof_of_payment = proofUrl;
+        }
   
         // Tambahkan data bank jika bank transfer
         if (selectedMethod.type === 'bank_transfer') {
@@ -375,39 +461,12 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
         }
   
         // Simpan payment ke Supabase
+        console.log('💾 Creating payment record...');
         const result = await paymentService.createPayment(paymentData);
   
         if (result.success) {
           // Simulasi proses payment gateway
           await new Promise(resolve => setTimeout(resolve, 2000));
-  
-          // Upload bukti transfer jika bank transfer dan user memilih file
-          if (
-            result.success &&
-            !Array.isArray(result.data) &&
-            result.data?.id &&
-            selectedMethod.type === 'bank_transfer' &&
-            proofFile
-          ) {
-            const fileExt = proofFile.name.split('.').pop() || 'dat';
-            const filePath = `payment-proofs/${transactionId}/${referenceCode}-${Date.now()}.${fileExt}`;
-            const { error: uploadError } = await supabase
-              .storage
-              .from('payment-proofs')
-              .upload(filePath, proofFile, { upsert: true, contentType: proofFile.type });
-  
-            if (!uploadError) {
-              const { data: publicUrlData } = supabase
-                .storage
-                .from('payment-proofs')
-                .getPublicUrl(filePath);
-  
-              const proofUrl = publicUrlData?.publicUrl;
-              if (proofUrl) {
-                await paymentService.uploadProofOfPayment(result.data.id, proofUrl);
-              }
-            }
-          }
   
           // Update status berdasarkan metode pembayaran
           let finalStatus: 'success' | 'processing' | 'failed' = 'processing';
@@ -446,7 +505,7 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
           throw new Error(result.message || 'Payment failed');
         }
       } catch (error) {
-        console.error('Payment error:', error);
+        console.error('💥 Payment error:', error);
         if (onPaymentError) {
           onPaymentError(error);
         }
@@ -785,17 +844,46 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
                             <input 
                               type="file" 
                               className="hidden" 
-                              accept=".jpg,.jpeg,.png,.pdf"
+                              accept="image/jpeg,image/jpg,image/png,application/pdf"
                               onChange={(e) => {
-                                const file = e.target.files?.[0] || null;
-                                if (file && file.size > 10 * 1024 * 1024) {
+                                const file = e.target.files?.[0];
+                                
+                                if (!file) {
+                                  setProofFile(null);
+                                  return;
+                                }
+                                
+                                // Validate file size
+                                if (file.size > 10 * 1024 * 1024) {
                                   setFormErrors(prev => ({
                                     ...prev,
                                     proofFile: 'Ukuran file maksimal 10MB'
                                   }));
+                                  e.target.value = ''; // Reset input
                                   return;
                                 }
+                                
+                                // Validate file type
+                                const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+                                if (!validTypes.includes(file.type)) {
+                                  setFormErrors(prev => ({
+                                    ...prev,
+                                    proofFile: 'Format file harus JPG, PNG, atau PDF'
+                                  }));
+                                  e.target.value = ''; // Reset input
+                                  return;
+                                }
+                                
+                                console.log('📁 File selected:', {
+                                  name: file.name,
+                                  size: file.size,
+                                  type: file.type,
+                                  lastModified: file.lastModified
+                                });
+                                
                                 setProofFile(file);
+                                
+                                // Clear error if exists
                                 if (formErrors.proofFile) {
                                   setFormErrors(prev => {
                                     const newErrors = {...prev};

@@ -33,7 +33,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   global: {
     headers: {
-      'Content-Type': 'application/json',
+      // HAPUS baris berikut agar upload Storage tidak salah header:
+      // 'Content-Type': 'application/json',
+      // Pertahankan Prefer untuk return=representation
       'Prefer': 'return=representation'
     }
   }
