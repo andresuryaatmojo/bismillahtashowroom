@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import paymentService, { CreatePaymentInput } from '../services/paymentService';
+import { supabase } from '../lib/supabase';
 
 interface PaymentPageProps {
   amount: number;
@@ -38,6 +39,7 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('');
+  const [proofFile, setProofFile] = useState<File | null>(null);
   
   // Form state untuk Card
   const [cardFormData, setCardFormData] = useState<CardFormData>({
@@ -300,330 +302,369 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
       isValid = false;
     }
 
+    // Validasi bukti pembayaran untuk bank transfer
+    if (!proofFile) {
+      errors.proofFile = 'Bukti pembayaran diperlukan untuk transfer bank';
+      isValid = false;
+    }
+
     setFormErrors(errors);
     return isValid;
   };
 
   // Handle konfirmasi pembayaran
+  // Di dalam fungsi handleConfirmPayment
   const handleConfirmPayment = async () => {
-    const selectedMethod = paymentMethods.find(m => m.id === selectedPaymentMethod);
-    
-    if (!selectedMethod) return;
-
-    // Validasi berdasarkan tipe payment
-    if (selectedMethod.type === 'card') {
-      if (!validateCardForm()) return;
-    } else if (selectedMethod.type === 'bank_transfer') {
-      if (!validateBankForm()) return;
-    }
-
-    // Validasi transaction_id diperlukan
-    if (!transactionId) {
-      if (onPaymentError) {
-        onPaymentError(new Error('Transaction ID is required'));
-      }
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      // Generate reference code
-      const referenceCode = paymentService.generateReferenceCode('PAY');
-
-      // Prepare payment data
-      const paymentData: CreatePaymentInput = {
-        transaction_id: transactionId,
-        payment_type: paymentType,
-        amount: amount,
-        payment_method: selectedMethod.name,
-        reference_code: referenceCode,
-        gateway_name: selectedMethod.type === 'card' ? 'Adyen' : selectedMethod.name,
-        notes: selectedMethod.type === 'card' 
-          ? `Card payment with ${cardFormData.cardNumber.slice(-4)}` 
-          : `Bank transfer to ${selectedMethod.name}`
-      };
-
-      // Tambahkan data bank jika bank transfer
-      if (selectedMethod.type === 'bank_transfer') {
-        paymentData.bank_name = selectedMethod.name;
-        paymentData.account_holder = `${bankFormData.firstName} ${bankFormData.lastName}`;
-        paymentData.notes = `Bank transfer - Customer: ${bankFormData.email}`;
-      }
-
-      // Tambahkan gateway transaction ID jika card
+      const selectedMethod = paymentMethods.find(m => m.id === selectedPaymentMethod);
+      
+      if (!selectedMethod) return;
+  
+      // Validasi berdasarkan tipe payment
       if (selectedMethod.type === 'card') {
-        paymentData.gateway_transaction_id = `ADY-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-        paymentData.gateway_response = {
-          cardType: cardFormData.cardNumber.startsWith('4') ? 'VISA' : 'MASTERCARD',
-          lastFourDigits: cardFormData.cardNumber.replace(/\s/g, '').slice(-4),
-          expiryDate: cardFormData.expiryDate
-        };
+        if (!validateCardForm()) return;
+      } else if (selectedMethod.type === 'bank_transfer') {
+        if (!validateBankForm()) return;
       }
-
-      // Simpan payment ke Supabase
-      const result = await paymentService.createPayment(paymentData);
-
-      if (result.success) {
-        // Simulasi proses payment gateway
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Update status berdasarkan metode pembayaran
-        let finalStatus: 'success' | 'processing' | 'failed' = 'processing';
-        
-        if (selectedMethod.type === 'card') {
-          // Simulasi success rate 90% untuk card
-          finalStatus = Math.random() > 0.1 ? 'success' : 'failed';
-        } else {
-          // Bank transfer selalu processing (menunggu konfirmasi manual)
-          finalStatus = 'processing';
+  
+      // Validasi transaction_id diperlukan
+      if (!transactionId) {
+        if (onPaymentError) {
+          onPaymentError(new Error('Transaction ID is required'));
         }
-
-        // Update payment status
-        if (result.data && !Array.isArray(result.data) && result.data.id) {
-          await paymentService.updatePayment(result.data.id, {
-            status: finalStatus,
-            gateway_transaction_id: paymentData.gateway_transaction_id
-          });
-        }
-
-        const successResult = {
-          paymentId: result.data && !Array.isArray(result.data) ? result.data.id : undefined,
-          referenceCode: referenceCode,
-          status: finalStatus,
+        return;
+      }
+  
+      setIsLoading(true);
+  
+      try {
+        // Generate reference code
+        const referenceCode = paymentService.generateReferenceCode('PAY');
+  
+        // Tetapkan default payment type ke 'down_payment' (booking fee) bila tidak ada
+        const finalPaymentType: 'down_payment' | 'installment' | 'full_payment' | 'remaining_payment' =
+          paymentType ?? 'down_payment';
+  
+        // Prepare payment data
+        const paymentData: CreatePaymentInput = {
+          transaction_id: transactionId,
+          payment_type: finalPaymentType,
           amount: amount,
-          paymentMethod: selectedMethod.name,
-          message: finalStatus === 'success' 
-            ? 'Payment completed successfully!' 
-            : 'Payment is being processed. You will receive confirmation shortly.'
+          payment_method: selectedMethod.name,
+          reference_code: referenceCode,
+          gateway_name: selectedMethod.type === 'card' ? 'Adyen' : selectedMethod.name,
+          notes: selectedMethod.type === 'card' 
+            ? `Card payment with ${cardFormData.cardNumber.slice(-4)}` 
+            : `Bank transfer to ${selectedMethod.name}`
         };
-
-        if (onPaymentSuccess) {
-          onPaymentSuccess(successResult);
+  
+        // Tambahkan data bank jika bank transfer
+        if (selectedMethod.type === 'bank_transfer') {
+          paymentData.bank_name = selectedMethod.name;
+          paymentData.account_holder = `${bankFormData.firstName} ${bankFormData.lastName}`;
+          paymentData.notes = `Bank transfer - Customer: ${bankFormData.email}`;
         }
-      } else {
-        throw new Error(result.message || 'Payment failed');
+  
+        // Tambahkan gateway transaction ID jika card
+        if (selectedMethod.type === 'card') {
+          paymentData.gateway_transaction_id = `ADY-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+          paymentData.gateway_response = {
+            cardType: cardFormData.cardNumber.startsWith('4') ? 'VISA' : 'MASTERCARD',
+            lastFourDigits: cardFormData.cardNumber.replace(/\s/g, '').slice(-4),
+            expiryDate: cardFormData.expiryDate
+          };
+        }
+  
+        // Simpan payment ke Supabase
+        const result = await paymentService.createPayment(paymentData);
+  
+        if (result.success) {
+          // Simulasi proses payment gateway
+          await new Promise(resolve => setTimeout(resolve, 2000));
+  
+          // Upload bukti transfer jika bank transfer dan user memilih file
+          if (
+            result.success &&
+            !Array.isArray(result.data) &&
+            result.data?.id &&
+            selectedMethod.type === 'bank_transfer' &&
+            proofFile
+          ) {
+            const fileExt = proofFile.name.split('.').pop() || 'dat';
+            const filePath = `payment-proofs/${transactionId}/${referenceCode}-${Date.now()}.${fileExt}`;
+            const { error: uploadError } = await supabase
+              .storage
+              .from('payment-proofs')
+              .upload(filePath, proofFile, { upsert: true, contentType: proofFile.type });
+  
+            if (!uploadError) {
+              const { data: publicUrlData } = supabase
+                .storage
+                .from('payment-proofs')
+                .getPublicUrl(filePath);
+  
+              const proofUrl = publicUrlData?.publicUrl;
+              if (proofUrl) {
+                await paymentService.uploadProofOfPayment(result.data.id, proofUrl);
+              }
+            }
+          }
+  
+          // Update status berdasarkan metode pembayaran
+          let finalStatus: 'success' | 'processing' | 'failed' = 'processing';
+          
+          if (selectedMethod.type === 'card') {
+            // Simulasi success rate 90% untuk card
+            finalStatus = Math.random() > 0.1 ? 'success' : 'failed';
+          } else {
+            // Bank transfer selalu processing (menunggu konfirmasi manual)
+            finalStatus = 'processing';
+          }
+  
+          // Update payment status
+          if (result.data && !Array.isArray(result.data) && result.data.id) {
+            await paymentService.updatePayment(result.data.id, {
+              status: finalStatus,
+              gateway_transaction_id: paymentData.gateway_transaction_id
+            });
+          }
+  
+          const successResult = {
+            paymentId: result.data && !Array.isArray(result.data) ? result.data.id : undefined,
+            referenceCode: referenceCode,
+            status: finalStatus,
+            amount: amount,
+            paymentMethod: selectedMethod.name,
+            message: finalStatus === 'success' 
+              ? 'Payment completed successfully!' 
+              : 'Payment is being processed. You will receive confirmation shortly.'
+          };
+  
+          if (onPaymentSuccess) {
+            onPaymentSuccess(successResult);
+          }
+        } else {
+          throw new Error(result.message || 'Payment failed');
+        }
+      } catch (error) {
+        console.error('Payment error:', error);
+        if (onPaymentError) {
+          onPaymentError(error);
+        }
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Payment error:', error);
-      if (onPaymentError) {
-        onPaymentError(error);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-lg mx-auto">
-        {/* Header dengan logo placeholder */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <div className="flex items-center justify-center mb-4">
-            <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
-              <span className="text-2xl text-gray-400">🏪</span>
+    useEffect(() => {
+      const timer = setTimeout(() => {
+        setIsLoading(false);
+      }, 1000);
+  
+      return () => clearTimeout(timer);
+    }, []);
+  
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4">
+        <div className="max-w-lg mx-auto">
+          {/* Header dengan logo placeholder */}
+          <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center">
+                <span className="text-2xl text-gray-400">🏪</span>
+              </div>
+            </div>
+  
+            {/* Total Amount */}
+            <div className="text-center">
+              <h1 className="text-3xl font-bold text-gray-900">
+                {formatPrice(amount)}
+              </h1>
+              {referenceId && (
+                <p className="text-sm text-gray-500 mt-2">
+                  Ref: {referenceId}
+                </p>
+              )}
             </div>
           </div>
-
-          {/* Total Amount */}
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-gray-900">
-              {formatPrice(amount)}
-            </h1>
-            {referenceId && (
-              <p className="text-sm text-gray-500 mt-2">
-                Ref: {referenceId}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Payment Methods */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900">
-            HOW WOULD YOU LIKE TO PAY?
-          </h2>
-
-          {/* Payment Method List */}
-          <div className="space-y-2">
-            {paymentMethods.map((method) => (
-              <div key={method.id}>
-                <button
-                  onClick={() => {
-                    setSelectedPaymentMethod(
-                      selectedPaymentMethod === method.id ? '' : method.id
-                    );
-                    setFormErrors({});
-                  }}
-                  className={`w-full flex items-center justify-between p-4 rounded-lg border-2 transition-all ${
-                    selectedPaymentMethod === method.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300 bg-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    {method.icon.startsWith('http') ? (
-                      <img 
-                        src={method.icon} 
-                        alt={method.name}
-                        className="w-10 h-10 object-contain"
-                      />
-                    ) : (
-                      <span className="text-2xl">{method.icon}</span>
+  
+          {/* Payment Methods */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <h2 className="text-lg font-semibold mb-4 text-gray-900">
+              HOW WOULD YOU LIKE TO PAY?
+            </h2>
+  
+            {/* Payment Method List */}
+            <div className="space-y-2">
+              {paymentMethods.map((method) => (
+                <div key={method.id}>
+                  <button
+                    onClick={() => {
+                      setSelectedPaymentMethod(
+                        selectedPaymentMethod === method.id ? '' : method.id
+                      );
+                      setFormErrors({});
+                    }}
+                    className={`w-full flex items-center justify-between p-4 rounded-lg border-2 transition-all ${
+                      selectedPaymentMethod === method.id
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {method.icon.startsWith('http') ? (
+                        <img 
+                          src={method.icon} 
+                          alt={method.name}
+                          className="w-10 h-10 object-contain"
+                        />
+                      ) : (
+                        <span className="text-2xl">{method.icon}</span>
+                      )}
+                      <span className="font-medium text-gray-900">
+                        {method.name}
+                      </span>
+                    </div>
+  
+                    {method.id === 'cards' && (
+                      <div className="flex gap-2">
+                        <div className="w-10 h-6 bg-gradient-to-r from-orange-500 to-red-500 rounded flex items-center justify-center text-white text-xs font-bold">
+                          MC
+                        </div>
+                        <div className="w-10 h-6 bg-blue-600 rounded flex items-center justify-center text-white text-xs font-bold">
+                          VISA
+                        </div>
+                      </div>
                     )}
-                    <span className="font-medium text-gray-900">
-                      {method.name}
-                    </span>
-                  </div>
-
-                  {method.id === 'cards' && (
-                    <div className="flex gap-2">
-                      <div className="w-10 h-6 bg-gradient-to-r from-orange-500 to-red-500 rounded flex items-center justify-center text-white text-xs font-bold">
-                        MC
+                  </button>
+  
+                  {/* Expanded form untuk CARDS */}
+                  {selectedPaymentMethod === method.id && method.type === 'card' && (
+                    <div className="mt-4 p-6 border-2 border-blue-500 rounded-lg bg-white">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-2xl">💳</span>
+                        <span className="font-semibold text-gray-900">Cards</span>
                       </div>
-                      <div className="w-10 h-6 bg-blue-600 rounded flex items-center justify-center text-white text-xs font-bold">
-                        VISA
-                      </div>
-                    </div>
-                  )}
-                </button>
-
-                {/* Expanded form untuk CARDS */}
-                {selectedPaymentMethod === method.id && method.type === 'card' && (
-                  <div className="mt-4 p-6 border-2 border-blue-500 rounded-lg bg-white">
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="text-2xl">💳</span>
-                      <span className="font-semibold text-gray-900">Cards</span>
-                    </div>
-
-                    <p className="text-xs text-gray-600 mb-4">
-                      All fields are required unless marked otherwise.
-                    </p>
-
-                    <div className="space-y-4">
-                      {/* Card Number */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                          Card number
-                        </label>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            name="cardNumber"
-                            value={cardFormData.cardNumber}
-                            onChange={handleCardInputChange}
-                            className={`w-full px-3 py-3 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                              formErrors.cardNumber ? 'border-red-500' : 'border-gray-300'
-                            }`}
-                            placeholder="1234 5678 9012 3456"
-                          />
-                          <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <rect x="3" y="6" width="18" height="12" rx="2" strokeWidth="2"/>
-                              <path d="M3 10h18" strokeWidth="2"/>
-                            </svg>
-                          </div>
-                        </div>
-                        {formErrors.cardNumber && (
-                          <p className="text-xs text-red-500 mt-1">
-                            {formErrors.cardNumber}
-                          </p>
-                        )}
-                        <div className="flex gap-2 mt-2">
-                          <div className="w-8 h-5 bg-gradient-to-r from-orange-500 to-red-500 rounded"></div>
-                          <div className="w-8 h-5 bg-blue-600 rounded"></div>
-                        </div>
-                      </div>
-
-                      {/* Expiry Date & Security Code */}
-                      <div className="grid grid-cols-2 gap-4">
+  
+                      <p className="text-xs text-gray-600 mb-4">
+                        All fields are required unless marked otherwise.
+                      </p>
+  
+                      <div className="space-y-4">
+                        {/* Card Number */}
                         <div>
                           <label className="block text-sm font-medium text-gray-900 mb-2">
-                            Expiry date
+                            Card number
                           </label>
                           <div className="relative">
                             <input
                               type="text"
-                              name="expiryDate"
-                              value={cardFormData.expiryDate}
+                              name="cardNumber"
+                              value={cardFormData.cardNumber}
                               onChange={handleCardInputChange}
                               className={`w-full px-3 py-3 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                formErrors.expiryDate ? 'border-red-500' : 'border-gray-300'
+                                formErrors.cardNumber ? 'border-red-500' : 'border-gray-300'
                               }`}
-                              placeholder="MM/YY"
+                              placeholder="1234 5678 9012 3456"
                             />
                             <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth="2"/>
-                                <path d="M16 2v4M8 2v4M3 10h18" strokeWidth="2"/>
-                              </svg>
-                            </div>
-                          </div>
-                          {formErrors.expiryDate && (
-                            <p className="text-xs text-red-500 mt-1">
-                              {formErrors.expiryDate}
-                            </p>
-                          )}
-                          <p className="text-xs text-gray-500 mt-1">
-                            Front of card in MM/YY format
-                          </p>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-900 mb-2">
-                            Security code
-                          </label>
-                          <div className="relative">
-                            <input
-                              type="text"
-                              name="securityCode"
-                              value={cardFormData.securityCode}
-                              onChange={handleCardInputChange}
-                              className={`w-full px-3 py-3 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                formErrors.securityCode ? 'border-red-500' : 'border-gray-300'
-                              }`}
-                              placeholder="123"
-                            />
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <rect x="3" y="6" width="18" height="12" rx="2" strokeWidth="2"/>
-                                <circle cx="15" cy="12" r="2" strokeWidth="2"/>
+                                <path d="M3 10h18" strokeWidth="2"/>
                               </svg>
                             </div>
                           </div>
-                          {formErrors.securityCode && (
+                          {formErrors.cardNumber && (
                             <p className="text-xs text-red-500 mt-1">
-                              {formErrors.securityCode}
+                              {formErrors.cardNumber}
                             </p>
                           )}
-                          <p className="text-xs text-gray-500 mt-1">
-                            3 digits on back of card
-                          </p>
+                          <div className="flex gap-2 mt-2">
+                            <div className="w-8 h-5 bg-gradient-to-r from-orange-500 to-red-500 rounded"></div>
+                            <div className="w-8 h-5 bg-blue-600 rounded"></div>
+                          </div>
                         </div>
+  
+                        {/* Expiry Date & Security Code */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-900 mb-2">
+                              Expiry date
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                name="expiryDate"
+                                value={cardFormData.expiryDate}
+                                onChange={handleCardInputChange}
+                                className={`w-full px-3 py-3 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                  formErrors.expiryDate ? 'border-red-500' : 'border-gray-300'
+                                }`}
+                                placeholder="MM/YY"
+                              />
+                              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth="2"/>
+                                  <path d="M16 2v4M8 2v4M3 10h18" strokeWidth="2"/>
+                                </svg>
+                              </div>
+                            </div>
+                            {formErrors.expiryDate && (
+                              <p className="text-xs text-red-500 mt-1">
+                                {formErrors.expiryDate}
+                              </p>
+                            )}
+                            <p className="text-xs text-gray-500 mt-1">
+                              Front of card in MM/YY format
+                            </p>
+                          </div>
+  
+                          <div>
+                            <label className="block text-sm font-medium text-gray-900 mb-2">
+                              Security code
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                name="securityCode"
+                                value={cardFormData.securityCode}
+                                onChange={handleCardInputChange}
+                                className={`w-full px-3 py-3 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                  formErrors.securityCode ? 'border-red-500' : 'border-gray-300'
+                                }`}
+                                placeholder="123"
+                              />
+                              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <rect x="3" y="6" width="18" height="12" rx="2" strokeWidth="2"/>
+                                  <circle cx="15" cy="12" r="2" strokeWidth="2"/>
+                                </svg>
+                              </div>
+                            </div>
+                            {formErrors.securityCode && (
+                              <p className="text-xs text-red-500 mt-1">
+                                {formErrors.securityCode}
+                              </p>
+                            )}
+                            <p className="text-xs text-gray-500 mt-1">
+                              3 digits on back of card
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleConfirmPayment}
+                          disabled={isLoading}
+                          className="w-full bg-gray-900 text-white py-4 rounded-lg font-semibold hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          {isLoading ? 'Processing...' : `Pay ${formatPrice(amount)}`}
+                        </button>
                       </div>
-
-                      <button
-                        onClick={handleConfirmPayment}
-                        disabled={isLoading}
-                        className="w-full bg-gray-900 text-white py-4 rounded-lg font-semibold hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
-                        {isLoading ? 'Processing...' : `Pay ${formatPrice(amount)}`}
-                      </button>
                     </div>
-                  </div>
                 )}
-
+  
                 {/* Expanded form untuk BANK TRANSFER */}
                 {selectedPaymentMethod === method.id && method.type === 'bank_transfer' && (
                   <div className="mt-4 p-6 border-2 border-blue-500 rounded-lg bg-white">
@@ -637,11 +678,11 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
                         {method.name}
                       </span>
                     </div>
-
+  
                     <p className="text-xs text-gray-600 mb-4">
                       All fields are required unless marked otherwise
                     </p>
-
+  
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -664,7 +705,7 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
                             </p>
                           )}
                         </div>
-
+  
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
                             Last name
@@ -686,7 +727,7 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
                           )}
                         </div>
                       </div>
-
+  
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Email address
@@ -708,12 +749,80 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
                         )}
                       </div>
 
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Bukti Pembayaran
+                        </label>
+                        <div className="flex items-center justify-center w-full">
+                          <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-gray-50 ${
+                            formErrors.proofFile ? 'border-red-500' : 'border-gray-300'
+                          }`}>
+                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                              {proofFile ? (
+                                <div className="flex flex-col items-center">
+                                  <svg className="w-8 h-8 mb-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                  <p className="text-sm text-gray-700 truncate max-w-xs">{proofFile.name}</p>
+                                  <p className="text-xs text-gray-500">
+                                    {(proofFile.size / 1024 / 1024).toFixed(2)} MB
+                                  </p>
+                                </div>
+                              ) : (
+                                <>
+                                  <svg className="w-8 h-8 mb-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                                  </svg>
+                                  <p className="mb-1 text-sm text-gray-500">
+                                    <span className="font-semibold">Klik untuk upload</span> atau drag and drop
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    JPG, PNG atau PDF (Maks. 10MB)
+                                  </p>
+                                </>
+                              )}
+                            </div>
+                            <input 
+                              type="file" 
+                              className="hidden" 
+                              accept=".jpg,.jpeg,.png,.pdf"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                if (file && file.size > 10 * 1024 * 1024) {
+                                  setFormErrors(prev => ({
+                                    ...prev,
+                                    proofFile: 'Ukuran file maksimal 10MB'
+                                  }));
+                                  return;
+                                }
+                                setProofFile(file);
+                                if (formErrors.proofFile) {
+                                  setFormErrors(prev => {
+                                    const newErrors = {...prev};
+                                    delete newErrors.proofFile;
+                                    return newErrors;
+                                  });
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                        {formErrors.proofFile && (
+                          <p className="text-xs text-red-500 mt-1">
+                            {formErrors.proofFile}
+                          </p>
+                        )}
+                        <p className="text-xs text-gray-500 mt-1">
+                          Upload bukti transfer bank Anda
+                        </p>
+                      </div>
+  
                       <button
                         onClick={handleConfirmPayment}
                         disabled={isLoading}
                         className="w-full bg-gray-900 text-white py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                       >
-                        {isLoading ? 'Processing...' : 'Confirm purchase'}
+                        {isLoading ? 'Processing...' : 'Konfirmasi Pembayaran'}
                       </button>
                     </div>
                   </div>

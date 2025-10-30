@@ -1,4 +1,6 @@
+// Top-level imports
 import { supabase } from '../lib/supabase';
+import paymentService from './paymentService';
 
 export type CreateTransactionInput = {
   buyer_id: string;
@@ -88,11 +90,19 @@ export async function createTransaction(input: CreateTransactionInput) {
     if (retry.error) {
       return { success: false, error: retry.error.message };
     }
+
+    // Tidak membuat payment otomatis lagi
+    // Payment akan dibuat hanya ketika pengguna mengisi form pembayaran dan mengunggah bukti
+
     return { success: true, data: retry.data };
   }
 
   if (error) {
     return { success: false, error: error.message };
   }
+
+  // Tidak membuat payment otomatis lagi
+  // Payment akan dibuat hanya ketika pengguna mengisi form pembayaran dan mengunggah bukti
+
   return { success: true, data };
 }
