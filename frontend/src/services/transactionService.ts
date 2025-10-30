@@ -625,8 +625,18 @@ export async function rejectPayment(
       .single();
     if (txnErr || !txn) return { success: false, error: txnErr?.message || 'Transaksi tidak ditemukan' };
 
-    const paymentStatus =
-      totalPaid >= Number(txn.total_amount) ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
+    // Tentukan payment_status: jika ada failed dan belum ada paid, set 'failed'
+    const hasFailed = (payments || []).some((p: any) => p.status === 'failed');
+    let paymentStatus: Transaction['payment_status'];
+    if (totalPaid >= Number(txn.total_amount)) {
+      paymentStatus = 'paid';
+    } else if (totalPaid > 0) {
+      paymentStatus = 'partial';
+    } else if (hasFailed) {
+      paymentStatus = 'failed';
+    } else {
+      paymentStatus = 'pending';
+    }
 
     const { error: updTxnErr } = await supabase
       .from('transactions')

@@ -29,9 +29,10 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Separator } from '../components/ui/separator';
+import { Textarea } from '../components/ui/textarea';
 import { 
   Transaction, 
   TransactionWithPayments, 
@@ -105,6 +106,12 @@ function HalamanKelolaTransaksi() {
     currentProofUrl: null,
   });
   
+  // State: konfirmasi 2 langkah untuk aksi pembayaran
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [confirmActionType, setConfirmActionType] = useState<'confirm' | 'reject' | null>(null);
+  const [selectedPaymentForAction, setSelectedPaymentForAction] = useState<Payment | null>(null);
+  const [rejectNote, setRejectNote] = useState('');
+  
   // State untuk statistik
   const [stats, setStats] = useState({
     total: 0,
@@ -115,12 +122,12 @@ function HalamanKelolaTransaksi() {
   });
 
   // Fungsi untuk memuat data transaksi berdasarkan jenis penjual
-  const loadTransactions = async () => {
+  const loadTransactions = async (): Promise<TransactionWithPayments[] | undefined> => {
     setPageStatus(prev => ({ ...prev, isLoading: true, error: null }));
     
     try {
       let result: { success: boolean; data?: TransactionWithPayments[]; total?: number; error?: string };
-      console.log('Loading transactions with filter:', filter.seller_type);
+      console.log('Loading transactions dengan filter:', filter.seller_type);
       
       if (filter.seller_type === 'showroom') {
         result = await getShowroomTransactionsWithPayments(1, 100);
@@ -149,11 +156,14 @@ function HalamanKelolaTransaksi() {
           cancelled,
           totalAmount,
         });
+        return result.data; // kembalikan data terbaru
       } else {
         setPageStatus(prev => ({ ...prev, error: result.error || 'Gagal memuat data transaksi' }));
+        return undefined;
       }
     } catch (error) {
       setPageStatus(prev => ({ ...prev, error: 'Terjadi kesalahan saat memuat data' }));
+      return undefined;
     } finally {
       setPageStatus(prev => ({ ...prev, isLoading: false }));
     }
@@ -306,9 +316,9 @@ function HalamanKelolaTransaksi() {
       if (!res.success) {
         alert(res.error || 'Gagal konfirmasi pembayaran');
       } else {
-        await loadTransactions();
-        // Refresh detail terpilih
-        const updated = transactions.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
+        const updatedList = await loadTransactions();
+        const source = updatedList ?? transactions;
+        const updated = source.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
         setPageStatus(prev => ({
           ...prev,
           selectedTransaction: updated || prev.selectedTransaction,
@@ -323,19 +333,19 @@ function HalamanKelolaTransaksi() {
     }
   };
 
-  // Fungsi untuk menolak pembayaran
-  const handleRejectPayment = async (payment: Payment) => {
+  // Fungsi untuk menolak pembayaran (ditambah parameter alasan)
+  const handleRejectPayment = async (payment: Payment, reason?: string) => {
     if (!user?.id) return;
-    const reason = prompt('Alasan penolakan (opsional):') || undefined;
     try {
       setPageStatus(prev => ({ ...prev, isLoading: true }));
       const res = await rejectPayment(payment.id, user.id, reason);
       if (!res.success) {
         alert(res.error || 'Gagal menolak pembayaran');
       } else {
-        await loadTransactions();
+        const updatedList = await loadTransactions();
+        const source = updatedList ?? transactions;
         if (pageStatus.selectedTransaction) {
-          const updated = transactions.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
+          const updated = source.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
           setPageStatus(prev => ({
             ...prev,
             selectedTransaction: updated || prev.selectedTransaction,
@@ -349,6 +359,25 @@ function HalamanKelolaTransaksi() {
     } finally {
       setPageStatus(prev => ({ ...prev, isLoading: false }));
     }
+  };
+
+  // Pembuka modal konfirmasi aksi
+  const openActionConfirm = (type: 'confirm' | 'reject', payment: Payment) => {
+    setConfirmActionType(type);
+    setSelectedPaymentForAction(payment);
+    setRejectNote('');
+    setConfirmModalOpen(true);
+  };
+
+  // Eksekusi aksi setelah konfirmasi dari modal
+  const performConfirmAction = async () => {
+    if (!selectedPaymentForAction || !confirmActionType) return;
+    if (confirmActionType === 'confirm') {
+      await handleConfirmBooking(selectedPaymentForAction);
+    } else {
+      await handleRejectPayment(selectedPaymentForAction, rejectNote || undefined);
+    }
+    setConfirmModalOpen(false);
   };
 
   // Fungsi untuk chat dengan pembeli
@@ -433,6 +462,8 @@ function HalamanKelolaTransaksi() {
         return 'bg-green-100 text-green-800';
       case 'cancelled':
         return 'bg-red-100 text-red-800';
+      case 'ditolak': // label tampilan override saat payment failed
+        return 'bg-red-100 text-red-800';
       case 'refunded':
         return 'bg-purple-100 text-purple-800';
       default:
@@ -466,18 +497,47 @@ function HalamanKelolaTransaksi() {
     return false;
   };
 
+  // Tambahan: cek apakah ada pembayaran yang ditolak/failed
+  const hasFailedPayment = (transaction: TransactionWithPayments): boolean => {
+    const fromPayments = Array.isArray(transaction.payments)
+      ? transaction.payments.some(p => p.status === 'failed')
+      : false;
+    const fromHeader = transaction.transaction.payment_status === 'failed';
+    return fromPayments || fromHeader;
+  };
+
   // Fungsi untuk mengecek apakah transaksi belum dibayar
   const isUnpaid = (transaction: TransactionWithPayments): boolean => {
     return transaction.transaction.payment_status === 'pending' && !hasPaymentProof(transaction);
   };
 
-  // Fungsi untuk mengecek apakah transaksi menunggu konfirmasi admin
+  // Ubah: pending konfirmasi hanya jika tidak ada failed
   const isWaitingAdminConfirm = (transaction: TransactionWithPayments): boolean => {
-    return transaction.transaction.status === 'pending' && hasPaymentProof(transaction);
+    return transaction.transaction.status === 'pending' && hasPaymentProof(transaction) && !hasFailedPayment(transaction);
+  };
+
+  // Util: status transaksi yang ditampilkan (override ke 'ditolak' bila failed)
+  const getDisplayTransactionStatus = (transaction: TransactionWithPayments): string => {
+    if (hasFailedPayment(transaction)) return 'ditolak';
+    return transaction.transaction.status || 'pending';
+  };
+
+  // Util: status pembayaran yang ditampilkan (override ke 'failed' bila ada payment gagal)
+  const getDisplayPaymentStatus = (t: TransactionWithPayments): Transaction['payment_status'] => {
+    const failed = Array.isArray(t.payments) && t.payments.some(p => p.status === 'failed');
+    if (failed) return 'failed';
+    return (t.transaction.payment_status || 'pending') as Transaction['payment_status'];
   };
 
   // Fungsi untuk render status badge yang lebih detail
   const renderDetailedStatusBadge = (transaction: TransactionWithPayments) => {
+    if (hasFailedPayment(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Ditolak
+        </span>
+      );
+    }
     if (isUnpaid(transaction)) {
       return (
         <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
@@ -1001,8 +1061,8 @@ function HalamanKelolaTransaksi() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Status:</span>
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(pageStatus.selectedTransaction.transaction.status)}`}>
-                        {pageStatus.selectedTransaction.transaction.status}
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(getDisplayTransactionStatus(pageStatus.selectedTransaction))}`}>
+                        {getDisplayTransactionStatus(pageStatus.selectedTransaction)}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -1011,8 +1071,8 @@ function HalamanKelolaTransaksi() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Status Pembayaran:</span>
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusBadgeColor(pageStatus.selectedTransaction.transaction.payment_status)}`}>
-                        {pageStatus.selectedTransaction.transaction.payment_status}
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusBadgeColor(getDisplayPaymentStatus(pageStatus.selectedTransaction))}`}>
+                        {getDisplayPaymentStatus(pageStatus.selectedTransaction)}
                       </span>
                     </div>
                   </div>
@@ -1154,10 +1214,10 @@ function HalamanKelolaTransaksi() {
                       Bukti transfer DP telah diunggah. Konfirmasi pembayaran booking?
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => handleRejectPayment(dp)}>
+                      <Button variant="outline" onClick={() => openActionConfirm('reject', dp)}>
                         <XCircle className="w-4 h-4 mr-1" /> Tolak
                       </Button>
-                      <Button onClick={() => handleConfirmBooking(dp)}>
+                      <Button onClick={() => openActionConfirm('confirm', dp)}>
                         <CheckCircle className="w-4 h-4 mr-1" /> Konfirmasi Booking
                       </Button>
                     </div>
@@ -1188,6 +1248,43 @@ function HalamanKelolaTransaksi() {
         onClose={closeProofModal}
         proofUrl={pageStatus.currentProofUrl}
       />
+
+      {/* Modal Konfirmasi Aksi Pembayaran */}
+      <Dialog open={confirmModalOpen} onOpenChange={setConfirmModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className={confirmActionType === 'reject' ? 'text-red-600' : ''}>
+              {confirmActionType === 'reject' ? 'Tolak Pembayaran' : 'Konfirmasi Pembayaran'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmActionType === 'reject'
+                ? 'Anda akan menolak bukti pembayaran ini.'
+                : 'Anda akan mengkonfirmasi bukti pembayaran ini.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {confirmActionType === 'reject' && (
+            <div className="space-y-2">
+              <Label htmlFor="rejectNote">Alasan penolakan (opsional)</Label>
+              <textarea
+                id="rejectNote"
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                className="w-full border rounded-md p-2 text-sm"
+                rows={3}
+                placeholder="Tulis alasan penolakan (opsional)"
+              />
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-4 justify-end">
+            <Button variant="outline" onClick={() => setConfirmModalOpen(false)}>Batal</Button>
+            <Button onClick={performConfirmAction}>
+              {confirmActionType === 'reject' ? 'Tolak Pembayaran' : 'Konfirmasi'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
