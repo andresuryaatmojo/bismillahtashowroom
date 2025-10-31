@@ -5,18 +5,24 @@ import { supabase } from '../lib/supabase';
 export interface Payment {
   id: string;
   transaction_id: string;
-  payment_type: 'down_payment' | 'installment' | 'full_payment' | 'remaining_payment';
+  payment_type: 'booking_fee' | 'down_payment' | 'installment' | 'full_payment'; // UPDATE: tambah booking_fee
   amount: number;
   payment_method: string;
   reference_code?: string;
   bank_name?: string;
   account_number?: string;
   account_holder?: string;
-  status: 'pending' | 'processing' | 'success' | 'failed' | 'expired' | 'refunded';
+  status: 'pending' | 'uploaded' | 'processing' | 'success' | 'rejected' | 'failed' | 'expired' | 'refunded'; // UPDATE: tambah uploaded & rejected
   proof_of_payment?: string;
   verified_by?: string;
   verified_at?: string;
   rejection_reason?: string;
+  
+  // NEW: Rejection tracking fields
+  rejected_by?: string;
+  rejected_at?: string;
+  rejection_count?: number;
+  
   gateway_name?: string;
   gateway_transaction_id?: string;
   gateway_response?: any;
@@ -28,7 +34,7 @@ export interface Payment {
 
 export interface CreatePaymentInput {
   transaction_id: string;
-  payment_type: 'down_payment' | 'installment' | 'full_payment' | 'remaining_payment';
+  payment_type: 'booking_fee' | 'down_payment' | 'installment' | 'full_payment'; // UPDATE
   amount: number;
   payment_method: string;
   reference_code?: string;
@@ -43,11 +49,14 @@ export interface CreatePaymentInput {
 }
 
 export interface UpdatePaymentInput {
-  status?: 'pending' | 'processing' | 'success' | 'failed' | 'expired' | 'refunded';
+  status?: 'pending' | 'uploaded' | 'processing' | 'success' | 'rejected' | 'failed' | 'expired' | 'refunded'; // UPDATE
   proof_of_payment?: string;
   verified_by?: string;
   verified_at?: string;
   rejection_reason?: string;
+  rejected_by?: string; // NEW
+  rejected_at?: string; // NEW
+  rejection_count?: number; // NEW
   gateway_transaction_id?: string;
   gateway_response?: any;
   notes?: string;
@@ -78,8 +87,8 @@ class PaymentService {
         };
       }
 
-      // Validasi payment_type
-      const validPaymentTypes = ['down_payment', 'installment', 'full_payment', 'remaining_payment'];
+      // Validasi payment_type - UPDATE dengan booking_fee
+      const validPaymentTypes = ['booking_fee', 'down_payment', 'installment', 'full_payment'];
       if (!validPaymentTypes.includes(paymentData.payment_type)) {
         return {
           success: false,
@@ -88,11 +97,15 @@ class PaymentService {
         };
       }
 
+      // Tentukan status awal berdasarkan apakah ada bukti pembayaran
+      const initialStatus = paymentData.proof_of_payment ? 'uploaded' : 'pending';
+
       const { data, error } = await supabase
         .from('payments')
         .insert([{
           ...paymentData,
-          status: 'pending',
+          status: initialStatus,
+          rejection_count: 0, // NEW: initialize rejection count
           payment_date: new Date().toISOString()
         }])
         .select()
@@ -127,9 +140,9 @@ class PaymentService {
    */
   async updatePayment(paymentId: string, updateData: UpdatePaymentInput): Promise<PaymentResponse> {
     try {
-      // Validasi status jika ada
+      // Validasi status jika ada - UPDATE dengan status baru
       if (updateData.status) {
-        const validStatuses = ['pending', 'processing', 'success', 'failed', 'expired', 'refunded'];
+        const validStatuses = ['pending', 'uploaded', 'processing', 'success', 'rejected', 'failed', 'expired', 'refunded'];
         if (!validStatuses.includes(updateData.status)) {
           return {
             success: false,
@@ -314,18 +327,28 @@ class PaymentService {
   }
 
   /**
-   * Memverifikasi payment
+   * Memverifikasi payment (untuk admin)
    */
   async verifyPayment(paymentId: string, verifiedBy: string, isApproved: boolean, rejectionReason?: string): Promise<PaymentResponse> {
     try {
+      // Ambil payment untuk cek rejection_count
+      const { data: existingPayment } = await supabase
+        .from('payments')
+        .select('rejection_count')
+        .eq('id', paymentId)
+        .single();
+
       const updateData: UpdatePaymentInput = {
         verified_by: verifiedBy,
         verified_at: new Date().toISOString(),
-        status: isApproved ? 'success' : 'failed'
+        status: isApproved ? 'success' : 'rejected' // UPDATE: gunakan rejected bukan failed
       };
 
-      if (!isApproved && rejectionReason) {
-        updateData.rejection_reason = rejectionReason;
+      if (!isApproved) {
+        updateData.rejection_reason = rejectionReason || 'Payment rejected by admin';
+        updateData.rejected_by = verifiedBy;
+        updateData.rejected_at = new Date().toISOString();
+        updateData.rejection_count = (existingPayment?.rejection_count || 0) + 1;
       }
 
       return await this.updatePayment(paymentId, updateData);
@@ -346,7 +369,7 @@ class PaymentService {
     try {
       return await this.updatePayment(paymentId, {
         proof_of_payment: proofUrl,
-        status: 'processing'
+        status: 'uploaded' // UPDATE: gunakan uploaded bukan processing
       });
     } catch (error) {
       console.error('Error in uploadProofOfPayment:', error);
@@ -405,7 +428,7 @@ class PaymentService {
   }
 
   /**
-   * Menghapus payment (soft delete dengan status)
+   * Menghapus payment
    */
   async deletePayment(paymentId: string): Promise<PaymentResponse> {
     try {
@@ -432,6 +455,77 @@ class PaymentService {
       };
     } catch (error) {
       console.error('Error in deletePayment:', error);
+      return {
+        success: false,
+        message: 'An unexpected error occurred',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * NEW: Mendapatkan payments yang perlu verifikasi admin
+   */
+  async getPaymentsNeedingVerification(): Promise<PaymentResponse> {
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*')
+        .in('status', ['uploaded', 'processing'])
+        .not('proof_of_payment', 'is', null)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching payments needing verification:', error);
+        return {
+          success: false,
+          message: 'Failed to fetch payments',
+          error: error.message
+        };
+      }
+
+      return {
+        success: true,
+        data: data,
+        message: 'Payments retrieved successfully'
+      };
+    } catch (error) {
+      console.error('Error in getPaymentsNeedingVerification:', error);
+      return {
+        success: false,
+        message: 'An unexpected error occurred',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * NEW: Mendapatkan payments yang ditolak
+   */
+  async getRejectedPayments(): Promise<PaymentResponse> {
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('status', 'rejected')
+        .order('rejected_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching rejected payments:', error);
+        return {
+          success: false,
+          message: 'Failed to fetch rejected payments',
+          error: error.message
+        };
+      }
+
+      return {
+        success: true,
+        data: data,
+        message: 'Rejected payments retrieved successfully'
+      };
+    } catch (error) {
+      console.error('Error in getRejectedPayments:', error);
       return {
         success: false,
         message: 'An unexpected error occurred',

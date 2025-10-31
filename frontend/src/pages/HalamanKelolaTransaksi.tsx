@@ -36,13 +36,20 @@ import { Textarea } from '../components/ui/textarea';
 import { 
   Transaction, 
   TransactionWithPayments, 
+  BookingStatus,
   getPurchaseTransactionsWithPayments,
   getShowroomTransactionsWithPayments,
-  getExternalTransactionsWithPayments
+  getExternalTransactionsWithPayments,
+  markAsPaidFull,
+  markAsPaidCredit,
+  recordHandover,
+  confirmBookingPayment,
+  rejectPayment,
+  cancelTransaction,
+  refundBookingFee
 } from '../services/transactionService';
 import { Payment } from '../services/paymentService';
 import carService from '../services/carService';
-import { confirmBookingPayment, rejectPayment } from '../services/transactionService';
 
 import { MessageSquare } from 'lucide-react';
 import { createChatRoom, sendTextWithCarInfoMessage } from '../services/chatService';
@@ -50,6 +57,7 @@ import { createChatRoom, sendTextWithCarInfoMessage } from '../services/chatServ
 // Interface untuk filter transaksi
 interface TransactionFilter {
   status: string;
+  booking_status: string; // TAMBAHAN
   payment_status: string;
   date_from: string;
   date_to: string;
@@ -87,6 +95,7 @@ function HalamanKelolaTransaksi() {
   // State untuk filter
   const [filter, setFilter] = useState<TransactionFilter>({
     status: 'all',
+    booking_status: 'all', // TAMBAHAN
     payment_status: 'all',
     date_from: '',
     date_to: '',
@@ -106,11 +115,21 @@ function HalamanKelolaTransaksi() {
     currentProofUrl: null,
   });
   
-  // State: konfirmasi 2 langkah untuk aksi pembayaran
+  // State untuk konfirmasi 2 langkah untuk aksi pembayaran
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [confirmActionType, setConfirmActionType] = useState<'confirm' | 'reject' | null>(null);
   const [selectedPaymentForAction, setSelectedPaymentForAction] = useState<Payment | null>(null);
   const [rejectNote, setRejectNote] = useState('');
+  
+  // State untuk modal pembatalan transaksi
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
+  
+  // State untuk modal refund booking fee
+  const [refundModalOpen, setRefundModalOpen] = useState(false);
+  const [refundReason, setRefundReason] = useState('');
+  const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
   
   // State untuk statistik
   const [stats, setStats] = useState({
@@ -121,21 +140,42 @@ function HalamanKelolaTransaksi() {
     totalAmount: 0,
   });
 
+  // Tambahkan state baru untuk modal pembayaran final dan handover 
+  const [showPaymentModal, setShowPaymentModal] = useState(false); 
+  const [paymentModalType, setPaymentModalType] = useState<'full' | 'credit' | null>(null); 
+  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null); 
+  const [paymentNotes, setPaymentNotes] = useState(''); 
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false); 
+ 
+  const [showHandoverModal, setShowHandoverModal] = useState(false); 
+  const [handoverPhotoFile, setHandoverPhotoFile] = useState<File | null>(null); 
+  const [handoverNotes, setHandoverNotes] = useState(''); 
+  const [isSubmittingHandover, setIsSubmittingHandover] = useState(false);
+  
+  // Inisialisasi kontroler transaksi
+  // Tidak lagi menggunakan KontrollerTransaksi untuk cancel/refund
+
   // Fungsi untuk memuat data transaksi berdasarkan jenis penjual
   const loadTransactions = async (): Promise<TransactionWithPayments[] | undefined> => {
     setPageStatus(prev => ({ ...prev, isLoading: true, error: null }));
     
     try {
       let result: { success: boolean; data?: TransactionWithPayments[]; total?: number; error?: string };
-      console.log('Loading transactions dengan filter:', filter.seller_type);
+      
+      // Build filter options
+      const filterOpts = {
+        status: filter.status !== 'all' ? [filter.status as Transaction['status']] : undefined,
+        booking_status: filter.booking_status !== 'all' ? [filter.booking_status as BookingStatus] : undefined,
+        payment_status: filter.payment_status !== 'all' ? [filter.payment_status as Transaction['payment_status']] : undefined,
+        search: filter.search || undefined
+      };
       
       if (filter.seller_type === 'showroom') {
-        result = await getShowroomTransactionsWithPayments(1, 100);
+        result = await getShowroomTransactionsWithPayments(1, 100, filterOpts);
       } else if (filter.seller_type === 'external') {
-        result = await getExternalTransactionsWithPayments(1, 100);
+        result = await getExternalTransactionsWithPayments(1, 100, filterOpts);
       } else {
-        // 'all' -> ambil semua transaksi pembelian
-        result = await getPurchaseTransactionsWithPayments(1, 100);
+        result = await getPurchaseTransactionsWithPayments(1, 100, filterOpts);
       }
       
       if (result.success && result.data) {
@@ -144,10 +184,13 @@ function HalamanKelolaTransaksi() {
         
         // Hitung statistik
         const total = result.data.length;
-        const pending = result.data.filter((t: TransactionWithPayments) => t.transaction.status === 'pending').length;
-        const completed = result.data.filter((t: TransactionWithPayments) => t.transaction.status === 'completed').length;
-        const cancelled = result.data.filter((t: TransactionWithPayments) => t.transaction.status === 'cancelled').length;
-        const totalAmount = result.data.reduce((sum: number, t: TransactionWithPayments) => sum + Number(t.transaction.total_amount), 0);
+        const pending = result.data.filter(t => t.transaction.booking_status === 'booking_pending').length;
+        const completed = result.data.filter(t => t.transaction.status === 'completed').length;
+        const cancelled = result.data.filter(t => 
+          t.transaction.status === 'cancelled' || 
+          t.transaction.booking_status === 'booking_cancelled'
+        ).length;
+        const totalAmount = result.data.reduce((sum, t) => sum + Number(t.transaction.total_amount), 0);
         
         setStats({
           total,
@@ -156,7 +199,7 @@ function HalamanKelolaTransaksi() {
           cancelled,
           totalAmount,
         });
-        return result.data; // kembalikan data terbaru
+        return result.data;
       } else {
         setPageStatus(prev => ({ ...prev, error: result.error || 'Gagal memuat data transaksi' }));
         return undefined;
@@ -176,6 +219,11 @@ function HalamanKelolaTransaksi() {
     // Filter berdasarkan status
     if (filter.status && filter.status !== 'all') {
       filtered = filtered.filter(t => t.transaction.status === filter.status);
+    }
+    
+    // Filter berdasarkan booking status - TAMBAHAN
+    if (filter.booking_status && filter.booking_status !== 'all') {
+      filtered = filtered.filter(t => t.transaction.booking_status === filter.booking_status);
     }
     
     // Filter berdasarkan status pembayaran
@@ -217,6 +265,7 @@ function HalamanKelolaTransaksi() {
   const resetFilter = () => {
     setFilter({
       status: 'all',
+      booking_status: 'all',
       payment_status: 'all',
       date_from: '',
       date_to: '',
@@ -275,6 +324,148 @@ function HalamanKelolaTransaksi() {
       showProofModal: true,
       currentProofUrl: publicUrl,
     }));
+  };
+    
+  // Fungsi untuk membuka modal pembayaran final 
+  const openPaymentModal = (type: 'full' | 'credit') => { 
+    setPaymentModalType(type); 
+    setPaymentProofFile(null); 
+    setPaymentNotes(''); 
+    setShowPaymentModal(true); 
+  }; 
+ 
+  // Fungsi untuk submit pembayaran final 
+  const handleSubmitFinalPayment = async () => { 
+    if (!pageStatus.selectedTransaction || !user?.id || !paymentModalType) return; 
+    
+    try { 
+      setIsSubmittingPayment(true); 
+      
+      let proofUrl: string | undefined; 
+      
+      // Upload bukti pembayaran jika ada 
+      if (paymentProofFile) { 
+        const fileExt = paymentProofFile.name.split('.').pop(); 
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`; 
+        
+        const { error: uploadError } = await supabase.storage 
+          .from('payment-proofs') 
+          .upload(fileName, paymentProofFile); 
+          
+        if (uploadError) throw uploadError; 
+        
+        const { data } = supabase.storage 
+          .from('payment-proofs') 
+          .getPublicUrl(fileName); 
+          
+        proofUrl = data.publicUrl; 
+      } 
+      
+      // Call service function 
+      const result = paymentModalType === 'full' 
+        ? await markAsPaidFull(pageStatus.selectedTransaction.transaction.id, user.id, { 
+            payment_proof: proofUrl, 
+            payment_notes: paymentNotes 
+          }) 
+        : await markAsPaidCredit(pageStatus.selectedTransaction.transaction.id, user.id, { 
+            payment_proof: proofUrl, 
+            payment_notes: paymentNotes 
+          }); 
+      
+      if (!result.success) { 
+        alert(result.error || 'Gagal mencatat pembayaran'); 
+        return; 
+      } 
+      
+      // Reload data 
+      const updatedList = await loadTransactions(); 
+      const source = updatedList ?? transactions; 
+      const updated = source.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id); 
+      
+      setPageStatus(prev => ({ 
+        ...prev, 
+        selectedTransaction: updated || prev.selectedTransaction, 
+      })); 
+      
+      setShowPaymentModal(false); 
+      alert(result.message || 'Pembayaran berhasil dicatat'); 
+      
+    } catch (e) { 
+      console.error('Error submit payment:', e); 
+      alert('Terjadi kesalahan saat mencatat pembayaran'); 
+    } finally { 
+      setIsSubmittingPayment(false); 
+    } 
+  };
+
+  // Fungsi untuk membuka modal handover 
+  const openHandoverModal = () => { 
+    setHandoverPhotoFile(null); 
+    setHandoverNotes(''); 
+    setShowHandoverModal(true); 
+  }; 
+  
+  // Fungsi untuk submit handover 
+  const handleSubmitHandover = async () => { 
+    if (!pageStatus.selectedTransaction || !user?.id) return; 
+    
+    try { 
+      setIsSubmittingHandover(true); 
+      
+      let photoUrl: string | undefined; 
+      
+      // Upload foto handover jika ada 
+      if (handoverPhotoFile) { 
+        const fileExt = handoverPhotoFile.name.split('.').pop(); 
+        const fileName = `handover-${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`; 
+        
+        const { error: uploadError } = await supabase.storage 
+          .from('payment-proofs') // atau buat bucket khusus 'handover-photos' 
+          .upload(fileName, handoverPhotoFile); 
+          
+        if (uploadError) throw uploadError; 
+        
+        const { data } = supabase.storage 
+          .from('payment-proofs') 
+          .getPublicUrl(fileName); 
+          
+        photoUrl = data.publicUrl; 
+      } 
+      
+      // Call service function 
+      const result = await recordHandover( 
+        pageStatus.selectedTransaction.transaction.id, 
+        user.id, 
+        { 
+          handover_photo: photoUrl, 
+          handover_notes: handoverNotes 
+        } 
+      ); 
+      
+      if (!result.success) { 
+        alert(result.error || 'Gagal mencatat serah terima'); 
+        return; 
+      } 
+      
+      // Reload data 
+      const updatedList = await loadTransactions(); 
+      const source = updatedList ?? transactions; 
+      const updated = source.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id); 
+      
+      setPageStatus(prev => ({ 
+        ...prev, 
+        selectedTransaction: updated || prev.selectedTransaction, 
+      })); 
+      
+      setShowHandoverModal(false); 
+      alert(result.message || 'Serah terima berhasil dicatat'); 
+      
+    } catch (e) { 
+      console.error('Error submit handover:', e); 
+      alert('Terjadi kesalahan saat mencatat serah terima'); 
+    } finally { 
+      setIsSubmittingHandover(false); 
+    } 
   };
 
   // Fungsi untuk menutup modal preview gambar
@@ -471,6 +662,240 @@ function HalamanKelolaTransaksi() {
     }
   };
 
+  // Fungsi untuk mendapatkan warna badge berdasarkan booking status 
+  const getBookingStatusBadgeColor = (status?: BookingStatus) => { 
+    switch (status) { 
+      case 'booking_pending': 
+        return 'bg-yellow-100 text-yellow-800'; 
+      case 'booking_paid': 
+        return 'bg-green-100 text-green-800'; 
+      case 'booking_rejected': 
+        return 'bg-red-100 text-red-800'; 
+      case 'booking_expired': 
+        return 'bg-gray-100 text-gray-800'; 
+      case 'booking_cancelled': 
+        return 'bg-red-100 text-red-800'; 
+      case 'booking_refunded': 
+        return 'bg-purple-100 text-purple-800'; 
+      default: 
+        return 'bg-gray-100 text-gray-800'; 
+    } 
+  }; 
+  
+  // Tambahan: cek payment booking_fee yang sudah sukses
+  const hasBookingFeeSuccess = (transaction: TransactionWithPayments): boolean => {
+    return Array.isArray(transaction.payments) && transaction.payments.some(
+      (p) => p.payment_type === 'booking_fee' && p.status === 'success'
+    );
+  };
+
+  // Update fungsi render status badge 
+  const renderDetailedStatusBadge = (transaction: TransactionWithPayments) => { 
+    const bookingStatus = transaction.transaction.booking_status; 
+    const txStatus = transaction.transaction.status; 
+
+    // Jika ada payment gagal, tampilkan Ditolak
+    if (hasFailedPayment(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Ditolak
+        </span>
+      );
+    }
+
+    // Jika transaksi sudah completed dan final payment sudah dilakukan, tampilkan Completed
+    if (transaction.transaction.status === 'completed' && transaction.transaction.final_payment_completed_at) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+          Completed
+        </span>
+      );
+    }
+    
+    // Jika booking fee sudah sukses, tampilkan Paid (hijau)
+    if (hasBookingFeeSuccess(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+          Paid
+        </span>
+      );
+    }
+
+    // Jika ada bukti pembayaran booking namun status payment masih pending -> Menunggu Verifikasi
+    if (needsBookingVerification(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+          Menunggu Verifikasi
+        </span>
+      );
+    }
+
+    // Jika belum ada pembayaran booking sama sekali -> Belum Bayar
+    if (isUnpaid(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Belum Bayar
+        </span>
+      );
+    }
+    
+    // Prioritas: tampilkan booking status jika belum paid (fallback ke booking_status)
+    if (bookingStatus && bookingStatus !== 'booking_paid') { 
+      return ( 
+        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getBookingStatusBadgeColor(bookingStatus)}`}> 
+          {bookingStatus.replace('booking_', '').replace('_', ' ')} 
+        </span> 
+      ); 
+    } 
+    
+    // Jika booking sudah paid, tampilkan status transaksi 
+    return ( 
+      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(txStatus)} capitalize`}> 
+        {txStatus} 
+      </span> 
+    ); 
+  }; 
+  
+  // Helper: cek apakah perlu verifikasi booking 
+  const needsBookingVerification = (transaction: TransactionWithPayments): boolean => { 
+    return transaction.transaction.booking_status === 'booking_pending' && 
+           transaction.payments.some(p => 
+             p.payment_type === 'booking_fee' && 
+             p.status === 'pending' && 
+             !!p.proof_of_payment 
+           ); 
+  }; 
+  
+  // Helper: cek apakah booking sudah paid dan menunggu pembayaran final 
+  const waitingFinalPayment = (transaction: TransactionWithPayments): boolean => { 
+    return transaction.transaction.booking_status === 'booking_paid' && 
+           transaction.transaction.status === 'confirmed' && 
+           !transaction.transaction.final_payment_completed_at; 
+  }; 
+  
+  // Helper: cek apakah sudah lunas dan menunggu handover 
+  const waitingHandover = (transaction: TransactionWithPayments): boolean => { 
+    return transaction.transaction.status === 'completed' && 
+           !!transaction.transaction.final_payment_completed_at && 
+           !transaction.transaction.handover_at; 
+  };
+  
+  // Helper: cek apakah transaksi bisa dibatalkan
+  const canCancelTransaction = (transaction: TransactionWithPayments): boolean => {
+    const txStatus = transaction.transaction.status;
+    const finalDone = !!transaction.transaction.final_payment_completed_at;
+    return txStatus !== 'completed' && txStatus !== 'cancelled' && txStatus !== 'refunded' && !finalDone;
+  };
+  
+  // Helper: cek apakah booking fee bisa direfund
+  const canRefundBooking = (transaction: TransactionWithPayments): boolean => {
+    const bookingStatus = transaction.transaction.booking_status;
+    const txStatus = transaction.transaction.status;
+    const refundedAlready = bookingStatus === 'booking_refunded' || txStatus === 'refunded';
+    return hasBookingFeeSuccess(transaction) && !refundedAlready && (txStatus === 'cancelled' || bookingStatus === 'booking_cancelled' || txStatus === 'pending' || txStatus === 'confirmed');
+  };
+
+  // Buka modal pembatalan
+  const openCancelModal = () => {
+    if (!pageStatus.selectedTransaction) return;
+    setCancelReason('');
+    setCancelModalOpen(true);
+  };
+
+  // Buka modal refund
+  const openRefundModal = () => {
+    if (!pageStatus.selectedTransaction) return;
+    setRefundReason('');
+    setRefundModalOpen(true);
+  };
+
+  // Submit pembatalan transaksi
+  const performCancelTransaction = async () => {
+    if (!pageStatus.selectedTransaction || !user?.id) return;
+    if (!cancelReason.trim()) {
+      alert('Mohon isi alasan pembatalan');
+      return;
+    }
+    try {
+      setIsSubmittingCancel(true);
+      setPageStatus(prev => ({ ...prev, isLoading: true }));
+
+      // Langsung panggil API dari service, tidak melalui kontroler
+      const result = await cancelTransaction(
+        pageStatus.selectedTransaction.transaction.id,
+        user.id,
+        cancelReason.trim()
+      );
+
+      if (!result.success) {
+        alert(result.error || 'Gagal membatalkan transaksi');
+        return;
+      }
+
+      const updatedList = await loadTransactions();
+      const source = updatedList ?? transactions;
+      const updated = source.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
+
+      setPageStatus(prev => ({ ...prev, selectedTransaction: updated || prev.selectedTransaction }));
+      setCancelModalOpen(false);
+      alert('Transaksi berhasil dibatalkan');
+    } catch (error) {
+      console.error('Error cancelling transaction:', error);
+      alert('Terjadi kesalahan saat membatalkan transaksi');
+    } finally {
+      setIsSubmittingCancel(false);
+      setPageStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  // Submit refund booking fee
+  const performRefundBooking = async () => {
+    if (!pageStatus.selectedTransaction || !user?.id) return;
+
+    const bookingFee = Number(pageStatus.selectedTransaction.transaction.booking_fee || 0);
+
+    if (!Number.isFinite(bookingFee) || bookingFee <= 0) {
+      alert('Booking fee tidak valid');
+      return;
+    }
+    if (!refundReason.trim()) {
+      alert('Mohon isi alasan refund');
+      return;
+    }
+
+    try {
+      setIsSubmittingRefund(true);
+      setPageStatus(prev => ({ ...prev, isLoading: true }));
+
+      // Langsung panggil API dari service, tidak melalui kontroler
+      const res = await refundBookingFee(
+        pageStatus.selectedTransaction.transaction.id,
+        user.id,
+        bookingFee, // Selalu refund 100% dari booking fee
+        refundReason.trim()
+      );
+
+      if (!res.success) {
+        alert(res.error || 'Gagal melakukan refund booking');
+        return;
+      }
+
+      const updatedList = await loadTransactions();
+      const source = updatedList ?? transactions;
+      const updated = source.find(t => t.transaction.id === pageStatus.selectedTransaction!.transaction.id);
+
+      setPageStatus(prev => ({ ...prev, selectedTransaction: updated || prev.selectedTransaction }));
+      setRefundModalOpen(false);
+      alert(res.message || 'Refund booking fee berhasil diproses');
+    } catch (error) {
+      console.error('Error processing refund:', error);
+      alert('Terjadi kesalahan saat memproses refund');
+    } finally {
+      setIsSubmittingRefund(false);
+      setPageStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
   // Fungsi untuk mendapatkan warna badge berdasarkan status pembayaran
   const getPaymentStatusBadgeColor = (status?: string) => {
     switch (status) {
@@ -526,38 +951,16 @@ function HalamanKelolaTransaksi() {
   const getDisplayPaymentStatus = (t: TransactionWithPayments): Transaction['payment_status'] => {
     const failed = Array.isArray(t.payments) && t.payments.some(p => p.status === 'failed');
     if (failed) return 'failed';
+    
+    // Jika status transaksi 'completed' dan final_payment_completed_at ada, maka status pembayaran adalah 'paid'
+    if (t.transaction.status === 'completed' && t.transaction.final_payment_completed_at) {
+      return 'paid';
+    }
+    
     return (t.transaction.payment_status || 'pending') as Transaction['payment_status'];
   };
 
-  // Fungsi untuk render status badge yang lebih detail
-  const renderDetailedStatusBadge = (transaction: TransactionWithPayments) => {
-    if (hasFailedPayment(transaction)) {
-      return (
-        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-          Ditolak
-        </span>
-      );
-    }
-    if (isUnpaid(transaction)) {
-      return (
-        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-          Belum Bayar
-        </span>
-      );
-    }
-    if (isWaitingAdminConfirm(transaction)) {
-      return (
-        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-          Pending Konfirmasi
-        </span>
-      );
-    }
-    return (
-      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(transaction.transaction.status)} capitalize`}>
-        {transaction.transaction.status}
-      </span>
-    );
-  };
+
 
   // Effect untuk memuat data transaksi saat komponen dimount dan ketika filter seller_type berubah
   useEffect(() => {
@@ -752,6 +1155,24 @@ function HalamanKelolaTransaksi() {
                   </SelectContent>
                 </Select>
                 
+                <Select 
+                  value={filter.booking_status} 
+                  onValueChange={(value) => setFilter({ ...filter, booking_status: value })} 
+                > 
+                  <SelectTrigger className="w-[180px]"> 
+                    <SelectValue placeholder="Status Booking" /> 
+                  </SelectTrigger> 
+                  <SelectContent> 
+                    <SelectItem value="all">Semua Status Booking</SelectItem> 
+                    <SelectItem value="booking_pending">Pending</SelectItem> 
+                    <SelectItem value="booking_paid">Paid</SelectItem> 
+                    <SelectItem value="booking_rejected">Rejected</SelectItem> 
+                    <SelectItem value="booking_expired">Expired</SelectItem> 
+                    <SelectItem value="booking_cancelled">Cancelled</SelectItem> 
+                    <SelectItem value="booking_refunded">Refunded</SelectItem> 
+                  </SelectContent> 
+                </Select>
+                
                 <Select
                   value={filter.payment_status}
                   onValueChange={(value) => setFilter({ ...filter, payment_status: value })}
@@ -880,9 +1301,9 @@ function HalamanKelolaTransaksi() {
                     'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="100%" height="100%" fill="%23e5e7eb"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%236b7280" font-size="16" font-family="sans-serif">Mobil</text></svg>';
                   
                   const bookingFee =
-                    typeof tx.down_payment === 'number' && tx.down_payment > 0
-                      ? tx.down_payment
-                      : Math.min(Number(tx.total_amount) || 0, Number(tx.total_amount) || 0);
+                    typeof tx.booking_fee === 'number' && tx.booking_fee > 0
+                      ? tx.booking_fee
+                      : Number(tx.total_amount || 0);
               
                   return (
                     <div
@@ -1022,7 +1443,7 @@ function HalamanKelolaTransaksi() {
 
       {/* Detail Modal */}
       <Dialog open={pageStatus.showDetailModal} onOpenChange={closeDetailModal}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Detail Transaksi</DialogTitle>
           </DialogHeader>
@@ -1201,23 +1622,156 @@ function HalamanKelolaTransaksi() {
                 )}
               </div>
 
+              <Separator /> 
+ 
+              {/* Section Booking Status */} 
+              <div> 
+                <h3 className="text-lg font-semibold mb-2">Status Booking</h3> 
+                <div className="grid grid-cols-2 gap-4"> 
+                  <div className="space-y-2"> 
+                    <div className="flex justify-between"> 
+                      <span className="text-gray-500">Booking Fee:</span> 
+                      <span className="font-medium"> 
+                        {formatCurrency(Number(pageStatus.selectedTransaction.transaction.booking_fee || 0))} 
+                      </span> 
+                    </div> 
+                    <div className="flex justify-between"> 
+                      <span className="text-gray-500">Status Booking:</span> 
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${ 
+                        getBookingStatusBadgeColor(pageStatus.selectedTransaction.transaction.booking_status) 
+                      }`}> 
+                        {pageStatus.selectedTransaction.transaction.booking_status?.replace('booking_', '')} 
+                      </span> 
+                    </div> 
+                    {pageStatus.selectedTransaction.transaction.booking_expires_at && ( 
+                      <div className="flex justify-between"> 
+                        <span className="text-gray-500">Booking Expires:</span> 
+                        <span className="text-sm"> 
+                          {formatDate(pageStatus.selectedTransaction.transaction.booking_expires_at)} 
+                        </span> 
+                      </div> 
+                    )} 
+                  </div> 
+                  
+                  {pageStatus.selectedTransaction.transaction.booking_rejected_at && ( 
+                    <div className="space-y-2"> 
+                      <div className="flex justify-between"> 
+                        <span className="text-gray-500">Ditolak pada:</span> 
+                        <span className="text-sm"> 
+                          {formatDate(pageStatus.selectedTransaction.transaction.booking_rejected_at)} 
+                        </span> 
+                      </div> 
+                      {pageStatus.selectedTransaction.transaction.booking_rejection_reason && ( 
+                        <div> 
+                          <span className="text-gray-500">Alasan:</span> 
+                          <p className="text-sm text-red-600 mt-1"> 
+                            {pageStatus.selectedTransaction.transaction.booking_rejection_reason} 
+                          </p> 
+                        </div> 
+                      )} 
+                    </div> 
+                  )} 
+                </div> 
+              </div> 
+              
+              <Separator /> 
+              
+              {/* Section Final Payment */} 
+              <div> 
+                <h3 className="text-lg font-semibold mb-2">Pembayaran Akhir</h3> 
+                <div className="space-y-2"> 
+                  <div className="flex justify-between"> 
+                    <span className="text-gray-500">Metode:</span> 
+                    <span className="font-medium"> 
+                      {pageStatus.selectedTransaction.transaction.final_payment_method === 'full' ? 'Pembayaran Penuh' : 
+                      pageStatus.selectedTransaction.transaction.final_payment_method === 'credit' ? 'Kredit' : '-'} 
+                    </span> 
+                  </div> 
+                  
+                  {pageStatus.selectedTransaction.transaction.final_payment_completed_at && ( 
+                    <div className="flex justify-between"> 
+                      <span className="text-gray-500">Lunas pada:</span> 
+                      <span>{formatDate(pageStatus.selectedTransaction.transaction.final_payment_completed_at)}</span> 
+                    </div> 
+                  )} 
+                  
+                  {pageStatus.selectedTransaction.transaction.final_payment_notes && ( 
+                    <div> 
+                      <span className="text-gray-500">Catatan:</span> 
+                      <p className="text-sm mt-1">{pageStatus.selectedTransaction.transaction.final_payment_notes}</p> 
+                    </div> 
+                  )} 
+                  
+                  {pageStatus.selectedTransaction.transaction.final_payment_proof && ( 
+                    <div> 
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleOpenProof(pageStatus.selectedTransaction!.transaction.final_payment_proof!)} 
+                      > 
+                        <Eye className="w-4 h-4 mr-2" /> 
+                        Lihat Bukti Pembayaran Akhir 
+                      </Button> 
+                    </div> 
+                  )} 
+                </div> 
+              </div> 
+              
+              <Separator /> 
+              
+              {/* Section Handover */} 
+              {pageStatus.selectedTransaction.transaction.handover_at && ( 
+                <> 
+                  <div> 
+                    <h3 className="text-lg font-semibold mb-2">Serah Terima Mobil</h3> 
+                    <div className="space-y-2"> 
+                      <div className="flex justify-between"> 
+                        <span className="text-gray-500">Diserahkan pada:</span> 
+                        <span>{formatDate(pageStatus.selectedTransaction.transaction.handover_at)}</span> 
+                      </div> 
+                      
+                      {pageStatus.selectedTransaction.transaction.handover_notes && ( 
+                        <div> 
+                          <span className="text-gray-500">Catatan:</span> 
+                          <p className="text-sm mt-1">{pageStatus.selectedTransaction.transaction.handover_notes}</p> 
+                        </div> 
+                      )} 
+                      
+                      {pageStatus.selectedTransaction.transaction.handover_photo && ( 
+                        <div> 
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => handleOpenProof(pageStatus.selectedTransaction!.transaction.handover_photo!)} 
+                          > 
+                            <Eye className="w-4 h-4 mr-2" /> 
+                            Lihat Foto Handover 
+                          </Button> 
+                        </div> 
+                      )} 
+                    </div> 
+                  </div> 
+                  <Separator /> 
+                </> 
+              )}
+
               {/* Aksi Verifikasi Admin */}
               {(() => {
-                const dp = pageStatus.selectedTransaction.payments.find(
-                  p => p.payment_type === 'down_payment' &&
-                       (p.status === 'pending' || p.status === 'processing') &&
+                const bookingPayment = pageStatus.selectedTransaction.payments.find(
+                  p => p.payment_type === 'booking_fee' &&
+                       (p.status === 'uploaded' || p.status === 'pending' || p.status === 'processing') &&
                        !!p.proof_of_payment
                 );
-                return dp ? (
+                return bookingPayment ? (
                   <div className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-md p-3">
                     <div className="text-sm text-yellow-800">
-                      Bukti transfer DP telah diunggah. Konfirmasi pembayaran booking?
+                      Bukti pembayaran booking fee telah diunggah. Konfirmasi pembayaran booking?
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => openActionConfirm('reject', dp)}>
+                      <Button variant="outline" onClick={() => openActionConfirm('reject', bookingPayment)}>
                         <XCircle className="w-4 h-4 mr-1" /> Tolak
                       </Button>
-                      <Button onClick={() => openActionConfirm('confirm', dp)}>
+                      <Button onClick={() => openActionConfirm('confirm', bookingPayment)}>
                         <CheckCircle className="w-4 h-4 mr-1" /> Konfirmasi Booking
                       </Button>
                     </div>
@@ -1225,17 +1779,66 @@ function HalamanKelolaTransaksi() {
                 ) : null;
               })()}
 
-              <div className="flex justify-end space-x-3 pt-4">
-                <Button variant="outline" onClick={() => pageStatus.selectedTransaction && handleChatBuyer(pageStatus.selectedTransaction.transaction)}>
-                  <MessageSquare className="w-4 h-4 mr-2" />
-                  Chat Pembeli
-                </Button>
-                <Button variant="outline" onClick={closeDetailModal}>
-                  Tutup
-                </Button>
-                <Button>
-                  Cetak Invoice
-                </Button>
+              {/* Action buttons berdasarkan status */} 
+              <div className="flex flex-wrap justify-end gap-2 pt-4"> 
+                <Button variant="outline" size="sm" onClick={() => pageStatus.selectedTransaction && handleChatBuyer(pageStatus.selectedTransaction.transaction)}> 
+                  <MessageSquare className="w-4 h-4 mr-2" /> 
+                  Chat Pembeli 
+                </Button> 
+                
+                {/* Tombol untuk batalkan transaksi */}
+                {pageStatus.selectedTransaction && canCancelTransaction(pageStatus.selectedTransaction) && (
+                  <Button 
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 border-red-600 hover:bg-red-50"
+                    onClick={openCancelModal}
+                  >
+                    <XCircle className="w-4 h-4 mr-2" />
+                    Batalkan Transaksi
+                  </Button>
+                )}
+                
+                {/* Tombol untuk refund booking fee */}
+                {pageStatus.selectedTransaction && canRefundBooking(pageStatus.selectedTransaction) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={openRefundModal}
+                  >
+                    <DollarSign className="w-4 h-4 mr-2" />
+                    Refund Booking Fee
+                  </Button>
+                )}
+                
+                {/* Tombol untuk catat pembayaran final - tampil jika booking paid tapi belum final payment */} 
+                {waitingFinalPayment(pageStatus.selectedTransaction) && ( 
+                  <> 
+                    <Button variant="default" size="sm" onClick={() => openPaymentModal('full')}> 
+                      <DollarSign className="w-4 h-4 mr-2" /> 
+                      Catat Pembayaran Lunas 
+                    </Button> 
+                    <Button variant="outline" size="sm" onClick={() => openPaymentModal('credit')}> 
+                      <DollarSign className="w-4 h-4 mr-2" /> 
+                      Catat Pembayaran Kredit 
+                    </Button> 
+                  </> 
+                )} 
+                
+                {/* Tombol untuk handover - tampil jika sudah lunas tapi belum handover */} 
+                {waitingHandover(pageStatus.selectedTransaction) && ( 
+                  <Button variant="default" size="sm" onClick={openHandoverModal}> 
+                    <Car className="w-4 h-4 mr-2" /> 
+                    Catat Serah Terima 
+                  </Button> 
+                )} 
+                
+                <Button variant="outline" size="sm" onClick={closeDetailModal}> 
+                  Tutup 
+                </Button> 
+                <Button size="sm"> 
+                  Cetak Invoice 
+                </Button> 
               </div>
             </div>
           )}
@@ -1283,6 +1886,185 @@ function HalamanKelolaTransaksi() {
               {confirmActionType === 'reject' ? 'Tolak Pembayaran' : 'Konfirmasi'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Modal */}
+      <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {paymentModalType === 'full' ? 'Catat Pembayaran Lunas' : 'Catat Pembayaran Kredit'}
+            </DialogTitle>
+            <DialogDescription>
+              Catat pembayaran akhir untuk transaksi ini
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="paymentProof">Bukti Pembayaran</Label>
+              <Input
+                id="paymentProof"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setPaymentProofFile(e.target.files?.[0] || null)}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="paymentNotes">Catatan (opsional)</Label>
+              <Textarea
+                id="paymentNotes"
+                value={paymentNotes}
+                onChange={(e) => setPaymentNotes(e.target.value)}
+                placeholder="Tambahkan catatan pembayaran..."
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-4 justify-end">
+            <Button variant="outline" onClick={() => setShowPaymentModal(false)}>
+              Batal
+            </Button>
+            <Button onClick={handleSubmitFinalPayment} disabled={isSubmittingPayment}>
+              {isSubmittingPayment ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Menyimpan...
+                </>
+              ) : (
+                'Simpan'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Handover Modal */}
+      <Dialog open={showHandoverModal} onOpenChange={setShowHandoverModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Catat Serah Terima Mobil</DialogTitle>
+            <DialogDescription>
+              Catat serah terima mobil kepada pembeli
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="handoverPhoto">Foto Serah Terima</Label>
+              <Input
+                id="handoverPhoto"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setHandoverPhotoFile(e.target.files?.[0] || null)}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="handoverNotes">Catatan (opsional)</Label>
+              <Textarea
+                id="handoverNotes"
+                value={handoverNotes}
+                onChange={(e) => setHandoverNotes(e.target.value)}
+                placeholder="Tambahkan catatan serah terima..."
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-4 justify-end">
+            <Button variant="outline" onClick={() => setShowHandoverModal(false)}>
+              Batal
+            </Button>
+            <Button onClick={handleSubmitHandover} disabled={isSubmittingHandover}>
+              {isSubmittingHandover ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Menyimpan...
+                </>
+              ) : (
+                'Simpan'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Cancel Transaction Modal */}
+      <Dialog open={cancelModalOpen} onOpenChange={setCancelModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Batalkan Transaksi</DialogTitle>
+            <DialogDescription>
+              Isi alasan pembatalan untuk transaksi ini.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="cancelReason">Alasan Pembatalan</Label>
+              <Textarea
+                id="cancelReason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Contoh: Pembeli batal karena kurang cocok"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setCancelModalOpen(false)} disabled={isSubmittingCancel}>Batal</Button>
+            <Button onClick={performCancelTransaction} disabled={isSubmittingCancel || !cancelReason.trim()}>
+              {isSubmittingCancel ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Konfirmasi Pembatalan
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Refund Booking Fee Modal */}
+      <Dialog open={refundModalOpen} onOpenChange={setRefundModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Refund Booking Fee</DialogTitle>
+            <DialogDescription>
+              Refund 100% booking fee sesuai kebijakan.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="refundAmount">Nominal Refund (100%)</Label>
+              <Input
+                id="refundAmount"
+                type="text"
+                value={formatCurrency(Number(pageStatus.selectedTransaction?.transaction.booking_fee || 0))}
+                readOnly
+                disabled
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Refund selalu 100% dari booking fee sesuai kebijakan.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="refundReason">Alasan Refund</Label>
+              <Textarea
+                id="refundReason"
+                value={refundReason}
+                onChange={(e) => setRefundReason(e.target.value)}
+                placeholder="Contoh: Pembeli batal, refund sesuai kebijakan booking"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setRefundModalOpen(false)} disabled={isSubmittingRefund}>Batal</Button>
+            <Button onClick={performRefundBooking} disabled={isSubmittingRefund || !refundReason.trim()}>
+              {isSubmittingRefund ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Proses Refund
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
