@@ -53,6 +53,7 @@ import LoginForm from './components/LoginForm';
 import NotFound from './pages/NotFound';
 import './App.css';
 import HalamanKelolaTransaksi from './pages/HalamanKelolaTransaksi';
+import HalamanKelolaTransaksiUser from './pages/HalamanKelolaTransaksiUser';
 
 // Komponen: AppContent
 const AppContent: React.FC = () => {
@@ -83,9 +84,10 @@ const AppContent: React.FC = () => {
   const isAuthPage = authPages.includes(location.pathname);
   
   // Check if current path is guest page or artikel detail page
-  const isGuestPage = guestPages.includes(location.pathname) || 
-                      location.pathname.startsWith('/artikel/') ||
-                      location.pathname.startsWith('/mobil/');
+  const isGuestPage =
+    guestPages.includes(location.pathname) ||
+    location.pathname.startsWith('/artikel/') ||
+    location.pathname.startsWith('/mobil/');
   
   const isAuthenticatedPage = !isAuthPage && !isGuestPage;
   const isAdminPage = location.pathname.startsWith('/admin');
@@ -277,6 +279,15 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          {/* Seller transactions */}
+          <Route
+            path="/seller/transaksi"
+            element={
+              <ProtectedRoute requiredPermission="create_listings">
+                <HalamanKelolaTransaksiUser />
+              </ProtectedRoute>
+            }
+          />
           
           {/* PROTECTED ADMIN ROUTES */}
           <Route
@@ -404,9 +415,9 @@ export default App;
 
 // Wrapper component untuk halaman pembayaran
 const HalamanPembayaranRoute = () => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const state = (location.state as any) || {};
+    const paymentLocation = useLocation();
+    const navigate = useNavigate();
+    const state = (paymentLocation.state as any) || {};
   const amount = state?.amount ?? state?.bookingFee ?? 0;
   const referenceId = state?.referenceId;
   

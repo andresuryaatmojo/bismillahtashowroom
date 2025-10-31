@@ -959,6 +959,12 @@ const HalamanKelolaIklan: React.FC = () => {
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Beranda
               </Button>
+              <Button 
+                variant="secondary"
+                onClick={() => navigate('/seller/transaksi')}
+              >
+                Transaksi
+              </Button>
               <Button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700">
                 <Plus className="w-4 h-4 mr-2" />
                 Pasang Iklan
