@@ -47,6 +47,7 @@ import HalamanJadwalTestDrive from './pages/HalamanJadwalTestDrive';
 import HalamanModerasiIklan from './pages/HalamanModerasiIklan';
 import HalamanExecutive from './pages/HalamanExecutive';
 import HalamanChatAdmin from './pages/HalamanChatAdmin';
+import AdminKnowledgeChatbot from './pages/AdminKnowledgeChatbot';
 
 // OTHER COMPONENTS
 import LoginForm from './components/LoginForm';
@@ -351,6 +352,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="admin">
                 <HalamanKelolaTransaksi />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/knowledge-chatbot"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminKnowledgeChatbot />
               </ProtectedRoute>
             }
           />

@@ -95,7 +95,7 @@ function AdminNavigation() {
   const dropdownGroups = [manajemenMobil, operasional, manajemenKonten, pengaturanSistem];
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-white border-r shadow-lg z-50">
+    <aside className="fixed top-0 left-0 h-screen w-64 bg-white border-r shadow-lg z-50">
       {/* Brand/Header */}
       <div className="h-16 border-b flex items-center px-4">
         <Link to="/admin" className="text-xl font-bold text-primary">
@@ -104,7 +104,7 @@ function AdminNavigation() {
       </div>
 
       {/* Sidebar Menu */}
-      <nav className="p-2 space-y-2 overflow-y-auto h-[calc(100%-4rem)]">
+      <nav className="p-4 space-y-2 overflow-y-auto h-[calc(100%-4rem)]">
         {/* Main Menu */}
         <div className="space-y-1">
           {mainMenu.map((item) => {

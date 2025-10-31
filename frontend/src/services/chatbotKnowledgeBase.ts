@@ -1,9 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL as string,
-  process.env.REACT_APP_SUPABASE_ANON_KEY as string
-);
+import { supabase } from '../lib/supabase';
 
 export type ValidationStatus = 'draft' | 'review' | 'approved' | 'rejected';
 export type TrainingStatus = 'pending' | 'training' | 'trained' | 'failed';
