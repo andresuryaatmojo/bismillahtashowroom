@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { cancelTransaction, refundBookingFee, BookingStatus } from '../services/transactionService';
 
 // Interfaces
 interface DataMobil {
@@ -16,7 +18,7 @@ interface DataMobil {
 interface Payment {
   id: string;
   transaction_id: string;
-  payment_type: 'down_payment' | 'installment' | 'full_payment' | 'remaining_payment';
+  payment_type: 'booking_fee' | 'down_payment' | 'installment' | 'full_payment' | 'remaining_payment';
   amount: number;
   payment_method: string;
   reference_code: string | null;
@@ -66,6 +68,12 @@ interface DataTransaksi {
   cancelled_at: string | null;
   created_at: string;
   updated_at: string;
+  
+  // Tambahan booking/final-payment untuk badge dan aksi admin/seller
+  booking_status?: BookingStatus;
+  booking_fee?: number;
+  final_payment_completed_at?: string | null;
+  proof_of_refund?: string | null;
   
   // Data tambahan yang akan diambil dari relasi
   mobil?: DataMobil;
@@ -133,6 +141,357 @@ const HalamanRiwayat: React.FC = () => {
   // Tambahan: peta id→penjual untuk menampilkan nama penjual
   const [petaPenjual, setPetaPenjual] = useState<Record<string, { full_name: string; city?: string }>>({});
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  // --- Badge helpers to mirror HalamanKelolaTransaksi ---
+  const formatPaymentStatusLabel = (status?: string) => {
+    switch (status) {
+      case 'pending': return 'Pending';
+      case 'paid': return 'Paid';
+      case 'failed': return 'Failed';
+      case 'refunded': return 'Refunded';
+      case 'partial': return 'Partial';
+      default:
+        return status ? status.charAt(0).toUpperCase() + status.slice(1) : '-';
+    }
+  };
+
+  const getPaymentStatusBadgeColor = (status?: string) => {
+    switch (status) {
+      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'partial': return 'bg-blue-100 text-blue-800';
+      case 'paid': return 'bg-green-100 text-green-800';
+      case 'failed': return 'bg-red-100 text-red-800';
+      case 'refunded': return 'bg-purple-100 text-purple-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getStatusBadgeColor = (status?: string) => {
+    switch (status) {
+      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'confirmed':
+      case 'processing': return 'bg-blue-100 text-blue-800';
+      case 'completed': return 'bg-green-100 text-green-800';
+      case 'cancelled': return 'bg-red-100 text-red-800';
+      case 'ditolak': return 'bg-red-100 text-red-800';
+      case 'refunded': return 'bg-purple-100 text-purple-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getBookingStatusBadgeColor = (status?: BookingStatus) => {
+    switch (status) {
+      case 'booking_pending': return 'bg-yellow-100 text-yellow-800';
+      case 'booking_paid': return 'bg-green-100 text-green-800';
+      case 'booking_rejected': return 'bg-red-100 text-red-800';
+      case 'booking_expired': return 'bg-gray-100 text-gray-800';
+      case 'booking_cancelled': return 'bg-red-100 text-red-800';
+      case 'booking_refunded': return 'bg-purple-100 text-purple-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const hasFailedPayment = (t: DataTransaksi): boolean => {
+    const fromPayments = Array.isArray(t.payments) ? t.payments.some(p => p.status === 'failed') : false;
+    const fromHeader = t.payment_status === 'failed' || t.status === 'cancelled';
+    return fromPayments || fromHeader;
+  };
+
+  const hasBookingFeeSuccess = (t: DataTransaksi): boolean => {
+    return Array.isArray(t.payments) && t.payments.some(
+      p => p.payment_type === 'booking_fee' && p.status === 'success'
+    );
+  };
+
+  const hasRefund = (t: DataTransaksi): boolean => {
+    const paymentRefunded = Array.isArray(t.payments) && t.payments.some(p => p.status === 'refunded');
+    const headerRefunded =
+      t.status === 'refunded' ||
+      t.payment_status === 'refunded' ||
+      t.booking_status === 'booking_refunded';
+    return paymentRefunded || headerRefunded;
+  };
+  
+  const openRefundProof = () => {
+    const url = statusHalaman.selectedTransaksi?.proof_of_refund;
+    if (url) {
+      window.open(url, '_blank');
+    }
+  };
+
+  const hasRefundRequest = (t: DataTransaksi): boolean => {
+    return !!t.notes && t.notes.includes('REFUND_REQUEST|');
+  };
+
+  const getDisplayTransactionStatus = (t: DataTransaksi): string => {
+    if (hasFailedPayment(t)) return 'ditolak';
+    return t.status || 'pending';
+  };
+
+  const getDisplayPaymentStatus = (t: DataTransaksi): DataTransaksi['payment_status'] => {
+    const failed = Array.isArray(t.payments) && t.payments.some(p => p.status === 'failed');
+    if (failed) return 'failed';
+    if (t.status === 'completed' && t.final_payment_completed_at) return 'paid';
+    return (t.payment_status || 'pending') as DataTransaksi['payment_status'];
+  };
+
+  const renderBookingStatusBadge = (t: DataTransaksi) => {
+    const bookingStatus = t.booking_status;
+    if (bookingStatus === 'booking_pending' && (!t.payments || t.payments.length === 0)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Belum Bayar
+        </span>
+      );
+    }
+    switch (bookingStatus) {
+      case 'booking_pending': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">Booking Pending</span>;
+      case 'booking_paid': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Booking Paid</span>;
+      case 'booking_refunded': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">Booking Refund</span>;
+      case 'booking_rejected': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Booking Rejected</span>;
+      case 'booking_cancelled': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Booking Cancelled</span>;
+      default:
+        return (
+          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(getDisplayTransactionStatus(t))}`}>
+            {getDisplayTransactionStatus(t)}
+          </span>
+        );
+    }
+  };
+
+  // Tampilkan badge booking + payment, dan tambah indikator "Menunggu Konfirmasi Admin" bila ada pengajuan refund
+  const renderStatusBadge = (t: DataTransaksi) => {
+    const paymentStatus = getDisplayPaymentStatus(t);
+    return (
+      <div className="flex items-center gap-2">
+        {renderBookingStatusBadge(t)}
+        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getPaymentStatusBadgeColor(paymentStatus)}`}>
+          {formatPaymentStatusLabel(paymentStatus)}
+        </span>
+        {hasRefundRequest(t) && !hasRefund(t) && (
+          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+            Menunggu Konfirmasi Admin
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const canCancelTransaction = (t: DataTransaksi): boolean => {
+    const txStatus = t.status;
+    const finalDone = !!t.final_payment_completed_at;
+    return txStatus !== 'completed' && txStatus !== 'cancelled' && txStatus !== 'refunded' && !finalDone;
+  };
+
+  const canRequestRefund = (t: DataTransaksi): boolean => {
+    const txStatus = t.status;
+    const bookingStatus = t.booking_status;
+    const finalDone = !!t.final_payment_completed_at;
+    
+    return (
+      !finalDone &&
+      !hasRefundRequest(t) &&
+      hasBookingFeeSuccess(t) &&
+      (txStatus === 'pending' || txStatus === 'confirmed') &&
+      bookingStatus !== 'booking_refunded'
+    );
+  };
+
+  // Helper: kondisi visibilitas terkait booking
+  const isBuyer = user?.current_mode === 'buyer' || user?.role === 'user';
+
+  // Booking helpers: treat booking_pending as "paid, awaiting admin approval"
+  const isBookingPaidOrPending = (t: DataTransaksi) =>
+    t.booking_status === 'booking_paid' ||
+    t.booking_status === 'booking_pending' ||
+    hasBookingFeeSuccess(t);
+
+  const isBookingRejected = (t: DataTransaksi) =>
+    t.booking_status === 'booking_rejected';
+
+  // Belum bayar booking: payment pending dan belum ada booking paid/pending
+  const isUnpaidBooking = (t: DataTransaksi) =>
+    (t.payment_status === 'pending' || t.payment_status === undefined) &&
+    !isBookingPaidOrPending(t);
+
+  // Munculkan "Batalkan & Ajukan Refund" untuk booking_paid
+  // dan booking_pending yang sudah memiliki pembayaran (agar tidak bentrok dengan "Belum Bayar")
+  const canCancelAndRequestRefund = (t: DataTransaksi) =>
+    isBuyer &&
+    (
+      t.booking_status === 'booking_paid' ||
+      (t.booking_status === 'booking_pending' && t.payments && t.payments.length > 0)
+    ) &&
+    !hasRefund(t) &&
+    t.status !== 'cancelled';
+
+  // Munculkan "Batalkan Transaksi" saat booking_pending tanpa pembayaran ATAU booking_rejected
+  const canCancelOnly = (t: DataTransaksi) =>
+    isBuyer &&
+    (
+      (t.booking_status === 'booking_pending' && (!t.payments || t.payments.length === 0)) ||
+      isBookingRejected(t)
+    ) &&
+    t.status !== 'cancelled';
+
+  const canRefundBooking = (t: DataTransaksi): boolean => {
+    const bookingStatus = t.booking_status;
+    const txStatus = t.status;
+    const refundedAlready = bookingStatus === 'booking_refunded' || txStatus === 'refunded';
+    return hasBookingFeeSuccess(t) && !refundedAlready &&
+      (txStatus === 'cancelled' || bookingStatus === 'booking_cancelled' || txStatus === 'pending' || txStatus === 'confirmed');
+  };
+
+  // Handler gabungan: batalkan + ajukan refund
+  const handleCancelAndRequestRefund = async (t: DataTransaksi) => {
+    if (!user?.id) {
+      alert('Harap login untuk mengajukan pembatalan & refund');
+      return;
+    }
+
+    const reason = (prompt('Alasan pembatalan & refund:') || '').trim();
+    if (!reason) {
+      alert('Alasan wajib diisi');
+      return;
+    }
+    const bankName = (prompt('Nama bank untuk refund:') || '').trim();
+    const accountNumber = (prompt('Nomor rekening untuk refund:') || '').trim();
+    const accountHolder = (prompt('Nama pemilik rekening:') || '').trim();
+    if (!bankName || !accountNumber || !accountHolder) {
+      alert('Data rekening refund wajib lengkap');
+      return;
+    }
+
+    try {
+      setStatusHalaman(prev => ({ ...prev, loading: true }));
+      // 1) Batalkan transaksi
+      const cancelRes = await cancelTransaction(t.id, user.id, reason);
+      if (!cancelRes.success) {
+        alert(cancelRes.error || 'Gagal membatalkan transaksi');
+        setStatusHalaman(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      // 2) Catat pengajuan refund di notes (tag: REFUND_REQUEST)
+      const marker = `REFUND_REQUEST|bank_name=${bankName};account_number=${accountNumber};account_holder=${accountHolder};reason=${reason};requested_by=${user.id};requested_at=${new Date().toISOString()}`;
+      const newNotes = t.notes ? `${t.notes}\n${marker}` : marker;
+
+      const { error: updErr } = await supabase
+        .from('transactions')
+        .update({ notes: newNotes })
+        .eq('id', t.id);
+      if (updErr) {
+        alert(`Pembatalan berhasil, namun gagal mencatat pengajuan refund: ${updErr.message}`);
+      }
+
+      // 3) Update state lokal
+      const updated = {
+        ...t,
+        status: 'cancelled' as const,
+        booking_status: 'booking_cancelled' as const,
+        notes: newNotes
+      };
+
+      setDaftarTransaksi(prev => prev.map(x => x.id === t.id ? updated : x));
+      setFilteredTransaksi(prev => prev.map(x => x.id === t.id ? updated : x));
+
+      if (statusHalaman.selectedTransaksi?.id === t.id) {
+        setStatusHalaman(prev => ({ ...prev, selectedTransaksi: updated }));
+      }
+
+      alert('Pengajuan pembatalan & refund terkirim. Menunggu konfirmasi admin.');
+    } catch (e) {
+      alert('Terjadi kesalahan saat mengajukan pembatalan & refund');
+    } finally {
+      setStatusHalaman(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleCancelTransaction = async (t: DataTransaksi) => {
+    if (!user?.id) {
+      alert('Aksi memerlukan autentikasi admin/penjual');
+      return;
+    }
+    const reason = (prompt('Alasan pembatalan:') || '').trim();
+
+    try {
+      setStatusHalaman(prev => ({ ...prev, loading: true }));
+      const res = await cancelTransaction(t.id, user.id, reason || undefined);
+      if (!res.success) {
+        alert(res.error || 'Gagal membatalkan transaksi');
+      } else {
+        setDaftarTransaksi(prev => prev.map(x =>
+          x.id === t.id ? { ...x, status: 'cancelled', booking_status: 'booking_cancelled', cancelled_at: new Date().toISOString(), notes: reason || x.notes } : x
+        ));
+        setFilteredTransaksi(prev => prev.map(x =>
+          x.id === t.id ? { ...x, status: 'cancelled', booking_status: 'booking_cancelled', cancelled_at: new Date().toISOString(), notes: reason || x.notes } : x
+        ));
+        if (statusHalaman.selectedTransaksi?.id === t.id) {
+          setStatusHalaman(prev => ({
+            ...prev,
+            selectedTransaksi: {
+              ...prev.selectedTransaksi!,
+              status: 'cancelled',
+              booking_status: 'booking_cancelled',
+              cancelled_at: new Date().toISOString(),
+              notes: reason || prev.selectedTransaksi!.notes
+            }
+          }));
+        }
+        alert(res.message || 'Transaksi dibatalkan');
+      }
+    } catch (e) {
+      alert('Terjadi kesalahan saat membatalkan transaksi');
+    } finally {
+      setStatusHalaman(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleRefundBooking = async (t: DataTransaksi) => {
+    if (!user?.id) {
+      alert('Aksi memerlukan autentikasi admin/penjual');
+      return;
+    }
+    const reason = (prompt('Alasan refund booking fee:') || '').trim();
+    const bookingFee = Number(t.booking_fee ?? t.down_payment ?? 0);
+    if (!Number.isFinite(bookingFee) || bookingFee <= 0) {
+      alert('Booking fee tidak valid');
+      return;
+    }
+
+    try {
+      setStatusHalaman(prev => ({ ...prev, loading: true }));
+      const res = await refundBookingFee(t.id, user.id, bookingFee, reason || undefined);
+      if (!res.success) {
+        alert(res.error || 'Gagal melakukan refund booking');
+      } else {
+        setDaftarTransaksi(prev => prev.map(x =>
+          x.id === t.id ? { ...x, status: 'refunded', payment_status: 'refunded', booking_status: 'booking_refunded', notes: reason || x.notes } : x
+        ));
+        setFilteredTransaksi(prev => prev.map(x =>
+          x.id === t.id ? { ...x, status: 'refunded', payment_status: 'refunded', booking_status: 'booking_refunded', notes: reason || x.notes } : x
+        ));
+        if (statusHalaman.selectedTransaksi?.id === t.id) {
+          setStatusHalaman(prev => ({
+            ...prev,
+            selectedTransaksi: {
+              ...prev.selectedTransaksi!,
+              status: 'refunded',
+              payment_status: 'refunded',
+              booking_status: 'booking_refunded',
+              notes: reason || prev.selectedTransaksi!.notes
+            }
+          }));
+        }
+        alert(res.message || 'Refund booking fee berhasil diproses');
+      }
+    } catch (e) {
+      alert('Terjadi kesalahan saat memproses refund');
+    } finally {
+      setStatusHalaman(prev => ({ ...prev, loading: false }));
+    }
+  };
 
   // Methods implementation
   const aksesHalamanRiwayat = async () => {
@@ -622,27 +981,7 @@ const HalamanRiwayat: React.FC = () => {
     return t.status === 'pending' && hasPaymentProof(t);
   };
 
-  const renderStatusBadge = (t: DataTransaksi) => {
-    if (isUnpaid(t)) {
-      return (
-        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-          Belum Bayar
-        </span>
-      );
-    }
-    if (isWaitingAdminConfirm(t)) {
-      return (
-        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-          Pending
-        </span>
-      );
-    }
-    return (
-      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(t.status)}`}>
-        {t.status}
-      </span>
-    );
-  };
+
 
   const goToPayment = (t: DataTransaksi) => {
     // Prioritize down_payment if it exists (booking fee)
@@ -1216,6 +1555,23 @@ const HalamanRiwayat: React.FC = () => {
                       >
                         {transaksi.hasReview ? '✓ Sudah Diulas' : 'Ulas'}
                       </button>
+
+                      {/* Aksi pembatalan: saling eksklusif */}
+                      {canCancelAndRequestRefund(transaksi) ? (
+                        <button
+                          className="px-3 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700"
+                          onClick={() => handleCancelAndRequestRefund(transaksi)}
+                        >
+                          Batalkan & Ajukan Refund
+                        </button>
+                      ) : canCancelOnly(transaksi) ? (
+                        <button
+                          className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                          onClick={() => handleCancelTransaction(transaksi)}
+                        >
+                          Batalkan Transaksi
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -1529,7 +1885,38 @@ const HalamanRiwayat: React.FC = () => {
 
               {/* Transaction Details */}
               <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Detail Transaksi</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Detail Transaksi</h3>
+                  {/* Optional: quick actions in detail for admin/seller */}
+                  {(user && (user.role === 'admin' || user.current_mode === 'seller')) && (
+                    <div className="flex gap-2">
+                      {/* Aksi pembatalan di header: juga eksklusif */}
+                      {canCancelAndRequestRefund(statusHalaman.selectedTransaksi) ? (
+                        <button
+                          className="px-3 py-2 text-sm rounded bg-orange-600 text-white hover:bg-orange-700"
+                          onClick={() => handleCancelAndRequestRefund(statusHalaman.selectedTransaksi!)}
+                        >
+                          Batalkan & Ajukan Refund
+                        </button>
+                      ) : canCancelOnly(statusHalaman.selectedTransaksi) ? (
+                        <button
+                          className="px-3 py-2 text-sm rounded bg-red-600 text-white hover:bg-red-700"
+                          onClick={() => handleCancelTransaction(statusHalaman.selectedTransaksi!)}
+                        >
+                          Batalkan Transaksi
+                        </button>
+                      ) : null}
+                      {canRefundBooking(statusHalaman.selectedTransaksi) && (
+                        <button
+                          onClick={() => handleRefundBooking(statusHalaman.selectedTransaksi!)}
+                          className="px-3 py-2 text-sm rounded bg-purple-600 text-white hover:bg-purple-700"
+                        >
+                          Refund Booking Fee
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <div className="space-y-3">
                     <div className="flex justify-between">
@@ -1578,7 +1965,40 @@ const HalamanRiwayat: React.FC = () => {
                 {statusHalaman.selectedTransaksi.notes && (
                   <div className="mt-4 pt-4 border-t">
                     <p className="text-sm text-gray-600 mb-1">Catatan:</p>
-                    <p className="text-sm">{statusHalaman.selectedTransaksi.notes}</p>
+                    {statusHalaman.selectedTransaksi.notes.includes('REFUND_REQUEST') ? (
+                      <div className="bg-orange-50 border border-orange-200 rounded-md p-3">
+                        <p className="text-sm font-semibold text-orange-800 mb-2">Pengajuan Refund:</p>
+                        {(() => {
+                          const parts = statusHalaman.selectedTransaksi.notes.split('|');
+                          if (parts.length >= 6) {
+                            return (
+                              <div className="text-sm text-orange-700 space-y-1">
+                                <p><strong>Alasan:</strong> {parts[1]}</p>
+                                <p><strong>Bank:</strong> {parts[2]}</p>
+                                <p><strong>No. Rekening:</strong> {parts[3]}</p>
+                                <p><strong>Pemilik:</strong> {parts[4]}</p>
+                                <p><strong>Tanggal Pengajuan:</strong> {new Date(parts[5]).toLocaleDateString('id-ID')}</p>
+                              </div>
+                            );
+                          }
+                          return <p className="text-sm text-orange-700">{statusHalaman.selectedTransaksi.notes}</p>;
+                        })()}
+                      </div>
+                    ) : (
+                      <p className="text-sm">{statusHalaman.selectedTransaksi.notes}</p>
+                    )}
+                  </div>
+                )}
+                
+                {statusHalaman.selectedTransaksi?.proof_of_refund && (
+                  <div className="mt-4 pt-4 border-t">
+                    <p className="text-sm text-gray-600 mb-2">Bukti Refund:</p>
+                    <button
+                      onClick={openRefundProof}
+                      className="px-3 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                    >
+                      Lihat Bukti Refund
+                    </button>
                   </div>
                 )}
 
@@ -1716,6 +2136,42 @@ const HalamanRiwayat: React.FC = () => {
                         className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700"
                       >
                         Bayar Sekarang
+                      </button>
+                    )}
+
+                    {canCancelAndRequestRefund(statusHalaman.selectedTransaksi) && (
+                      <button
+                        onClick={() => handleCancelAndRequestRefund(statusHalaman.selectedTransaksi!)}
+                        className="w-full bg-orange-600 text-white py-2 px-4 rounded-md hover:bg-orange-700"
+                      >
+                        Batalkan & Ajukan Refund
+                      </button>
+                    )}
+
+                    {canCancelOnly(statusHalaman.selectedTransaksi) && (
+                      <button
+                        onClick={() => handleCancelTransaction(statusHalaman.selectedTransaksi!)}
+                        className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700"
+                      >
+                        Batalkan Transaksi
+                      </button>
+                    )}
+
+                    {(user && (user.role === 'admin' || user.current_mode === 'seller')) && canCancelTransaction(statusHalaman.selectedTransaksi) && (
+                      <button
+                        onClick={() => handleCancelTransaction(statusHalaman.selectedTransaksi!)}
+                        className="w-full bg-orange-600 text-white py-2 px-4 rounded-md hover:bg-orange-700"
+                      >
+                        Batalkan Transaksi
+                      </button>
+                    )}
+
+                    {(user && (user.role === 'admin' || user.current_mode === 'seller')) && canRefundBooking(statusHalaman.selectedTransaksi) && (
+                      <button
+                        onClick={() => handleRefundBooking(statusHalaman.selectedTransaksi!)}
+                        className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700"
+                      >
+                        Refund Booking Fee
                       </button>
                     )}
 

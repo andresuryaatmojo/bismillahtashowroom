@@ -81,6 +81,67 @@ function HalamanKelolaTransaksi() {
   const navigate = useNavigate();
   const { user } = useAuth();
   
+  // Helper functions for refund request detection and parsing
+  const hasRefundRequest = (t: TransactionWithPayments): boolean => {
+    return !!t.transaction.notes && t.transaction.notes.includes('REFUND_REQUEST|');
+  };
+
+  const parseRefundRequest = (notes?: string): {
+    bank_name?: string;
+    account_number?: string;
+    account_holder?: string;
+    reason?: string;
+    requested_by?: string;
+    requested_at?: string;
+  } => {
+    if (!notes) return {};
+    const line = notes.split('\n').find(l => l.startsWith('REFUND_REQUEST|'));
+    if (!line) return {};
+    const payload = line.replace('REFUND_REQUEST|', '');
+    const obj: Record<string, string> = {};
+    payload.split(';').forEach(pair => {
+      const [k, v] = pair.split('=');
+      if (k) obj[k] = v || '';
+    });
+    return {
+      bank_name: obj.bank_name,
+      account_number: obj.account_number,
+      account_holder: obj.account_holder,
+      reason: obj.reason,
+      requested_by: obj.requested_by,
+      requested_at: obj.requested_at,
+    };
+  };
+
+  const rejectRefundRequest = async (transaction: TransactionWithPayments) => {
+    if (!user?.id) return;
+    const reason = (prompt('Alasan menolak refund:') || '').trim();
+    if (!reason) {
+      alert('Alasan wajib diisi');
+      return;
+    }
+    const tag = `REFUND_REJECTED|reason=${reason};rejected_by=${user.id};rejected_at=${new Date().toISOString()}`;
+    const newNotes = transaction.transaction.notes ? `${transaction.transaction.notes}\n${tag}` : tag;
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .update({ notes: newNotes })
+        .eq('id', transaction.transaction.id);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      // Refresh selected transaction in state
+      const updatedList = await loadTransactions();
+      const source = updatedList ?? transactions;
+      const updated = source.find(t => t.transaction.id === transaction.transaction.id);
+      setPageStatus(prev => ({ ...prev, selectedTransaction: updated || prev.selectedTransaction }));
+      alert('Pengajuan refund ditolak.');
+    } catch (e) {
+      alert('Gagal menolak refund');
+    }
+  };
+  
   // State untuk data transaksi
   const [transactions, setTransactions] = useState<TransactionWithPayments[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<TransactionWithPayments[]>([]);
@@ -129,6 +190,7 @@ function HalamanKelolaTransaksi() {
   // State untuk modal refund booking fee
   const [refundModalOpen, setRefundModalOpen] = useState(false);
   const [refundReason, setRefundReason] = useState('');
+  const [refundProofFile, setRefundProofFile] = useState<File | null>(null);
   const [isSubmittingRefund, setIsSubmittingRefund] = useState(false);
   
   // State untuk statistik
@@ -905,6 +967,7 @@ function HalamanKelolaTransaksi() {
   const openRefundModal = () => {
     if (!pageStatus.selectedTransaction) return;
     setRefundReason('');
+    setRefundProofFile(null);
     setRefundModalOpen(true);
   };
 
@@ -966,12 +1029,36 @@ function HalamanKelolaTransaksi() {
       setIsSubmittingRefund(true);
       setPageStatus(prev => ({ ...prev, isLoading: true }));
 
-      // Langsung panggil API dari service, tidak melalui kontroler
+      // Upload bukti refund jika ada
+      let proofUrl: string | undefined;
+      if (refundProofFile) {
+        const fileExt = refundProofFile.name.split('.').pop();
+        const fileName = `refund-${pageStatus.selectedTransaction.transaction.id}-${Date.now()}.${fileExt}`;
+        const objectKey = `refund/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('payment-proofs') // reuse bucket yang sudah ada
+          .upload(objectKey, refundProofFile);
+
+        if (uploadError) {
+          alert(uploadError.message || 'Gagal upload bukti refund');
+          return;
+        }
+
+        const { data } = supabase.storage
+          .from('payment-proofs')
+          .getPublicUrl(objectKey);
+
+        proofUrl = data.publicUrl;
+      }
+
+      // Panggil service refund, kirim proofUrl
       const res = await refundBookingFee(
         pageStatus.selectedTransaction.transaction.id,
         user.id,
         bookingFee, // Selalu refund 100% dari booking fee
-        refundReason.trim()
+        refundReason.trim(),
+        proofUrl
       );
 
       if (!res.success) {
@@ -1892,6 +1979,44 @@ function HalamanKelolaTransaksi() {
                 ) : null;
               })()}
 
+              {/* Panel Pengajuan Refund (bila ada) */}
+              {hasRefundRequest(pageStatus.selectedTransaction) && (
+                <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded p-4">
+                  <h3 className="text-lg font-semibold mb-2 text-yellow-800">Pengajuan Refund dari Pembeli</h3>
+                  {(() => {
+                    const req = parseRefundRequest(pageStatus.selectedTransaction.transaction.notes || '');
+                    return (
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between"><span className="text-gray-600">Alasan:</span><span className="font-medium">{req.reason || '-'}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-600">Bank:</span><span className="font-medium">{req.bank_name || '-'}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-600">No. Rekening:</span><span className="font-medium">{req.account_number || '-'}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-600">Atas Nama:</span><span className="font-medium">{req.account_holder || '-'}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-600">Diajukan:</span><span className="font-medium">{req.requested_at ? formatDate(req.requested_at) : '-'}</span></div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      variant="default"
+                      onClick={() => {
+                        const req = parseRefundRequest(pageStatus.selectedTransaction!.transaction.notes || '');
+                        setRefundReason(req.reason || 'Refund booking fee atas pembatalan');
+                        setRefundModalOpen(true);
+                      }}
+                    >
+                      Proses Refund
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => rejectRefundRequest(pageStatus.selectedTransaction!)}
+                    >
+                      Tolak Refund
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Action buttons berdasarkan status */} 
               <div className="flex flex-wrap justify-end gap-2 pt-4"> 
                 <Button variant="outline" size="sm" onClick={() => pageStatus.selectedTransaction && handleChatBuyer(pageStatus.selectedTransaction.transaction)}> 
@@ -2169,6 +2294,18 @@ function HalamanKelolaTransaksi() {
                 placeholder="Contoh: Pembeli batal, refund sesuai kebijakan booking"
                 rows={3}
               />
+            </div>
+            <div>
+              <Label htmlFor="refundProof">Bukti Transfer Refund (opsional)</Label>
+              <Input
+                id="refundProof"
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => setRefundProofFile(e.target.files?.[0] || null)}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Unggah resi transfer atau PDF konfirmasi refund.
+              </p>
             </div>
           </div>
           <DialogFooter className="gap-2">

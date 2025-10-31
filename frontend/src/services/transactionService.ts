@@ -56,6 +56,7 @@ export type Transaction = {
   // Refund fields
   refund_amount?: number | null;
   refund_processed_at?: string | null;
+  refund_reason?: string | null;
   
   // Status fields (yang lama, tetap dipertahankan untuk kompatibilitas)
   payment_method?: string | null;
@@ -67,6 +68,9 @@ export type Transaction = {
   handover_notes?: string | null;
   handover_at?: string | null;
   handover_by?: string | null;
+  
+  // General notes (e.g., refund requests tagged with REFUND_REQUEST|...)
+  notes?: string | null;
   
   // Timestamps
   created_at?: string;
@@ -753,7 +757,8 @@ export async function refundBookingFee(
   transactionId: string,
   adminId: string,
   amount: number,
-  reason?: string
+  reason?: string,
+  proofUrl?: string
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
     // Ambil booking_fee dari transaksi dan abaikan amount dari UI (refund 100%)
@@ -778,7 +783,8 @@ export async function refundBookingFee(
       .update({
         refund_amount: bookingFee,                 // selalu 100%
         refund_processed_at: now,
-        refund_reason: reason || null,            // simpan alasan refund di kolom baru
+        refund_reason: reason || null,
+        proof_of_refund: proofUrl || null,
         booking_status: 'booking_refunded',
         payment_status: 'refunded',
         status: 'refunded',
