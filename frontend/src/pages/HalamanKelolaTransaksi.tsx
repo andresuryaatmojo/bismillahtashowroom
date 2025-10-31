@@ -689,6 +689,18 @@ function HalamanKelolaTransaksi() {
     );
   };
 
+  // Tambahan: cek apakah transaksi atau payment sudah refund
+  const hasRefund = (transaction: TransactionWithPayments): boolean => {
+    const paymentRefunded =
+      Array.isArray(transaction.payments) &&
+      transaction.payments.some((p) => p.status === 'refunded');
+    const headerRefunded =
+      transaction.transaction.status === 'refunded' ||
+      transaction.transaction.payment_status === 'refunded' ||
+      transaction.transaction.booking_status === 'booking_refunded';
+    return paymentRefunded || headerRefunded;
+  };
+
   // Update fungsi render status badge 
   const renderDetailedStatusBadge = (transaction: TransactionWithPayments) => { 
     const bookingStatus = transaction.transaction.booking_status; 
@@ -699,6 +711,15 @@ function HalamanKelolaTransaksi() {
       return (
         <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
           Ditolak
+        </span>
+      );
+    }
+
+    // NEW: jika ada refund, tampilkan Refunded (prioritas di atas Paid)
+    if (hasRefund(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+          Refunded
         </span>
       );
     }
@@ -754,6 +775,84 @@ function HalamanKelolaTransaksi() {
         {txStatus} 
       </span> 
     ); 
+  };
+  
+  // Helper untuk render badge booking status
+  const renderBookingStatusBadge = (transaction: TransactionWithPayments) => {
+    const bookingStatus = transaction.transaction.booking_status;
+
+    // Belum bayar saat masih booking_pending dan tidak ada bukti/record pembayaran
+    if (bookingStatus === 'booking_pending' && isUnpaid(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Belum Bayar
+        </span>
+      );
+    }
+
+    // Mapping label eksplisit untuk status booking
+    switch (bookingStatus) {
+      case 'booking_pending':
+        return (
+          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+            Booking Pending
+          </span>
+        );
+      case 'booking_paid':
+        return (
+          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+            Booking Paid
+          </span>
+        );
+      case 'booking_refunded':
+        return (
+          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+            Booking Refund
+          </span>
+        );
+      case 'booking_rejected':
+        return (
+          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+            Booking Rejected
+          </span>
+        );
+      case 'booking_cancelled':
+        return (
+          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+            Booking Cancelled
+          </span>
+        );
+      default:
+        // Fallback ke logic lama bila booking_status tidak tersedia/unknown
+        return renderDetailedStatusBadge(transaction);
+    }
+  };
+
+  // NEW: render dua badge di list (status booking + status pembayaran)
+  const renderListBadges = (transaction: TransactionWithPayments) => {
+    const paymentStatus = getDisplayPaymentStatus(transaction);
+    return (
+      <div className="flex items-center gap-2">
+        {renderBookingStatusBadge(transaction)}
+        <span
+          className={`px-2 py-1 text-xs font-semibold rounded-full ${getPaymentStatusBadgeColor(
+            paymentStatus
+          )}`}
+        >
+          {paymentStatus}
+        </span>
+      </div>
+    );
+  };
+  
+  // Helper untuk render badge status pembayaran
+  const renderPaymentStatusBadge = (transaction: TransactionWithPayments) => {
+    const paymentStatus = getDisplayPaymentStatus(transaction);
+    return (
+      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getPaymentStatusBadgeColor(paymentStatus)}`}>
+        {formatPaymentStatusLabel(paymentStatus)}
+      </span>
+    );
   }; 
   
   // Helper: cek apakah perlu verifikasi booking 
@@ -893,6 +992,19 @@ function HalamanKelolaTransaksi() {
     } finally {
       setIsSubmittingRefund(false);
       setPageStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  // Fungsi untuk format label status pembayaran
+  const formatPaymentStatusLabel = (status?: string) => {
+    switch (status) {
+      case 'pending': return 'Pending';
+      case 'paid': return 'Paid';
+      case 'failed': return 'Failed';
+      case 'refunded': return 'Refunded';
+      case 'partial': return 'Partial';
+      default:
+        return status ? status.charAt(0).toUpperCase() + status.slice(1) : '-';
     }
   };
 
@@ -1320,7 +1432,8 @@ function HalamanKelolaTransaksi() {
                           <span className="text-gray-500 text-sm">
                             {formatDate(tx.created_at)}
                           </span>
-                          {renderDetailedStatusBadge(item)}
+                          {renderBookingStatusBadge(item)}
+                          {renderPaymentStatusBadge(item)}
                         </div>
                         <div className="text-sm text-gray-500 font-mono">
                           {tx.invoice_number || tx.id}
