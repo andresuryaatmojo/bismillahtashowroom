@@ -126,27 +126,28 @@ export default function HalamanChatAdmin() {
   const location = useLocation();
 
   useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        let query = supabase.from('chat_rooms').select('*');
+  (async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      let query = supabase.from('chat_rooms').select('*');
 
-        if (adminFilter === 'eskalasi') {
-          query = query.eq('is_escalated', true);
-        } else if (adminFilter === 'chatbot') {
-          query = query.eq('room_type', 'user_to_bot');
-        } else if (adminFilter === 'mobil') {
-          query = query
-            .not('car_id', 'is', null)
-            .eq('room_type', 'user_to_admin')
-            .eq('is_escalated', false)
-            .eq('escalation_history', 0)
-            .is('resolved_at', null);
-        } else if (adminFilter === 'semua') {
-          // Batasi hanya admin dan eskalasi
-          query = query.or('room_type.eq.user_to_admin,is_escalated.eq.true');
-        }
+      if (adminFilter === 'eskalasi') {
+        query = query.eq('is_escalated', true);
+      } else if (adminFilter === 'chatbot') {
+        // Ambil room chatbot langsung + room eskalasi untuk disaring di klien
+        query = query.or('room_type.eq.user_to_bot,is_escalated.eq.true');
+      } else if (adminFilter === 'mobil') {
+        query = query
+          .not('car_id', 'is', null)
+          .eq('room_type', 'user_to_admin')
+          .eq('is_escalated', false)
+          .eq('escalation_history', 0)
+          .is('resolved_at', null);
+      } else if (adminFilter === 'semua') {
+        // TERMASUK room chatbot agar badge terlihat di daftar
+        query = query.or('room_type.eq.user_to_admin,room_type.eq.user_to_bot,is_escalated.eq.true');
+      }
 
         const { data, error: err } = await query.order('last_message_at', { ascending: false });
         if (err) throw err;
@@ -162,34 +163,35 @@ export default function HalamanChatAdmin() {
 
   // Subscribe ke perubahan chat_rooms agar daftar auto-refresh saat ada UPDATE/INSERT
   useEffect(() => {
-    const channel = supabase
-      .channel('admin-chat-rooms')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms' }, async () => {
-        try {
-          setLoading(true);
-          let query = supabase.from('chat_rooms').select('*');
-          if (adminFilter === 'eskalasi') {
-            query = query
-              .eq('is_escalated', true)
-              .is('resolved_at', null);
-          } else if (adminFilter === 'chatbot') {
-            query = query.eq('room_type', 'user_to_bot');
-          } else if (adminFilter === 'mobil') {
-            query = query
-              .not('car_id', 'is', null)
-              .eq('room_type', 'user_to_admin')
-              .eq('is_escalated', false)
-              .eq('escalation_history', 0)
-              .is('resolved_at', null);
-          } else if (adminFilter === 'arsip') {
-            // Arsip: percakapan yang sudah selesai eskalasi
-            query = query
-              .not('resolved_at', 'is', null)
-              .gt('escalation_history', 0);
-          } else if (adminFilter === 'semua') {
-            // Konsisten: hanya user_to_admin dan eskalasi
-            query = query.or('room_type.eq.user_to_admin,is_escalated.eq.true');
-          }
+  const channel = supabase
+    .channel('admin-chat-rooms')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms' }, async () => {
+      try {
+        setLoading(true);
+        let query = supabase.from('chat_rooms').select('*');
+        if (adminFilter === 'eskalasi') {
+          query = query
+            .eq('is_escalated', true)
+            .is('resolved_at', null);
+        } else if (adminFilter === 'chatbot') {
+          // Konsisten dengan fetch awal
+          query = query.or('room_type.eq.user_to_bot,is_escalated.eq.true');
+        } else if (adminFilter === 'mobil') {
+          query = query
+            .not('car_id', 'is', null)
+            .eq('room_type', 'user_to_admin')
+            .eq('is_escalated', false)
+            .eq('escalation_history', 0)
+            .is('resolved_at', null);
+        } else if (adminFilter === 'arsip') {
+          // Arsip: percakapan yang sudah selesai eskalasi
+          query = query
+            .not('resolved_at', 'is', null)
+            .gt('escalation_history', 0);
+        } else if (adminFilter === 'semua') {
+          // Konsisten dengan fetch awal: sertakan user_to_bot juga
+          query = query.or('room_type.eq.user_to_admin,room_type.eq.user_to_bot,is_escalated.eq.true');
+        }
 
           const { data, error } = await query.order('last_message_at', { ascending: false });
           if (!error) setRooms((data || []) as ChatRoomDb[]);
@@ -204,25 +206,53 @@ export default function HalamanChatAdmin() {
     };
   }, [adminFilter]);
 
-  // Filter rooms berdasarkan kategori dan pencarian
-  const filteredRooms = rooms.filter((r) => {
-    const byCategory =
-      adminFilter === 'semua'
-        ? (r.room_type === 'user_to_admin' || r.is_escalated === true)
-        : adminFilter === 'eskalasi'
-        ? (r.is_escalated === true && !(r as any).resolved_at)
-        : adminFilter === 'chatbot'
-        ? r.room_type === 'user_to_bot'
-        : adminFilter === 'mobil'
-        ? !!r.car_id && r.room_type === 'user_to_admin' && !r.is_escalated && (r.escalation_history || 0) === 0 && !(r as any).resolved_at
-        : adminFilter === 'arsip'
-        ? !!(r as any).resolved_at && (r.escalation_history || 0) > 0
-        : true;
-  
-    const q = adminQuery.trim().toLowerCase();
-    const text = `${r.user1_id} ${r.user2_id} ${r.car_id ?? ''}`.toLowerCase();
-    return byCategory && (q === '' || text.includes(q));
-  });
+  // Helper: ekstrak teks dari last_message_preview (string atau JSON)
+const extractPreviewText = (preview?: string | null) => {
+  if (!preview) return '';
+  const raw = preview.trim();
+  // Coba regex cepat
+  const jsonTextMatch = raw.match(/"text":"([^"]+)"/); 
+  if (jsonTextMatch?.[1]) return jsonTextMatch[1];
+  const jsonMsgMatch = raw.match(/"message_text":"([^"]+)"/); 
+  if (jsonMsgMatch?.[1]) return jsonMsgMatch[1];
+  // Coba parse JSON
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'string') return parsed;
+    if (parsed?.text) return String(parsed.text);
+    if (parsed?.message_text) return String(parsed.message_text);
+    if (parsed?.carInfo?.title) return String(parsed.carInfo.title);
+  } catch {}
+  // Fallback: asumsi plain text
+  return raw;
+};
+
+// Deteksi thread berasal dari chatbot (room user_to_bot ATAU pesan terakhir mengandung kata 'chatbot')
+const isChatbotThread = (room: ChatRoomDb) => {
+  if (room.room_type === 'user_to_bot') return true;
+  const text = extractPreviewText((room as any).last_message_preview).toLowerCase();
+  return text.includes('chatbot');
+};
+
+// Filter rooms berdasarkan kategori dan pencarian
+const filteredRooms = rooms.filter((r) => {
+  const byCategory =
+    adminFilter === 'semua'
+      ? (r.room_type === 'user_to_admin' || r.is_escalated === true || r.room_type === 'user_to_bot' || isChatbotThread(r))
+      : adminFilter === 'eskalasi'
+      ? (r.is_escalated === true && !(r as any).resolved_at)
+      : adminFilter === 'chatbot'
+      ? isChatbotThread(r)
+      : adminFilter === 'mobil'
+      ? !!r.car_id && r.room_type === 'user_to_admin' && !r.is_escalated && (r.escalation_history || 0) === 0 && !(r as any).resolved_at
+      : adminFilter === 'arsip'
+      ? !!(r as any).resolved_at && (r.escalation_history || 0) > 0
+      : true;
+
+  const q = adminQuery.trim().toLowerCase();
+  const textIndexable = `${r.user1_id} ${r.user2_id} ${r.car_id ?? ''} ${extractPreviewText((r as any).last_message_preview)}`.toLowerCase();
+  return byCategory && (q === '' || textIndexable.includes(q));
+});
 
   // Preselect room jika datang dari navigasi dengan state.activeRoomId
   useEffect(() => {
@@ -638,6 +668,7 @@ export default function HalamanChatAdmin() {
             const user2Name = namaPengguna(room.user2_id);
             const showArrow = room.is_escalated || !!(room as any).resolved_at;
             const threadTitle = showArrow ? `${user1Name} ↔ ${user2Name}` : `${user1Name}`;
+            const chatbotThread = isChatbotThread(room);
             
             return (
               <button
@@ -647,41 +678,30 @@ export default function HalamanChatAdmin() {
               >
                 <div className="font-medium truncate">
                   {threadTitle}
-                  {room.is_escalated && !(room as any).resolved_at ? (
-                    <span className="ml-2 px-1.5 py-0.5 text-xs bg-red-100 text-red-600 rounded">
-                      Eskalasi
-                    </span>
-                  ) : (room as any).resolved_at ? (
-                    <span className="ml-2 px-1.5 py-0.5 text-xs bg-green-100 text-green-600 rounded">
-                      Selesai eskalasi
-                    </span>
-                  ) : null}
+                  {chatbotThread ? (
+            <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-600 rounded">
+              Chatbot
+            </span>
+          ) : room.is_escalated && !(room as any).resolved_at ? (
+            <span className="ml-2 px-1.5 py-0.5 text-xs bg-red-100 text-red-600 rounded">
+              Eskalasi
+            </span>
+          ) : (room as any).resolved_at ? (
+            <span className="ml-2 px-1.5 py-0.5 text-xs bg-green-100 text-green-600 rounded">
+              Selesai eskalasi
+            </span>
+          ) : null}
                 </div>
                 <div className="text-xs text-gray-500 truncate">
                   {room.car_id
                     ? (() => {
-                        if (!room.last_message_preview) return 'Belum ada pesan';
-                        
-                        // Coba ekstrak teks dari format JSON yang terlihat di gambar
-                        const jsonMatch = room.last_message_preview.match(/"text":"([^"]+)"/);
-                        if (jsonMatch && jsonMatch[1]) {
-                          return jsonMatch[1];
-                        }
-                        
-                        // Fallback ke cara lama jika regex tidak berhasil
-                        try {
-                          const parsed = JSON.parse(room.last_message_preview);
-                          if (parsed && typeof parsed === 'object') {
-                            if (parsed.text) return parsed.text;
-                            if (parsed.carInfo?.title) return parsed.carInfo.title;
-                          }
-                        } catch {}
-                        
-                        // Jika semua gagal, tampilkan pesan default
-                        return 'Pesan dengan lampiran mobil';
+                        const text = extractPreviewText((room as any).last_message_preview);
+                        return text || 'Pesan dengan lampiran mobil';
                       })()
-                    : room.room_type === 'user_to_bot'
+                    : chatbotThread
                     ? 'Chatbot'
+                    : room.room_type === 'user_to_admin'
+                    ? 'User-to-Admin'
                     : 'User-to-User'}
                 </div>
               </button>
