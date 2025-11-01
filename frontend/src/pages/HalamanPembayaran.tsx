@@ -380,11 +380,6 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
           : `Transfer bank ke ${selectedMethod.name}`
       };
       
-      // Tambahkan proof URL jika ada
-      if (proofUrl) {
-        paymentData.proof_of_payment = proofUrl;
-      }
-
       // Tambahkan data bank jika bank transfer
       if (selectedMethod.type === 'bank_transfer') {
         paymentData.bank_name = selectedMethod.name;
@@ -407,6 +402,18 @@ const HalamanPembayaran: React.FC<PaymentPageProps> = ({
       const result = await paymentService.createPayment(paymentData);
 
       if (result.success) {
+        // Jika payment berhasil dibuat dan ada bukti pembayaran
+        if (result.data && !Array.isArray(result.data) && proofUrl) {
+          const paymentId = result.data.id;
+          console.log('📤 Memanggil uploadProofOfPayment untuk update payment dan status mobil...');
+          const uploadResult = await paymentService.uploadProofOfPayment(paymentId, proofUrl);
+          if (!uploadResult.success) {
+            console.error('❌ Error saat uploadProofOfPayment:', uploadResult.error);
+          } else {
+            console.log('✅ Bukti pembayaran berhasil diupload dan status mobil diupdate');
+          }
+        }
+
         // Simulasi proses payment gateway untuk card
         if (selectedMethod.type === 'card') {
           await new Promise(resolve => setTimeout(resolve, 2000));

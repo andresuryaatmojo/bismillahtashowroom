@@ -156,7 +156,7 @@ class CarService {
             seller_type
           )
         `, { count: 'exact' })
-        .eq('status', 'available'); // Only show available cars
+        .in('status', ['available']); // Only show available cars, exclude booked and sold cars
 
       // Apply filters
       if (filters.search) {
@@ -349,7 +349,7 @@ class CarService {
           car_images (id, image_url, is_primary, display_order),
           users (id, username, full_name, seller_rating, seller_type)
         `)
-        .eq('status', 'available')
+        .in('status', ['available'])
         .eq('is_featured', true)
         .order('posted_at', { ascending: false })
         .limit(limit);
@@ -381,7 +381,7 @@ class CarService {
           car_images (id, image_url, is_primary, display_order),
           users (id, username, full_name, seller_rating, seller_type)
         `)
-        .eq('status', 'available')
+        .in('status', ['available'])
         .order('posted_at', { ascending: false })
         .limit(limit);
 

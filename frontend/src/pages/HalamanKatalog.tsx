@@ -101,8 +101,12 @@ const HalamanKatalog: React.FC = () => {
         sort_by: sortBy
       });
       
-      setCars(response.data);
-      setTotalCars(response.total);
+      // Client-side guard: hanya tampilkan mobil berstatus 'available'
+      const visibleCars = (response.data || []).filter(car => car.status === 'available');
+      
+      setCars(visibleCars);
+      // Opsional: sesuaikan total agar konsisten dengan daftar yang tampil
+      setTotalCars(visibleCars.length);
     } catch (error) {
       console.error('Error fetching cars:', error);
     } finally {

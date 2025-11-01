@@ -560,12 +560,23 @@ function HalamanKelolaTransaksi() {
   const handleConfirmBooking = async (payment: Payment) => {
     if (!pageStatus.selectedTransaction || !user?.id) return;
     try {
+      console.log('🔄 handleConfirmBooking dipanggil dengan payment:', payment);
       setPageStatus(prev => ({ ...prev, isLoading: true }));
+      
+      console.log('📞 Memanggil confirmBookingPayment dengan:', {
+        transactionId: pageStatus.selectedTransaction.transaction.id,
+        paymentId: payment.id,
+        adminId: user.id
+      });
+      
       const res = await confirmBookingPayment(
         pageStatus.selectedTransaction.transaction.id,
         payment.id,
         user.id
       );
+      
+      console.log('✅ Hasil confirmBookingPayment:', res);
+      
       if (!res.success) {
         alert(res.error || 'Gagal konfirmasi pembayaran');
       } else {

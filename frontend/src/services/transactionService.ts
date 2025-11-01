@@ -99,6 +99,11 @@ export type TransactionWithPayments = {
 
 // Fungsi untuk membuat transaksi baru
 export async function createTransaction(input: CreateTransactionInput) {
+  // Cegah pembelian mobil sendiri (jika ID buyer dan seller dalam namespace sama)
+  if (input.buyer_id === input.seller_id) {
+    return { success: false, error: 'Anda tidak dapat membeli mobil yang Anda jual sendiri' };
+  }
+
   const generateInvoiceNumber = (): string => {
     const now = new Date();
     const y = now.getFullYear();
@@ -544,40 +549,136 @@ export async function getExternalTransactionsWithPayments(
   }
 }
 
-// Fungsi untuk konfirmasi pembayaran booking
+// ⭐ FUNGSI UTAMA YANG DIPERBAIKI - Konfirmasi pembayaran booking
 export async function confirmBookingPayment(
   transactionId: string,
   paymentId: string,
   adminId: string
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
-    // 1) Set payment -> success + verified
-    const { error: paymentErr } = await supabase
+    console.log('🔄 confirmBookingPayment dipanggil dengan:', { transactionId, paymentId, adminId });
+    const now = new Date().toISOString();
+
+    // Ambil data transaksi untuk mendapatkan car_id
+    const { data: tx, error: fetchErr } = await supabase
+      .from('transactions')
+      .select('id, car_id')
+      .eq('id', transactionId)
+      .single();
+
+    if (fetchErr) {
+      console.error('❌ Error fetching transaction:', fetchErr);
+      return { success: false, error: fetchErr.message };
+    }
+
+    console.log('📋 Data transaksi:', tx);
+
+    if (!tx?.car_id) {
+      console.error('❌ Car ID tidak ditemukan pada transaksi');
+      return { success: false, error: 'Car ID tidak ditemukan pada transaksi' };
+    }
+
+    // Cek status mobil saat ini
+    const { data: carData, error: carFetchErr } = await supabase
+      .from('cars')
+      .select('status')
+      .eq('id', tx.car_id)
+      .single();
+      
+    if (carFetchErr) {
+      console.error('❌ Error fetching car status:', carFetchErr);
+    } else {
+      console.log('🚗 Status mobil sebelum update:', carData?.status);
+    }
+
+    // ⭐ LANGKAH 1: Update status mobil menjadi 'reserved' TERLEBIH DAHULU
+    // Ini sangat penting agar mobil SEGERA hilang dari katalog
+    const { data: updatedCar, error: carErr } = await supabase
+      .from('cars')
+      .update({
+        status: 'reserved',
+        updated_at: now
+      })
+      .eq('id', tx.car_id)
+      .select()
+      .single();
+
+    if (carErr) {
+      console.error('❌ Error updating car status:', carErr);
+      return { success: false, error: `Gagal update status mobil: ${carErr.message}` };
+    }
+
+    console.log('✅ Status mobil berhasil diubah menjadi reserved:', updatedCar);
+
+    // LANGKAH 2: Update payment -> success + verified
+    const { data: updatedPayment, error: paymentErr } = await supabase
       .from('payments')
       .update({
         status: 'success',
         verified_by: adminId,
-        verified_at: new Date().toISOString()
+        verified_at: now
       })
-      .eq('id', paymentId);
-      
-    if (paymentErr) return { success: false, error: paymentErr.message };
+      .eq('id', paymentId)
+      .select()
+      .single();
 
-    // 2) Update transaksi: booking_status jadi 'booking_paid', status jadi 'confirmed'
-    const { error: txnErr } = await supabase
+    if (paymentErr) {
+      console.error('❌ Error updating payment:', paymentErr);
+      // Rollback car status jika payment gagal
+      await supabase
+        .from('cars')
+        .update({ status: 'available', updated_at: now })
+        .eq('id', tx.car_id);
+      return { success: false, error: paymentErr.message };
+    }
+
+    console.log('✅ Payment berhasil diupdate menjadi success:', updatedPayment);
+
+    // LANGKAH 3: Update status transaksi
+    const { data: updatedTx, error: txnErr } = await supabase
       .from('transactions')
       .update({
+        payment_status: 'paid',
         booking_status: 'booking_paid',
         status: 'confirmed',
-        confirmed_at: new Date().toISOString()
+        updated_at: now,
       })
-      .eq('id', transactionId);
-      
-    if (txnErr) return { success: false, error: txnErr.message };
+      .eq('id', transactionId)
+      .select()
+      .single();
 
-    return { success: true, message: 'Pembayaran booking fee telah dikonfirmasi' };
+    if (txnErr) {
+      console.error('❌ Error updating transaction:', txnErr);
+      // Rollback car status dan payment jika transaksi gagal
+      await supabase
+        .from('cars')
+        .update({ status: 'available', updated_at: now })
+        .eq('id', tx.car_id);
+      await supabase
+        .from('payments')
+        .update({ status: 'uploaded', verified_by: null, verified_at: null })
+        .eq('id', paymentId);
+      return { success: false, error: txnErr.message };
+    }
+
+    console.log('✅ Transaction berhasil diupdate:', updatedTx);
+
+    // Verifikasi sekali lagi status mobil
+    const { data: finalCarData } = await supabase
+      .from('cars')
+      .select('status')
+      .eq('id', tx.car_id)
+      .single();
+      
+    console.log('🚗 Status mobil setelah semua proses:', finalCarData?.status);
+
+    return { 
+      success: true, 
+      message: '✅ Pembayaran booking fee dikonfirmasi. Mobil telah di-reserved dan tidak lagi tersedia di katalog.' 
+    };
   } catch (e: any) {
-    return { success: false, error: e.message || 'Gagal konfirmasi pembayaran' };
+    console.error('💥 Error in confirmBookingPayment:', e);
+    return { success: false, error: e.message || 'Unknown error' };
   }
 }
 
@@ -643,20 +744,49 @@ export async function markAsPaidFull(
   }
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
+    // Ambil car_id dari transaksi
+    const { data: tx, error: fetchErr } = await supabase
+      .from('transactions')
+      .select('id, car_id')
+      .eq('id', transactionId)
+      .single();
+
+    if (fetchErr) {
+      return { success: false, error: fetchErr.message };
+    }
+
+    const now = new Date().toISOString();
+
+    // Update transaksi dengan status completed
     const { error } = await supabase
       .from('transactions')
       .update({
         final_payment_method: 'full',
         final_payment_proof: data.payment_proof || null,
         final_payment_notes: data.payment_notes || null,
-        final_payment_completed_at: new Date().toISOString(),
+        final_payment_completed_at: now,
         status: 'completed',
-        payment_status: 'paid', // Mengubah payment_status menjadi 'paid'
-        completed_at: new Date().toISOString()
+        payment_status: 'paid',
+        completed_at: now
       })
       .eq('id', transactionId);
       
     if (error) return { success: false, error: error.message };
+    
+    // Update status mobil menjadi terjual (sold)
+    if (tx.car_id) {
+      const { error: carErr } = await supabase
+        .from('cars')
+        .update({
+          status: 'sold',
+          updated_at: now
+        })
+        .eq('id', tx.car_id);
+
+      if (carErr) {
+        console.error('Error updating car status:', carErr);
+      }
+    }
     
     return { success: true, message: 'Pembayaran penuh berhasil dicatat' };
   } catch (e: any) {
@@ -670,7 +800,7 @@ export async function markAsPaidCredit(
   adminId: string,
   data: {
     payment_proof?: string;
-    payment_notes?: string; // notes bisa berisi: "Kredit BCA 36 bulan, approved"
+    payment_notes?: string;
   }
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
@@ -737,7 +867,6 @@ export async function cancelTransaction(
         booking_status: 'booking_cancelled',
         cancelled_at: now,
         updated_at: now,
-        // Simpan alasan ke notes agar tetap tercatat
         notes: reason ? `Cancelled by ${adminId}: ${reason}` : null,
       })
       .eq('id', transactionId)
@@ -761,10 +890,10 @@ export async function refundBookingFee(
   proofUrl?: string
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
-    // Ambil booking_fee dari transaksi dan abaikan amount dari UI (refund 100%)
+    // Ambil booking_fee dan car_id dari transaksi
     const { data: tx, error: fetchErr } = await supabase
       .from('transactions')
-      .select('id, booking_fee')
+      .select('id, booking_fee, car_id')
       .eq('id', transactionId)
       .single();
 
@@ -778,10 +907,11 @@ export async function refundBookingFee(
 
     const now = new Date().toISOString();
 
+    // Update transaksi dengan status refund
     const { data, error } = await supabase
       .from('transactions')
       .update({
-        refund_amount: bookingFee,                 // selalu 100%
+        refund_amount: bookingFee,
         refund_processed_at: now,
         refund_reason: reason || null,
         proof_of_refund: proofUrl || null,
@@ -798,6 +928,22 @@ export async function refundBookingFee(
     if (error) {
       return { success: false, error: error.message };
     }
+
+    // Update status mobil kembali menjadi available agar muncul di katalog
+    if (tx.car_id) {
+      const { error: carErr } = await supabase
+        .from('cars')
+        .update({
+          status: 'available',
+          updated_at: now
+        })
+        .eq('id', tx.car_id);
+
+      if (carErr) {
+        console.error('Error updating car status:', carErr);
+      }
+    }
+
     return { success: true, message: 'Refund booking fee diproses' };
   } catch (e: any) {
     return { success: false, error: e.message || 'Unknown error' };

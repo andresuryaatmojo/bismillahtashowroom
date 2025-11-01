@@ -985,15 +985,19 @@ const HalamanRiwayat: React.FC = () => {
 
   const goToPayment = (t: DataTransaksi) => {
     // Prioritize down_payment if it exists (booking fee)
-    const paymentAmount = t.down_payment || t.total_amount;
+    const isBookingFee = isUnpaidBooking(t) || t.booking_status === 'booking_pending';
+    const paymentAmount = isBookingFee
+      ? (t.booking_fee ?? t.total_amount)
+      : (t.remaining_payment && t.remaining_payment > 0 ? t.remaining_payment : t.total_amount);
     
     navigate('/pembayaran', {
       state: {
         amount: paymentAmount,
         transactionId: t.id,
         referenceId: t.invoice_number,
-        paymentType: t.down_payment ? 'down_payment' : 
-                    (t.remaining_payment && t.remaining_payment > 0 ? 'remaining_payment' : 'full_payment'),
+        paymentType: isBookingFee
+          ? 'booking_fee'
+          : (t.remaining_payment && t.remaining_payment > 0 ? 'remaining_payment' : 'full_payment'),
       },
     });
   };

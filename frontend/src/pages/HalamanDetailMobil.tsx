@@ -66,7 +66,7 @@ const HalamanDetailMobil: React.FC = () => {
     }
   }, [id, user]);
 
-  // Load user data
+  // Fungsi loadUser
   const loadUser = async () => {
     const { data } = await supabase.auth.getUser();
     if (data.user) {
@@ -76,7 +76,7 @@ const HalamanDetailMobil: React.FC = () => {
         .from('users')
         .select('full_name, email, phone_number')
         .eq('auth_user_id', data.user.id)
-        .single();
+        .maybeSingle(); // was .single()
       
       if (userData) {
         setBookingForm(prev => ({
@@ -94,13 +94,18 @@ const HalamanDetailMobil: React.FC = () => {
     if (!user) return;
     
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('wishlists')
-        .select('*')
+        .select('id')            // kecilkan payload
         .eq('car_id', carId)
         .eq('user_id', user.id)
-        .single();
+        .limit(1)
+        .maybeSingle();          // was .single()
       
+      if (error) {
+        // Jika ada error selain 0 baris, log agar mudah debug
+        console.error('Error checking wishlist status:', error);
+      }
       setIsInWishlist(!!data);
     } catch (error) {
       console.error('Error checking wishlist status:', error);
@@ -301,8 +306,9 @@ const HalamanDetailMobil: React.FC = () => {
   }
 
   const primaryImage = car.car_images?.find((img: any) => img.is_primary) || car.car_images?.[0];
-  // Gunakan fallback ke `car.specifications` untuk kompatibilitas data lama
   const specs = car.car_specifications || car.specifications || {};
+  // Tentukan apakah user adalah pemilik mobil ini
+  const isOwner = !!(user?.id && car?.seller_id && user.id === car.seller_id);
   
   // Check if specifications exist and have any features
   const hasSpecs = specs && (
@@ -466,12 +472,28 @@ const HalamanDetailMobil: React.FC = () => {
               {/* Tombol Pesan Mobil dengan latar biru */}
               <div className="mb-4">
                 <Button 
-                  variant="default" 
+                  size="lg" 
                   className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={() => id && navigate('/transaksi', { state: { mobilId: id } })}
+                  disabled={isOwner}
+                  onClick={() => {
+                    if (isOwner) {
+                      toast({
+                        title: "Tidak dapat memesan",
+                        description: "Anda tidak dapat memesan mobil yang Anda jual sendiri.",
+                        variant: "warning"
+                      });
+                      return;
+                    }
+                    id && navigate('/transaksi', { state: { mobilId: id } });
+                  }}
                 >
                   Pesan Mobil
                 </Button>
+                {isOwner && (
+                  <p className="text-sm text-red-600 mt-2">
+                    Anda adalah pemilik mobil ini, pemesanan dinonaktifkan.
+                  </p>
+                )}
               </div>
               
               {/* Tombol Test Drive dan Chat Penjual dengan proporsi 50% 50% */}

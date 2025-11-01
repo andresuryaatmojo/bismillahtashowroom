@@ -147,91 +147,102 @@ const HalamanTransaksi: React.FC = () => {
       return;
     }
 
-    if (!car?.seller_id) {
-      window.alert('Informasi penjual tidak ditemukan');
-      return;
-    }
+    const handleCreateTransaction = async () => {
+      if (!car?.seller_id) {
+        window.alert('Informasi penjual tidak ditemukan');
+        return;
+      }
+    
+      // Cegah beli mobil sendiri
+      if (user?.id && car.seller_id && user.id === car.seller_id) {
+        window.alert('Anda tidak dapat membeli mobil yang Anda jual sendiri.');
+        return;
+      }
+    
+      try {
+        setIsProcessing(true);
 
-    try {
-      setIsProcessing(true);
+        // Debugging: Periksa status autentikasi
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log('🔐 Auth Session:', session ? 'Valid' : 'Invalid');
+        if (session) {
+          console.log('👤 User ID:', session.user.id);
 
-      // Debugging: Periksa status autentikasi
-      const { data: { session } } = await supabase.auth.getSession();
-      console.log('🔐 Auth Session:', session ? 'Valid' : 'Invalid');
-      if (session) {
-        console.log('👤 User ID:', session.user.id);
+          const expiresLabel =
+            typeof session.expires_at === 'number'
+              ? new Date(session.expires_at * 1000).toLocaleString()
+              : 'Unknown';
+          console.log('🔄 Token expires at:', expiresLabel);
 
-        const expiresLabel =
-          typeof session.expires_at === 'number'
-            ? new Date(session.expires_at * 1000).toLocaleString()
-            : 'Unknown';
-        console.log('🔄 Token expires at:', expiresLabel);
-
-        // Verifikasi konsistensi user vs session
-        if (user.id !== session.user.id && user.auth_user_id !== session.user.id) {
-          console.error('⚠️ User ID mismatch! user.id:', user.id, 'auth_user_id:', user.auth_user_id, 'session.user.id:', session.user.id);
+          // Verifikasi konsistensi user vs session
+          if (user.id !== session.user.id && user.auth_user_id !== session.user.id) {
+            console.error('⚠️ User ID mismatch! user.id:', user.id, 'auth_user_id:', user.auth_user_id, 'session.user.id:', session.user.id);
+          }
+        } else {
+          console.error('❌ No active session found!');
         }
-      } else {
-        console.error('❌ No active session found!');
-      }
 
-      console.log('📝 Creating transaction with booking fee...');
+        console.log('📝 Creating transaction with booking fee...');
 
-      // Pastikan buyer_id = auth.uid()
-      const result = await createTransaction({
-        buyer_id: (user.auth_user_id || session?.user.id) as string,
-        seller_id: car.seller_id,
-        car_id: carId,
-        car_price: prices.carPrice,
-        booking_fee: prices.bookingFee,
-        total_amount: prices.totalAmount,
-        trade_in_value: 0,
-        discount_amount: 0,
-        admin_fee: 0,
-        notes: `Booking untuk ${carDisplayName}`,
-        transaction_details: JSON.stringify({
-          car_name: carDisplayName,
+        // Pastikan buyer_id = auth.uid()
+        const result = await createTransaction({
+          buyer_id: (user.auth_user_id || session?.user.id) as string,
+          seller_id: car.seller_id,
+          car_id: carId,
+          car_price: prices.carPrice,
           booking_fee: prices.bookingFee,
-          remaining_payment: prices.remainingPayment
-        })
-      });
+          total_amount: prices.totalAmount,
+          trade_in_value: 0,
+          discount_amount: 0,
+          admin_fee: 0,
+          notes: `Booking untuk ${carDisplayName}`,
+          transaction_details: JSON.stringify({
+            car_name: carDisplayName,
+            booking_fee: prices.bookingFee,
+            remaining_payment: prices.remainingPayment
+          })
+        });
 
-      if (!result.success) {
-        console.error('❌ Error creating transaction:', result.error);
-        window.alert('Gagal membuat transaksi: ' + (result.error || 'Unknown error'));
-        return;
+        if (!result.success) {
+          console.error('❌ Error creating transaction:', result.error);
+          window.alert('Gagal membuat transaksi: ' + (result.error || 'Unknown error'));
+          return;
+        }
+
+        console.log('✅ Transaction created:', result.data);
+
+        // Generate reference ID
+        const referenceId = `BOOK-${carId.substring(0, 8)}-${Date.now()}`;
+        const transactionId = result.data?.id;
+
+        if (!transactionId) {
+          window.alert('Transaction ID tidak ditemukan');
+          return;
+        }
+
+        // Navigate ke halaman pembayaran dengan data booking fee
+        console.log('🔄 Navigating to payment page...');
+        navigate('/pembayaran', {
+          state: {
+            amount: prices.bookingFee, // Hanya bayar booking fee dulu
+            referenceId,
+            transactionId,
+            mobilId: carId,
+            paymentType: 'booking_fee', // UPDATE: gunakan booking_fee
+            carName: carDisplayName,
+            totalCarPrice: prices.totalAmount
+          },
+        });
+      } catch (err: any) {
+        console.error('💥 Error creating transaction:', err);
+        window.alert('Terjadi kesalahan saat membuat transaksi: ' + (err?.message || 'Unknown error'));
+      } finally {
+        setIsProcessing(false);
       }
+    };
 
-      console.log('✅ Transaction created:', result.data);
-
-      // Generate reference ID
-      const referenceId = `BOOK-${carId.substring(0, 8)}-${Date.now()}`;
-      const transactionId = result.data?.id;
-
-      if (!transactionId) {
-        window.alert('Transaction ID tidak ditemukan');
-        return;
-      }
-
-      // Navigate ke halaman pembayaran dengan data booking fee
-      console.log('🔄 Navigating to payment page...');
-      navigate('/pembayaran', {
-        state: {
-          amount: prices.bookingFee, // Hanya bayar booking fee dulu
-          referenceId,
-          transactionId,
-          mobilId: carId,
-          paymentType: 'booking_fee', // UPDATE: gunakan booking_fee
-          carName: carDisplayName,
-          totalCarPrice: prices.totalAmount
-        },
-      });
-    } catch (err: any) {
-      console.error('💥 Error creating transaction:', err);
-      window.alert('Terjadi kesalahan saat membuat transaksi: ' + (err?.message || 'Unknown error'));
-    } finally {
-      setIsProcessing(false);
-    }
+    // PANGGIL fungsi yang sudah didefinisikan
+    await handleCreateTransaction();
   };
 
   return (
@@ -517,11 +528,11 @@ const HalamanTransaksi: React.FC = () => {
 
                 <div className="mb-4">
                   <button
-                    disabled={!isTermsAccepted || isProcessing || !car?.seller_id}
+                    disabled={!isTermsAccepted || isProcessing}
                     onClick={handlePayNow}
                     className={
                       `w-full py-3 rounded-lg font-semibold transition-colors ` +
-                      `${!isTermsAccepted || isProcessing || !car?.seller_id
+                      `${!isTermsAccepted || isProcessing
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'}`
                     }

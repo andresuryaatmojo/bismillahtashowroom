@@ -64,7 +64,6 @@ interface TransactionFilter {
   date_to: string;
   search: string;
   payment_method: string;
-  seller_type: string; // 'all', 'showroom', 'external'
 }
 
 // Interface untuk status halaman
@@ -163,8 +162,7 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
     date_from: '',
     date_to: '',
     search: '',
-    payment_method: 'all',
-    seller_type: 'all' // Default tampilkan semua transaksi untuk admin
+    payment_method: 'all'
   });
   
   // State untuk status halaman
@@ -219,12 +217,35 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
   // Inisialisasi kontroler transaksi
   // Tidak lagi menggunakan KontrollerTransaksi untuk cancel/refund
 
-  // Fungsi untuk memuat data transaksi berdasarkan jenis penjual
+  // Fungsi untuk memuat data transaksi dari mobil yang dijual user seller ini
   const loadTransactions = async (): Promise<TransactionWithPayments[] | undefined> => {
     setPageStatus(prev => ({ ...prev, isLoading: true, error: null }));
     
+    if (!user?.id) {
+      setPageStatus(prev => ({ ...prev, error: 'User tidak ditemukan', isLoading: false }));
+      return undefined;
+    }
+    
     try {
-      let result: { success: boolean; data?: TransactionWithPayments[]; total?: number; error?: string };
+      // Ambil semua mobil yang dijual oleh user ini
+      const { data: userCars, error: carsError } = await supabase
+        .from('cars')
+        .select('id')
+        .eq('seller_id', user.id);
+
+      if (carsError) {
+        setPageStatus(prev => ({ ...prev, error: carsError.message }));
+        return undefined;
+      }
+
+      if (!userCars || userCars.length === 0) {
+        setTransactions([]);
+        setFilteredTransactions([]);
+        setStats({ total: 0, pending: 0, completed: 0, cancelled: 0, totalAmount: 0 });
+        return [];
+      }
+
+      const userCarIds = userCars.map(car => car.id);
       
       // Build filter options
       const filterOpts = {
@@ -234,39 +255,123 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
         search: filter.search || undefined
       };
       
-      if (filter.seller_type === 'showroom') {
-        result = await getShowroomTransactionsWithPayments(1, 100, filterOpts);
-      } else if (filter.seller_type === 'external') {
-        result = await getExternalTransactionsWithPayments(1, 100, filterOpts);
-      } else {
-        result = await getPurchaseTransactionsWithPayments(1, 100, filterOpts);
+      // Query transaksi hanya untuk mobil yang dijual user ini
+      let query = supabase
+        .from('transactions')
+        .select('*', { count: 'exact' })
+        .eq('transaction_type', 'purchase')
+        .in('car_id', userCarIds)
+        .order('created_at', { ascending: false })
+        .range(0, 99); // Ambil maksimal 100 transaksi
+
+      if (filterOpts.status && filterOpts.status.length) {
+        query = query.in('status', filterOpts.status);
       }
-      
-      if (result.success && result.data) {
-        setTransactions(result.data);
-        setFilteredTransactions(result.data);
+      if (filterOpts.booking_status && filterOpts.booking_status.length) {
+        query = query.in('booking_status', filterOpts.booking_status);
+      }
+      if (filterOpts.payment_status && filterOpts.payment_status.length) {
+        query = query.in('payment_status', filterOpts.payment_status);
+      }
+      if (filterOpts.search && filterOpts.search.trim()) {
+        query = query.ilike('invoice_number', `%${filterOpts.search.trim()}%`);
+      }
+
+      const { data: transactions, error, count } = await query;
+
+      if (error) {
+        setPageStatus(prev => ({ ...prev, error: error.message }));
+        return undefined;
+      }
+
+      // Ambil data buyer untuk setiap transaksi
+      const buyerIds = [...new Set((transactions || []).map((tx: any) => tx.buyer_id).filter(Boolean))];
+      let buyersMap: Record<string, any> = {};
+      if (buyerIds.length > 0) {
+        const { data: buyers } = await supabase
+          .from('users')
+          .select('id, full_name, email, phone_number')
+          .in('id', buyerIds);
+
+        if (buyers) {
+          buyersMap = buyers.reduce((acc, buyer) => {
+            acc[buyer.id] = buyer;
+            return acc;
+          }, {} as Record<string, any>);
+        }
+      }
+
+      const txns = (transactions || []).map((tx: any) => {
+        const buyer = buyersMap[tx.buyer_id];
+        return {
+          ...tx,
+          buyer_name: buyer?.full_name || null,
+          buyer_email: buyer?.email || null,
+          buyer_phone: buyer?.phone_number || null,
+        };
+      }) as Transaction[];
+
+      // Ambil data payments untuk setiap transaksi
+      if (txns.length > 0) {
+        const ids = txns.map(t => t.id);
+        const { data: paymentsData, error: paymentsError } = await supabase
+          .from('payments')
+          .select('*')
+          .in('transaction_id', ids);
+
+        if (paymentsError) {
+          setPageStatus(prev => ({ ...prev, error: paymentsError.message }));
+          return undefined;
+        }
+
+        const paymentsByTxn = new Map<string, Payment[]>();
+        (paymentsData || []).forEach(p => {
+          const list = paymentsByTxn.get(p.transaction_id) || [];
+          list.push(p as Payment);
+          paymentsByTxn.set(p.transaction_id, list);
+        });
+
+        const combined: TransactionWithPayments[] = txns.map(txn => {
+          const list = paymentsByTxn.get(txn.id) || [];
+          const totalPaid = list
+            .filter(p => p.status === 'success')
+            .reduce((sum, p) => sum + (p.amount || 0), 0);
+          const latest = list.slice().sort(
+            (a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()
+          )[0];
+
+          return {
+            transaction: txn,
+            payments: list,
+            paymentSummary: {
+              count: list.length,
+              totalPaid,
+              latestStatus: latest?.status,
+              latestPaidAt: latest?.status === 'success' ? latest.payment_date : null,
+            },
+          };
+        });
+
+        setTransactions(combined);
+        setFilteredTransactions(combined);
         
         // Hitung statistik
-        const total = result.data.length;
-        const pending = result.data.filter(t => t.transaction.booking_status === 'booking_pending').length;
-        const completed = result.data.filter(t => t.transaction.status === 'completed').length;
-        const cancelled = result.data.filter(t => 
+        const total = combined.length;
+        const pending = combined.filter(t => t.transaction.booking_status === 'booking_pending').length;
+        const completed = combined.filter(t => t.transaction.status === 'completed').length;
+        const cancelled = combined.filter(t => 
           t.transaction.status === 'cancelled' || 
           t.transaction.booking_status === 'booking_cancelled'
         ).length;
-        const totalAmount = result.data.reduce((sum, t) => sum + Number(t.transaction.total_amount), 0);
+        const totalAmount = combined.reduce((sum, t) => sum + Number(t.transaction.total_amount), 0);
         
-        setStats({
-          total,
-          pending,
-          completed,
-          cancelled,
-          totalAmount,
-        });
-        return result.data;
+        setStats({ total, pending, completed, cancelled, totalAmount });
+        return combined;
       } else {
-        setPageStatus(prev => ({ ...prev, error: result.error || 'Gagal memuat data transaksi' }));
-        return undefined;
+        setTransactions([]);
+        setFilteredTransactions([]);
+        setStats({ total: 0, pending: 0, completed: 0, cancelled: 0, totalAmount: 0 });
+        return [];
       }
     } catch (error) {
       setPageStatus(prev => ({ ...prev, error: 'Terjadi kesalahan saat memuat data' }));
@@ -334,8 +439,7 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
       date_from: '',
       date_to: '',
       search: '',
-      payment_method: 'all',
-      seller_type: 'all', // Default ke semua
+      payment_method: 'all'
     });
     setFilteredTransactions(transactions);
     setCurrentPage(1);
@@ -662,7 +766,7 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
         }
       }
       
-      navigate('/admin/chat', { state: { activeRoomId: room.id } });
+      navigate('/chat', { state: { activeRoomId: room.id } });
     } catch (e) {
       alert('Gagal membuka chat');
     }
@@ -1163,10 +1267,10 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
 
 
 
-  // Effect untuk memuat data transaksi saat komponen dimount dan ketika filter seller_type berubah
+  // Effect untuk memuat data transaksi saat komponen dimount dan ketika user berubah
   useEffect(() => {
     loadTransactions();
-  }, [filter.seller_type]);
+  }, [user?.id]);
 
   // Effect untuk menerapkan filter saat filter berubah
   useEffect(() => {
@@ -1205,21 +1309,16 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
         >
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-gray-900">Kelola Transaksi Pembelian</h1>
+              <h1 className="text-3xl font-bold text-gray-900">Kelola Transaksi Penjualan</h1>
               <Badge 
-                variant={filter.seller_type === 'showroom' ? 'default' : 'secondary'}
+                variant="default"
                 className="text-sm"
               >
-                {filter.seller_type === 'showroom' ? 'Transaksi Showroom' : 
-                 filter.seller_type === 'external' ? 'Transaksi Eksternal' : 'Semua Transaksi'}
+                Mobil Saya
               </Badge>
             </div>
             <p className="text-gray-600 mt-1">
-              {filter.seller_type === 'showroom'
-                ? 'Kelola dan pantau transaksi pembelian mobil dari showroom (admin)'
-                : filter.seller_type === 'external'
-                ? 'Kelola dan pantau transaksi pembelian mobil dari penjual eksternal'
-                : 'Kelola dan pantau semua transaksi pembelian mobil dari semua penjual'}
+              Kelola dan pantau transaksi pembelian mobil yang Anda jual
             </p>
           </div>
           <div className="flex space-x-3">
@@ -1391,19 +1490,7 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
                   </SelectContent>
                 </Select>
                 
-                <Select
-                  value={filter.seller_type}
-                  onValueChange={(value) => setFilter({ ...filter, seller_type: value })}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Jenis Penjual" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="showroom">Showroom</SelectItem>
-                    <SelectItem value="external">Eksternal</SelectItem>
-                    <SelectItem value="all">Semua</SelectItem>
-                  </SelectContent>
-                </Select>
+
                 
                 <Button variant="outline" onClick={resetFilter} className="flex items-center">
                   <RefreshCw size={16} className="mr-2" />

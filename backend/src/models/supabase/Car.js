@@ -294,7 +294,7 @@ class Car {
   }
 
   static validateStatus(status) {
-    const validStatuses = ['available', 'sold', 'pending', 'rejected'];
+    const validStatuses = ['available', 'sold', 'pending', 'rejected', 'reserved'];
     return validStatuses.includes(status);
   }
 }

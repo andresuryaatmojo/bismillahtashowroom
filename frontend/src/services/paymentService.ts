@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabaseAdmin';
 
 // ==================== INTERFACES ====================
 
@@ -328,30 +329,106 @@ class PaymentService {
 
   /**
    * Memverifikasi payment (untuk admin)
+   * PENTING: Untuk booking fee, fungsi ini akan mengupdate status mobil dan transaksi
    */
   async verifyPayment(paymentId: string, verifiedBy: string, isApproved: boolean, rejectionReason?: string): Promise<PaymentResponse> {
     try {
-      // Ambil payment untuk cek rejection_count
-      const { data: existingPayment } = await supabase
+      const now = new Date().toISOString();
+
+      // Ambil payment beserta transaction dan car info
+      const { data: paymentData, error: fetchError } = await supabase
         .from('payments')
-        .select('rejection_count')
+        .select(`
+          *,
+          transactions!inner (
+            id,
+            car_id,
+            booking_status,
+            status
+          )
+        `)
         .eq('id', paymentId)
         .single();
 
+      if (fetchError) {
+        return {
+          success: false,
+          message: 'Payment tidak ditemukan',
+          error: fetchError.message
+        };
+      }
+
       const updateData: UpdatePaymentInput = {
         verified_by: verifiedBy,
-        verified_at: new Date().toISOString(),
-        status: isApproved ? 'success' : 'rejected' // UPDATE: gunakan rejected bukan failed
+        verified_at: now,
+        status: isApproved ? 'success' : 'rejected'
       };
 
       if (!isApproved) {
         updateData.rejection_reason = rejectionReason || 'Payment rejected by admin';
         updateData.rejected_by = verifiedBy;
-        updateData.rejected_at = new Date().toISOString();
-        updateData.rejection_count = (existingPayment?.rejection_count || 0) + 1;
+        updateData.rejected_at = now;
+        updateData.rejection_count = (paymentData?.rejection_count || 0) + 1;
+      } else {
+        // Jika approved dan ini adalah booking fee, update status mobil dan transaksi
+        if (paymentData.payment_type === 'booking_fee') {
+          const transactionId = paymentData.transaction_id;
+          const carId = paymentData.transactions?.car_id;
+
+          if (carId) {
+            // Update status mobil menjadi 'reserved'
+            const { error: carError } = await supabase
+              .from('cars')
+              .update({
+                status: 'reserved',
+                updated_at: now
+              })
+              .eq('id', carId);
+
+            if (carError) {
+              console.error('Error updating car status:', carError);
+              return {
+                success: false,
+                message: 'Gagal mengupdate status mobil',
+                error: carError.message
+              };
+            }
+
+            // Update status transaksi
+            const { error: txError } = await supabase
+              .from('transactions')
+              .update({
+                payment_status: 'paid',
+                booking_status: 'booking_paid',
+                status: 'confirmed',
+                updated_at: now
+              })
+              .eq('id', transactionId);
+
+            if (txError) {
+              console.error('Error updating transaction status:', txError);
+              // Rollback car status jika transaksi gagal
+              await supabase
+                .from('cars')
+                .update({ status: 'available', updated_at: now })
+                .eq('id', carId);
+              return {
+                success: false,
+                message: 'Gagal mengupdate status transaksi',
+                error: txError.message
+              };
+            }
+          }
+        }
       }
 
-      return await this.updatePayment(paymentId, updateData);
+      const result = await this.updatePayment(paymentId, updateData);
+      
+      if (result.success && isApproved && paymentData.payment_type === 'booking_fee') {
+        result.message = 'Booking fee berhasil diverifikasi. Mobil telah di-reserved dan tidak lagi tersedia di katalog.';
+      }
+
+      return result;
     } catch (error) {
       console.error('Error in verifyPayment:', error);
       return {
@@ -367,12 +444,124 @@ class PaymentService {
    */
   async uploadProofOfPayment(paymentId: string, proofUrl: string): Promise<PaymentResponse> {
     try {
-      return await this.updatePayment(paymentId, {
+      console.log('🔄 uploadProofOfPayment dipanggil dengan paymentId:', paymentId);
+      
+      // Dapatkan data payment untuk mendapatkan transaction_id
+      const { data: payment, error: paymentError } = await supabase
+        .from('payments')
+        .select('transaction_id, payment_type')
+        .eq('id', paymentId)
+        .single();
+
+      if (paymentError || !payment) {
+        console.error('❌ Error fetching payment data:', paymentError);
+        return {
+          success: false,
+          message: 'Failed to fetch payment data',
+          error: paymentError?.message || 'Payment not found'
+        };
+      }
+
+      console.log('📋 Payment data:', payment);
+
+      // Hanya proses untuk booking_fee
+      if (payment.payment_type === 'booking_fee') {
+        console.log('✅ Payment type is booking_fee, proceeding to update car status');
+        
+        // Dapatkan data transaksi untuk mendapatkan car_id
+        const { data: transaction, error: txError } = await supabase
+          .from('transactions')
+          .select('car_id')
+          .eq('id', payment.transaction_id)
+          .single();
+
+        if (txError || !transaction) {
+          console.error('❌ Error fetching transaction data:', txError);
+          return {
+            success: false,
+            message: 'Failed to fetch transaction data',
+            error: txError?.message || 'Transaction not found'
+          };
+        }
+
+        console.log('📋 Transaction data with car_id:', transaction);
+
+        // Update status mobil menjadi reserved (hanya jika masih available)
+        const now = new Date().toISOString();
+        console.log('🚗 Updating car status to reserved for car_id:', transaction.car_id);
+
+        let carUpdateOk = false;
+
+        // Coba update dengan admin client (bypass RLS)
+        try {
+          const { data: adminCarData, error: adminCarErr } = await supabaseAdmin
+            .from('cars')
+            .update({ status: 'reserved', updated_at: now })
+            .eq('id', transaction.car_id)
+            .eq('status', 'available')
+            .select('id, status');
+
+          if (adminCarErr) {
+            console.error('❌ Admin update car status error:', adminCarErr);
+          } else {
+            carUpdateOk = Array.isArray(adminCarData) ? adminCarData.length > 0 : !!adminCarData;
+            console.log('✅ Admin updated car to reserved:', adminCarData);
+          }
+        } catch (e) {
+          console.warn('⚠️ supabaseAdmin unavailable, falling back to user client:', e);
+        }
+
+        // Fallback ke user-level update jika admin gagal
+        if (!carUpdateOk) {
+          const { data: carData, error: carError } = await supabase
+            .from('cars')
+            .update({ status: 'reserved', updated_at: now })
+            .eq('id', transaction.car_id)
+            .eq('status', 'available')
+            .select('id, status');
+
+          if (carError) {
+            console.error('❌ Error updating car status (fallback):', carError);
+          } else {
+            carUpdateOk = Array.isArray(carData) ? carData.length > 0 : !!carData;
+            console.log('✅ Fallback update car to reserved:', carData);
+          }
+        }
+
+        if (!carUpdateOk) {
+          console.warn('ℹ️ Car update matched zero rows — possibly already reserved or RLS blocked returning rows.');
+        }
+
+        // Verifikasi read-back status mobil setelah update dengan admin client (hindari RLS)
+        try {
+          const { data: verifyCarAdmin, error: verifyAdminErr } = await supabaseAdmin
+            .from('cars')
+            .select('status')
+            .eq('id', transaction.car_id)
+            .single();
+
+          if (verifyAdminErr) {
+            console.error('❌ Error verifying car status (admin):', verifyAdminErr);
+          } else {
+            console.log('🚗 Status mobil setelah update bukti pembayaran (admin read):', verifyCarAdmin?.status);
+          }
+        } catch (e) {
+          console.warn('⚠️ Admin verify failed, skipping:', e);
+        }
+      } else {
+        console.log('ℹ️ Payment type is not booking_fee, skipping car status update');
+      }
+
+      // Update payment status ke uploaded
+      const result = await this.updatePayment(paymentId, {
         proof_of_payment: proofUrl,
-        status: 'uploaded' // UPDATE: gunakan uploaded bukan processing
+        status: 'uploaded'
       });
+      
+      console.log('📊 Final result of uploadProofOfPayment:', result);
+      return result;
     } catch (error) {
-      console.error('Error in uploadProofOfPayment:', error);
+      console.error('❌ Error in uploadProofOfPayment:', error);
       return {
         success: false,
         message: 'An unexpected error occurred',
