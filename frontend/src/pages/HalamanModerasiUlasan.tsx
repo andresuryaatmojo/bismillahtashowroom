@@ -406,6 +406,7 @@ const HalamanModerasiUlasan: React.FC = () => {
   const openEditModal = (review: ReviewData) => {
     setState(prev => ({
       ...prev,
+      selectedReview: review,
       showEditModal: true,
       editData: {
         review_text: review.review_text || '',
@@ -434,16 +435,6 @@ const HalamanModerasiUlasan: React.FC = () => {
       setState(prev => ({ ...prev, isLoading: true }));
       
       const now = new Date().toISOString();
-      
-      // Gunakan fetchSupabaseRest untuk update data
-      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        throw new Error('Supabase environment variables are missing');
-      }
-      
-      const url = new URL(`${SUPABASE_URL}/rest/v1/reviews`);
-      url.search = `id=eq.${state.selectedReview.id}`;
-      url.searchParams.set('apikey', SUPABASE_ANON_KEY);
-      
       const updateData = {
         review_text: state.editData.review_text,
         pros: state.editData.pros,
@@ -453,21 +444,13 @@ const HalamanModerasiUlasan: React.FC = () => {
         moderated_at: now
       };
       
-      const response = await fetch(url.toString(), {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify(updateData)
-      });
+      // Gunakan Supabase client agar JWT user ikut dan RLS terpenuhi
+      const { error } = await supabase
+        .from('reviews')
+        .update(updateData)
+        .eq('id', state.selectedReview.id);
       
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`Supabase REST error ${response.status}: ${errorText || response.statusText}`);
-      }
+      if (error) throw error;
       
       // Refresh data
       await loadReviews();
