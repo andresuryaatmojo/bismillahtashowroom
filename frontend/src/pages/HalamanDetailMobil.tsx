@@ -16,7 +16,7 @@ import {
   Fuel, Gauge, Settings, Zap, Shield, Award, CreditCard, ArrowLeft, Loader2,
   Camera, KeyRound, Power, Bluetooth, Usb, Fan, Wifi, Sun, Monitor, Radar, MessageSquare
 } from 'lucide-react';
-import { carService } from '../services/carService';
+import { carService, computeCatalogDisplay } from '../services/carService';
 import { testDriveService } from '../services/testDriveService';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -797,42 +797,89 @@ const HalamanDetailMobil: React.FC = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-lg font-semibold text-gray-900">Harga</span>
-                      <span className="text-2xl font-bold text-blue-600">{formatCurrency(car.price)}</span>
-                    </div>
-                    
-                    <div className="space-y-2 text-sm text-gray-600">
-                      <div className="flex justify-between">
-                        <span>Cicilan mulai dari</span>
-                        <span className="font-medium">{formatCurrency(Math.floor(car.price / 60))}/bulan</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>DP minimal (20%)</span>
-                        <span className="font-medium">{formatCurrency(Math.floor(car.price * 0.2))}</span>
-                      </div>
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      className="w-full"
-                      onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
+                  {/* Status badge + TTL dari computed availability */}
+              {(() => {
+                const display = computeCatalogDisplay(car.status, car.active_transaction);
+                return (
+                  <div className="flex items-center justify-between mb-2">
+                    <span
+                      className={`px-2 py-1 rounded text-white ${
+                        display.badgeColor === 'green'
+                          ? 'bg-green-600'
+                          : display.badgeColor === 'yellow'
+                          ? 'bg-yellow-600'
+                          : display.badgeColor === 'orange'
+                          ? 'bg-orange-600'
+                          : 'bg-gray-600'
+                      }`}
                     >
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      Simulasi Kredit
-                    </Button>
-                    
+                      {display.label}
+                    </span>
+                    {display.expiresAt && (
+                      <span className="text-xs text-yellow-700">
+                        Booking berakhir: {new Date(display.expiresAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-semibold text-gray-900">Harga</span>
+                  <span className="text-2xl font-bold text-blue-600">{formatCurrency(car.price)}</span>
+                </div>
+                
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Cicilan mulai dari</span>
+                    <span className="font-medium">{formatCurrency(Math.floor(car.price / 60))}/bulan</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>DP minimal (20%)</span>
+                    <span className="font-medium">{formatCurrency(Math.floor(car.price * 0.2))}</span>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-full"
+                  onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
+                >
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  Simulasi Kredit
+                </Button>
+                
+                {/* Tombol Proses Pembelian: disable jika tidak available_for_booking */}
+                {(() => {
+                  const display = computeCatalogDisplay(car.status, car.active_transaction);
+                  return (
                     <Button
                       variant="default"
                       size="lg"
-                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
-                      onClick={() => setShowBookingModal(true)}
+                      className={`w-full ${
+                        display.canBook
+                          ? 'bg-blue-600 hover:bg-blue-700'
+                          : 'bg-gray-300 cursor-not-allowed text-gray-600'
+                      }`}
+                      disabled={!display.canBook}
+                      onClick={() => navigate('/pembelian', { state: { mobilId: car.id } })}
                     >
-                      <Calendar className="w-4 h-4 mr-2" />
-                      Booking Test Drive
+                      {display.canBook ? 'Proses Pembelian' : 'Sedang Diproses / Tidak Tersedia'}
                     </Button>
+                  );
+                })()}
+
+                <Button
+                  variant="default"
+                  size="lg"
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
+                  onClick={() => setShowBookingModal(true)}
+                >
+                  <Calendar className="w-4 h-4 mr-2" />
+                  Booking Test Drive
+                </Button>
                   </div>
                 </CardContent>
               </Card>

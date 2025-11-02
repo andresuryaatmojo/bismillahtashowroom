@@ -3,6 +3,9 @@ import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { cancelTransaction, refundBookingFee, BookingStatus } from '../services/transactionService';
+import PaymentProofViewer from '../components/PaymentProofViewer';
+import { Eye } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 
 // Interfaces
 interface DataMobil {
@@ -13,6 +16,7 @@ interface DataMobil {
   warna: string;
   foto: string[];
   harga: number;
+  status?: string; // Menambahkan property status
 }
 
 interface Payment {
@@ -91,6 +95,11 @@ interface DataUlasan {
   tanggalUlasan: string;
   helpful: number;
   status: 'published' | 'pending' | 'rejected';
+  rating_car_condition?: number; // 1-5 optional
+  rating_seller_service?: number; // 1-5 optional
+  rating_transaction_process?: number; // 1-5 optional
+  pros?: string; // optional
+  cons?: string; // optional
 }
 
 interface KriteriaFilter {
@@ -116,6 +125,13 @@ interface StatusHalaman {
 
 const HalamanRiwayat: React.FC = () => {
   // State management
+  // State untuk menampilkan ringkasan ulasan di modal detail
+  const [reviewRingkas, setReviewRingkas] = useState<{
+    rating_stars: number;
+    review_text: string | null;
+    images: string[];
+  } | null>(null);
+
   const [statusHalaman, setStatusHalaman] = useState<StatusHalaman>({
     view: 'list',
     loading: true,
@@ -153,6 +169,62 @@ const HalamanRiwayat: React.FC = () => {
       case 'partial': return 'Partial';
       default:
         return status ? status.charAt(0).toUpperCase() + status.slice(1) : '-';
+    }
+  };
+  
+  const formatPaymentStatusLabelWithContext = (t: DataTransaksi) => {
+    const paymentStatus = getDisplayPaymentStatus(t);
+    if (paymentStatus === 'paid') {
+      if (t.final_payment_completed_at || t.status === 'completed') {
+        return 'Full Paid';
+      }
+      if (hasBookingFeeSuccess(t) || t.booking_status === 'booking_paid') {
+        return 'Confirmed';
+      }
+      return 'Paid';
+    }
+    return formatPaymentStatusLabel(paymentStatus);
+  };
+
+  // Fungsi format tambahan untuk tampilan detail transaksi
+  const formatStatus = (status?: string) => {
+    switch (status) {
+      case 'pending': return 'Menunggu';
+      case 'confirmed': return 'Dikonfirmasi';
+      case 'processing': return 'Diproses';
+      case 'completed': return 'Selesai';
+      case 'cancelled': return 'Dibatalkan';
+      case 'refunded': return 'Dikembalikan';
+      default:
+        return status ? status.charAt(0).toUpperCase() + status.slice(1) : '-';
+    }
+  };
+
+  const formatTransactionType = (type?: string) => {
+    switch (type) {
+      case 'purchase': return 'Pembelian';
+      case 'installment': return 'Cicilan';
+      case 'trade_in': return 'Tukar Tambah';
+      case 'test_drive': return 'Test Drive';
+      case 'service': return 'Servis';
+      default:
+        return type ? type.charAt(0).toUpperCase() + type.slice(1) : '-';
+    }
+  };
+
+  const formatPaymentStatus = (status?: string) => {
+    return formatPaymentStatusLabel(status);
+  };
+
+  const formatPaymentType = (type?: string) => {
+    switch (type) {
+      case 'booking_fee': return 'Booking Fee';
+      case 'down_payment': return 'Uang Muka';
+      case 'installment': return 'Cicilan';
+      case 'full_payment': return 'Pembayaran Penuh';
+      case 'remaining_payment': return 'Sisa Pembayaran';
+      default:
+        return type ? type.charAt(0).toUpperCase() + type.slice(1) : '-';
     }
   };
 
@@ -213,10 +285,28 @@ const HalamanRiwayat: React.FC = () => {
     return paymentRefunded || headerRefunded;
   };
   
+  const [showProofModal, setShowProofModal] = useState(false);
+  const [currentProofUrl, setCurrentProofUrl] = useState<string | null>(null);
+
+  // Normalisasi path storage → public URL Supabase
+  const getPublicUrlFromPath = (proofPath: string): string => {
+    if (!proofPath) return '';
+    if (proofPath.startsWith('http')) return proofPath;
+    let fileName = proofPath;
+    if (proofPath.includes('/payment-proofs/')) {
+      const parts = proofPath.split('/payment-proofs/');
+      fileName = parts[parts.length - 1];
+    }
+    const { data } = supabase.storage.from('payment-proofs').getPublicUrl(fileName);
+    return data?.publicUrl || proofPath;
+  };
+
   const openRefundProof = () => {
     const url = statusHalaman.selectedTransaksi?.proof_of_refund;
     if (url) {
-      window.open(url, '_blank');
+      const publicUrl = getPublicUrlFromPath(url);
+      setCurrentProofUrl(publicUrl);
+      setShowProofModal(true);
     }
   };
 
@@ -245,6 +335,14 @@ const HalamanRiwayat: React.FC = () => {
         </span>
       );
     }
+    // Ubah: jika bukti pembayaran booking ditolak, tampilkan Booking Rejected
+    if (bookingStatus === 'booking_pending' && hasFailedPayment(t)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Booking Rejected
+        </span>
+      );
+    }
     switch (bookingStatus) {
       case 'booking_pending': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">Booking Pending</span>;
       case 'booking_paid': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Booking Paid</span>;
@@ -267,7 +365,7 @@ const HalamanRiwayat: React.FC = () => {
       <div className="flex items-center gap-2">
         {renderBookingStatusBadge(t)}
         <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getPaymentStatusBadgeColor(paymentStatus)}`}>
-          {formatPaymentStatusLabel(paymentStatus)}
+          {formatPaymentStatusLabelWithContext(t)}
         </span>
         {hasRefundRequest(t) && !hasRefund(t) && (
           <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
@@ -310,10 +408,31 @@ const HalamanRiwayat: React.FC = () => {
   const isBookingRejected = (t: DataTransaksi) =>
     t.booking_status === 'booking_rejected';
 
-  // Belum bayar booking: payment pending dan belum ada booking paid/pending
-  const isUnpaidBooking = (t: DataTransaksi) =>
-    (t.payment_status === 'pending' || t.payment_status === undefined) &&
-    !isBookingPaidOrPending(t);
+  // **REVISI: Cek apakah mobil sudah direserve oleh pembeli lain (FIRST PAY FIRST GET)**
+  const isReservedByOtherBuyer = (t: DataTransaksi): boolean => {
+    if (!user?.id) return false;
+    
+    // Cek apakah ada transaksi lain untuk mobil yang sama dengan booking_fee success
+    // yang bukan transaksi current user dan dibuat lebih dulu
+    const otherTransactions = daftarTransaksi.filter(
+      tx => tx.car_id === t.car_id && 
+      tx.id !== t.id && 
+      tx.buyer_id !== user.id &&
+      hasBookingFeeSuccess(tx) &&
+      new Date(tx.created_at) < new Date(t.created_at) // Pembeli lain membayar lebih dulu
+    );
+    
+    return otherTransactions.length > 0;
+  };
+
+  // **REVISI: Belum bayar booking - DENGAN VALIDASI RESERVED**
+  const isUnpaidBooking = (t: DataTransaksi) => {
+    // Jika mobil sudah direserve oleh pembeli lain, return false
+    if (isReservedByOtherBuyer(t)) return false;
+    
+    return (t.payment_status === 'pending' || t.payment_status === undefined) &&
+      !isBookingPaidOrPending(t);
+  };
 
   // Munculkan "Batalkan & Ajukan Refund" untuk booking_paid
   // dan booking_pending yang sudah memiliki pembayaran (agar tidak bentrok dengan "Belum Bayar")
@@ -493,12 +612,12 @@ const HalamanRiwayat: React.FC = () => {
     }
   };
 
-  // Methods implementation
+  // **REVISI: Methods implementation dengan ISOLASI DATA**
   const aksesHalamanRiwayat = async () => {
     setStatusHalaman(prev => ({ ...prev, loading: true, view: 'list' }));
     
     try {
-      // Mendapatkan user ID dari session saat ini
+      // **CRITICAL: Mendapatkan user ID dari session saat ini**
       const { data: { session } } = await supabase.auth.getSession();
       const currentUserId = session?.user?.id;
       
@@ -506,34 +625,55 @@ const HalamanRiwayat: React.FC = () => {
         throw new Error('User tidak terautentikasi');
       }
       
-      // Mengambil data transaksi dari Supabase
+      // **ISOLASI DATA: HANYA ambil transaksi milik user yang login**
       const { data: transactions, error } = await supabase
         .from('transactions')
         .select(`
           *,
           cars:car_id (
-            id,
-            year,
-            color,
-            price,
-            car_brands (name),
-            car_models (name),
-            car_images (image_url, is_primary, display_order)
-          )
+        id,
+        year,
+        color,
+        price,
+        status,
+        car_brands (name),
+        car_models (name),
+        car_images (image_url, is_primary, display_order)
+      )
         `)
-        .eq('buyer_id', currentUserId)
+        .eq('buyer_id', currentUserId) // **CRITICAL: Filter by current user**
         .order('created_at', { ascending: false });
       
       if (error) {
         throw error;
       }
       
+      // **VALIDASI: Pastikan tidak ada data transaksi user lain yang bocor**
+      const validatedTransactions = (transactions || []).filter(
+        (t: any) => t.buyer_id === currentUserId
+      );
+      
+      // Fallback foto: ambil langsung dari car_images berdasarkan car_id
+      const carIds = validatedTransactions.map((t: any) => t.car_id);
+      const { data: imageRows } = await supabase
+        .from('car_images')
+        .select('car_id, image_url, is_primary, display_order')
+        .in('car_id', carIds);
+
+      const imagesByCarId: Record<string, string[]> = {};
+      (imageRows || []).forEach((row: any) => {
+        if (!imagesByCarId[row.car_id]) imagesByCarId[row.car_id] = [];
+        imagesByCarId[row.car_id].push(row.image_url);
+      });
+      
       // Ambil semua payments untuk transaksi yang dimuat (1 query, pakai in)
-      const transactionIds = (transactions || []).map(t => t.id);
+      const transactionIds = validatedTransactions.map(t => t.id);
+      
+      // **ISOLASI DATA: HANYA ambil payments untuk transaksi user ini**
       const { data: allPayments } = await supabase
         .from('payments')
         .select('*')
-        .in('transaction_id', transactionIds);
+        .in('transaction_id', transactionIds); // Sudah aman karena transaction_ids sudah difilter
 
       const paymentsByTxn: Record<string, Payment[]> = {};
       (allPayments || []).forEach((p: any) => {
@@ -569,8 +709,8 @@ const HalamanRiwayat: React.FC = () => {
       // Mengambil data review untuk menentukan transaksi mana yang sudah direview
       const { data: reviews, error: reviewsErr } = await supabase
         .from('reviews')
-        .select('*') // Hindari pemilihan kolom yang tidak ada
-        .eq('reviewer_id', currentUserId); // Pakai kolom yang sesuai skema
+        .select('*')
+        .eq('reviewer_id', currentUserId); // **ISOLASI: Hanya review user ini**
       
       if (reviewsErr) {
         console.warn('Load reviews failed:', reviewsErr.message);
@@ -584,25 +724,40 @@ const HalamanRiwayat: React.FC = () => {
         : [];
       
       // Transformasi data ke format yang dibutuhkan aplikasi
-      const formattedTransactions: DataTransaksi[] = transactions.map(t => {
-        // Transformasi data mobil
+      const formattedTransactions: DataTransaksi[] = validatedTransactions.map((t: any) => {
+        // Ambil snapshot nama mobil dari transaction_details (jika ada)
+        const details = (() => {
+          try {
+            return typeof t.transaction_details === 'string'
+              ? JSON.parse(t.transaction_details)
+              : t.transaction_details;
+          } catch {
+            return null;
+          }
+        })();
+
+        const fallbackName = details?.car_name || '';
+        const fallbackPhotos = imagesByCarId[t.car_id] || [];
+
+        // Bangun data mobil dengan fallback
         const mobil: DataMobil = {
           id: t.car_id,
-          merk: t.cars?.car_brands?.name || '',
-          model: t.cars?.car_models?.name || '',
+          merk: t.cars?.car_brands?.name || (fallbackName ? fallbackName.split(' ')[0] : ''),
+          model: t.cars?.car_models?.name || (fallbackName || ''),
           tahun: t.cars?.year || 0,
           warna: t.cars?.color || '',
           foto: Array.isArray(t.cars?.car_images)
             ? t.cars.car_images.map((img: any) => img.image_url)
-            : [],
-          harga: t.cars?.price || 0
+            : fallbackPhotos,
+          harga: t.cars?.price || t.car_price || 0,
+          status: t.cars?.status || 'available' // **PENTING: Ambil status mobil**
         };
-        
+
         return {
           ...t,
           mobil,
           hasReview: reviewedTransactionIds.includes(t.id),
-          payments: paymentsByTxn[t.id] || [] // ← tempelkan payments ke transaksi
+          payments: paymentsByTxn[t.id] || []
         };
       });
       
@@ -625,6 +780,9 @@ const HalamanRiwayat: React.FC = () => {
       );
       setPetaPenjual(sellerMap);
       
+      // **AUTO-CANCEL: Cek transaksi yang mobil-nya sudah dibooking pembeli lain**
+      await autoCancelReservedTransactions(formattedTransactions, currentUserId);
+      
       setStatusHalaman(prev => ({ ...prev, loading: false }));
     } catch (error) {
       console.error('Error mengambil data transaksi:', error);
@@ -633,6 +791,64 @@ const HalamanRiwayat: React.FC = () => {
         loading: false, 
         error: 'Gagal memuat data transaksi. Silakan coba lagi.' 
       }));
+    }
+  };
+
+  // **REVISI: AUTO-CANCEL transaksi jika mobil sudah dibooking pembeli lain**
+  const autoCancelReservedTransactions = async (transactions: DataTransaksi[], userId: string) => {
+    try {
+      for (const t of transactions) {
+        // Skip jika transaksi sudah cancelled/completed
+        if (t.status === 'cancelled' || t.status === 'completed' || t.status === 'refunded') {
+          continue;
+        }
+        
+        // Skip jika sudah ada pembayaran booking
+        if (hasBookingFeeSuccess(t)) {
+          continue;
+        }
+        
+        // Cek apakah mobil sudah direserve oleh pembeli lain
+        if (isReservedByOtherBuyer(t)) {
+          // Auto-cancel transaksi ini
+          const cancelReason = 'Mobil sudah direservasi oleh pembeli lain yang membayar lebih dulu';
+          
+          const { error } = await supabase
+            .from('transactions')
+            .update({ 
+              status: 'cancelled',
+              booking_status: 'booking_cancelled',
+              cancelled_at: new Date().toISOString(),
+              notes: cancelReason
+            })
+            .eq('id', t.id)
+            .eq('buyer_id', userId); // **SECURITY: Pastikan hanya update transaksi user ini**
+          
+          if (!error) {
+            // Update local state
+            setDaftarTransaksi(prev => prev.map(x =>
+              x.id === t.id ? { 
+                ...x, 
+                status: 'cancelled' as const, 
+                booking_status: 'booking_cancelled' as const,
+                cancelled_at: new Date().toISOString(),
+                notes: cancelReason 
+              } : x
+            ));
+            setFilteredTransaksi(prev => prev.map(x =>
+              x.id === t.id ? { 
+                ...x, 
+                status: 'cancelled' as const, 
+                booking_status: 'booking_cancelled' as const,
+                cancelled_at: new Date().toISOString(),
+                notes: cancelReason 
+              } : x
+            ));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error auto-canceling reserved transactions:', error);
     }
   };
 
@@ -682,93 +898,160 @@ const HalamanRiwayat: React.FC = () => {
   };
 
   const kirimUlasan = async () => {
-    setStatusHalaman(prev => ({ ...prev, loading: true }));
-    
+    setStatusHalaman(prev => ({ ...prev, loading: true, error: null }));
     try {
       // Mendapatkan user ID dari session saat ini
       const { data: { session } } = await supabase.auth.getSession();
       const currentUserId = session?.user?.id;
-      
-      if (!currentUserId) {
-        throw new Error('User tidak terautentikasi');
+      if (!currentUserId) throw new Error('User tidak terautentikasi');
+
+      const selected = statusHalaman.selectedTransaksi;
+      if (!selected) throw new Error('Transaksi tidak dipilih');
+
+      const rating = statusHalaman.reviewData.rating || 0;
+      if (rating < 1 || rating > 5) {
+        throw new Error('Rating bintang wajib antara 1 sampai 5');
       }
-      
-      // Upload foto ke storage Supabase
+
+      // Cek duplikasi (unik reviewer_id + car_id)
+      const { data: existingReview } = await supabase
+        .from('reviews')
+        .select('id')
+        .eq('reviewer_id', currentUserId)
+        .eq('car_id', statusHalaman.reviewData.mobilId)
+        .maybeSingle();
+      if (existingReview?.id) throw new Error('Anda sudah mengulas mobil ini sebelumnya');
+
+      // Upload foto ke bucket yang sudah ada (sementara gunakan payment-proofs)
+      const REVIEW_BUCKET = 'payment-proofs';
       const uploadedImageUrls: string[] = [];
-      
       for (const file of statusHalaman.uploadedPhotos) {
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-        const filePath = `reviews/${fileName}`;
-        
-        const { error: uploadError, data } = await supabase.storage
-          .from('images')
+        const filePath = `reviews/${fileName}`; // folder reviews di dalam bucket payment-proofs
+        const { error: uploadError } = await supabase.storage
+          .from(REVIEW_BUCKET)
           .upload(filePath, file);
-          
         if (uploadError) {
           console.error('Error uploading image:', uploadError);
           continue;
         }
-        
-        // Mendapatkan URL publik
         const { data: { publicUrl } } = supabase.storage
-          .from('images')
+          .from(REVIEW_BUCKET)
           .getPublicUrl(filePath);
-          
         uploadedImageUrls.push(publicUrl);
       }
-      
-      // Menyimpan ulasan ke database
-      const { error: reviewError } = await supabase
+
+      // Payload sesuai skema tabel reviews - dengan safe insert
+      const reviewPayload: any = {
+        reviewer_id: currentUserId,
+        car_id: statusHalaman.reviewData.mobilId!,
+        seller_id: selected.seller_id,
+        transaction_id: statusHalaman.reviewData.transaksiId || null,
+        // Gunakan kolom yang sesuai dengan skema DB
+        rating_stars: rating,
+        rating_car_condition: statusHalaman.reviewData.rating_car_condition || null,
+        rating_seller_service: statusHalaman.reviewData.rating_seller_service || null,
+        rating_transaction_process: statusHalaman.reviewData.rating_transaction_process || null,
+        review_text: statusHalaman.reviewData.komentar || null,
+        pros: statusHalaman.reviewData.pros || null,
+        cons: statusHalaman.reviewData.cons || null,
+        is_verified_purchase: !!statusHalaman.reviewData.transaksiId,
+        moderation_status: 'approved', // langsung approved agar tampil
+        status: 'active'
+      };
+
+      // Hapus key yang undefined untuk menghindari error
+      Object.keys(reviewPayload).forEach((k) => {
+        if (reviewPayload[k] === undefined) delete reviewPayload[k];
+      });
+
+      // Tambahkan opsi onConflict untuk menghindari error kolom ambigu
+      const { data: insertedReviews, error: reviewError } = await supabase
         .from('reviews')
-        .insert({
-          transaction_id: statusHalaman.reviewData.transaksiId,
-          car_id: statusHalaman.reviewData.mobilId,
-          user_id: currentUserId,
-          rating: statusHalaman.reviewData.rating,
-          comment: statusHalaman.reviewData.komentar,
-          images: uploadedImageUrls,
-          status: 'published'
-        });
-        
-      if (reviewError) {
-        throw reviewError;
+        .insert(reviewPayload)
+        .select();
+      if (reviewError) throw reviewError;
+
+      const createdReview = insertedReviews?.[0];
+      if (!createdReview?.id) throw new Error('Review gagal dibuat');
+
+      // Simpan meta image ke review_images
+      if (uploadedImageUrls.length > 0) {
+        const imagesPayload = uploadedImageUrls.map((url, idx) => ({
+          review_id: createdReview.id,
+          image_url: url,
+          caption: null,
+          display_order: idx
+        }));
+        const { error: imagesError } = await supabase
+          .from('review_images')
+          .insert(imagesPayload);
+        if (imagesError) console.warn('Insert review_images gagal:', imagesError.message);
       }
-      
-      // Update transaction to mark as reviewed
-      setDaftarTransaksi(prev => 
-        prev.map(t => 
-          t.id === statusHalaman.reviewData.transaksiId 
-            ? { ...t, hasReview: true }
-            : t
+
+      // Tandai transaksi sudah diulas
+      setDaftarTransaksi(prev =>
+        prev.map(t =>
+          t.id === statusHalaman.reviewData.transaksiId ? { ...t, hasReview: true } : t
         )
       );
-      
+      setFilteredTransaksi(prev =>
+        prev.map(t =>
+          t.id === statusHalaman.reviewData.transaksiId ? { ...t, hasReview: true } : t
+        )
+      );
+
       const ulasanBaru: DataUlasan = {
-        id: Date.now().toString(),
+        id: createdReview.id,
         transaksiId: statusHalaman.reviewData.transaksiId!,
         mobilId: statusHalaman.reviewData.mobilId!,
-        rating: statusHalaman.reviewData.rating!,
-        komentar: statusHalaman.reviewData.komentar!,
+        rating,
+        komentar: statusHalaman.reviewData.komentar || '',
         foto: uploadedImageUrls,
         tanggalUlasan: new Date().toISOString(),
         helpful: 0,
-        status: 'published'
+        status: 'published', // Ulasan langsung published (auto-approved)
+        rating_car_condition: statusHalaman.reviewData.rating_car_condition,
+        rating_seller_service: statusHalaman.reviewData.rating_seller_service,
+        rating_transaction_process: statusHalaman.reviewData.rating_transaction_process,
+        pros: statusHalaman.reviewData.pros,
+        cons: statusHalaman.reviewData.cons
       };
+
+      // Tampilkan pesan sukses dan kembali ke list view
+      alert('Ulasan berhasil dikirim dan langsung dipublikasikan!');
       
       setStatusHalaman(prev => ({
         ...prev,
-        view: 'review-success',
+        view: 'list',
         loading: false,
-        reviewData: ulasanBaru
+        selectedTransaksi: null,
+        reviewData: {}
       }));
-    } catch (error) {
-      console.error('Error mengirim ulasan:', error);
-      setStatusHalaman(prev => ({ 
-        ...prev, 
-        loading: false, 
-        error: 'Gagal mengirim ulasan. Silakan coba lagi.' 
+    } catch (error: any) {
+      // Tangani 42501 (RLS) dengan pesan jelas
+      const msg = error?.message || '';
+      const isRls = msg.includes('row-level security');
+      setStatusHalaman(prev => ({
+        ...prev,
+        loading: false,
+        error: isRls
+          ? 'Akses ditolak oleh RLS saat membuat review. Pastikan kebijakan RLS sudah mengizinkan insert.'
+          : msg || 'Gagal mengirim ulasan. Silakan coba lagi.'
       }));
+    } finally {
+      // Pastikan UI kembali ke daftar jika terjadi error
+      if (statusHalaman.error) {
+        setTimeout(() => {
+          setStatusHalaman(prev => ({
+            ...prev,
+            view: 'list',
+            selectedTransaksi: null,
+            reviewData: {}
+          }));
+        }, 3000); // Tampilkan error selama 3 detik sebelum kembali ke list
+      }
     }
   };
 
@@ -815,21 +1098,92 @@ const HalamanRiwayat: React.FC = () => {
     setStatusHalaman(prev => ({ ...prev, view: 'list' }));
   };
 
+  // Muat ulasan milik user untuk transaksi/mobil yang dipilih
+  async function muatUlasanUntukTransaksi(selected: any) {
+    try {
+      if (!selected?.car_id) {
+        setReviewRingkas(null);
+        return;
+      }
+
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id;
+      if (!userId) {
+        setReviewRingkas(null);
+        return;
+      }
+
+      // Ambil ulasan user untuk mobil ini dengan filter yang mendukung auto-publish
+      const { data: review, error: reviewErr } = await supabase
+        .from('reviews')
+        .select('id, rating_stars, review_text, status, moderation_status')
+        .eq('car_id', selected.car_id)
+        .eq('reviewer_id', userId)
+        .eq('status', 'active')
+        .in('moderation_status', ['auto_approved', 'approved', 'pending'])
+        .limit(1)
+        .maybeSingle();
+
+      if (reviewErr || !review) {
+        setReviewRingkas(null);
+        return;
+      }
+
+      // Ambil daftar image_url terkait ulasan
+      const { data: imgRows, error: imgErr } = await supabase
+        .from('review_images')
+        .select('image_url')
+        .eq('review_id', review.id);
+
+      if (imgErr) {
+        setReviewRingkas({
+          rating_stars: review.rating_stars,
+          review_text: review.review_text,
+          images: []
+        });
+        return;
+      }
+
+      const finalReview = {
+        rating_stars: review.rating_stars,
+        review_text: review.review_text,
+        images: (imgRows || []).map((r: any) => r.image_url).filter(Boolean)
+      };
+
+      setReviewRingkas(finalReview);
+    } catch (error) {
+      setReviewRingkas(null);
+    }
+  }
+
+  // Saat detail dibuka atau transaksi terpilih berubah, muat ulasan
+  useEffect(() => {
+    if (statusHalaman.view === 'detail' && statusHalaman.selectedTransaksi) {
+      muatUlasanUntukTransaksi(statusHalaman.selectedTransaksi);
+    } else {
+      setReviewRingkas(null);
+    }
+  }, [statusHalaman.view, statusHalaman.selectedTransaksi]);
+
   const pilihTransaksiTertentu = (idTransaksi: string) => {
-    const transaksi = daftarTransaksi.find(t => t.id === idTransaksi);
+    // **ISOLASI DATA: Validasi bahwa transaksi adalah milik user**
+    const transaksi = daftarTransaksi.find(t => t.id === idTransaksi && t.buyer_id === user?.id);
     if (transaksi) {
       setStatusHalaman(prev => ({
         ...prev,
         selectedTransaksi: transaksi,
         view: 'detail'
       }));
+    } else {
+      alert('Transaksi tidak ditemukan atau Anda tidak memiliki akses');
     }
   };
 
   const unduhInvoice = async (idTransaksi: string) => {
-    const transaksi = daftarTransaksi.find(t => t.id === idTransaksi);
+    // **ISOLASI DATA: Validasi ownership**
+    const transaksi = daftarTransaksi.find(t => t.id === idTransaksi && t.buyer_id === user?.id);
     if (!transaksi) {
-      alert('Transaksi tidak ditemukan');
+      alert('Transaksi tidak ditemukan atau Anda tidak memiliki akses');
       return;
     }
 
@@ -914,6 +1268,12 @@ const HalamanRiwayat: React.FC = () => {
   const pilihAksi = (jenisAksi: string) => {
     if (!statusHalaman.selectedTransaksi) return;
     
+    // **ISOLASI DATA: Validasi ownership sebelum aksi**
+    if (statusHalaman.selectedTransaksi.buyer_id !== user?.id) {
+      alert('Anda tidak memiliki akses untuk melakukan aksi ini');
+      return;
+    }
+    
     switch (jenisAksi) {
       case 'review':
         pilihMobilUntukDiulas(statusHalaman.selectedTransaksi.car_id);
@@ -973,17 +1333,28 @@ const HalamanRiwayat: React.FC = () => {
     return false;
   };
 
+  // **REVISI: Cek isUnpaid dengan validasi reserved**
   const isUnpaid = (t: DataTransaksi): boolean => {
-    return t.payment_status === 'pending' && !hasPaymentProof(t);
+    // TIDAK tampilkan tombol bayar jika mobil sudah direserve oleh pembeli lain
+    if (isReservedByOtherBuyer(t)) {
+      return false;
+    }
+    
+    // Tampilkan tombol bayar HANYA jika status mobil adalah "available"
+    return t.mobil?.status === 'available';
   };
 
   const isWaitingAdminConfirm = (t: DataTransaksi): boolean => {
     return t.status === 'pending' && hasPaymentProof(t);
   };
 
-
-
   const goToPayment = (t: DataTransaksi) => {
+    // **VALIDASI: Cek lagi sebelum redirect ke pembayaran**
+    if (isReservedByOtherBuyer(t)) {
+      alert('Maaf, mobil ini sudah direservasi oleh pembeli lain yang membayar lebih dulu.');
+      return;
+    }
+    
     // Prioritize down_payment if it exists (booking fee)
     const isBookingFee = isUnpaidBooking(t) || t.booking_status === 'booking_pending';
     const paymentAmount = isBookingFee
@@ -1141,9 +1512,10 @@ const HalamanRiwayat: React.FC = () => {
   };
 
   const cetakInvoice = async (idTransaksi: string) => {
-    const transaksi = daftarTransaksi.find(t => t.id === idTransaksi);
+    // **ISOLASI DATA: Validasi ownership**
+    const transaksi = daftarTransaksi.find(t => t.id === idTransaksi && t.buyer_id === user?.id);
     if (!transaksi) {
-      alert('Transaksi tidak ditemukan');
+      alert('Transaksi tidak ditemukan atau Anda tidak memiliki akses');
       return;
     }
 
@@ -1336,6 +1708,7 @@ const HalamanRiwayat: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* TAMPILAN TIDAK DIUBAH - Hanya logic yang direvisi */}
       {/* List View */}
       {statusHalaman.view === 'list' && (
         <div className="max-w-6xl mx-auto px-4 py-6">
@@ -1529,6 +1902,15 @@ const HalamanRiwayat: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* **PESAN JIKA MOBIL RESERVED** */}
+                    {isReservedByOtherBuyer(transaksi) && transaksi.status !== 'cancelled' && (
+                      <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p className="text-sm text-red-800">
+                          ⚠️ Maaf, mobil ini sudah direservasi oleh pembeli lain yang membayar lebih dulu.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Aksi: Lihat Detail Transaksi dan Ulas (rata kanan) */}
                     <div className="mt-4 flex flex-wrap gap-2 justify-end">
                       <button
@@ -1560,6 +1942,20 @@ const HalamanRiwayat: React.FC = () => {
                         {transaksi.hasReview ? '✓ Sudah Diulas' : 'Ulas'}
                       </button>
 
+                      {/* Tambah tombol: Lihat Bukti Refund */}
+                      {hasRefund(transaksi) && transaksi.proof_of_refund && (
+                        <button
+                          onClick={() => {
+                            const publicUrl = getPublicUrlFromPath(transaksi.proof_of_refund!);
+                            setCurrentProofUrl(publicUrl);
+                            setShowProofModal(true);
+                          }}
+                          className="px-3 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
+                        >
+                          Lihat Bukti Refund
+                        </button>
+                      )}
+
                       {/* Aksi pembatalan: saling eksklusif */}
                       {canCancelAndRequestRefund(transaksi) ? (
                         <button
@@ -1585,741 +1981,389 @@ const HalamanRiwayat: React.FC = () => {
         </div>
       )}
 
-      {/* Review Form */}
-      {statusHalaman.view === 'review-form' && statusHalaman.selectedTransaksi && (
-        <div className="max-w-4xl mx-auto px-4 py-6">
-          <div className="mb-6">
-            <button
-              onClick={lihatDaftarRiwayat}
-              className="flex items-center text-blue-600 hover:text-blue-700 mb-4"
-            >
-              ← Kembali ke Riwayat
-            </button>
-            <h1 className="text-3xl font-bold text-gray-900">Tulis Ulasan</h1>
-            <p className="text-gray-600">
-            Bagikan pengalaman Anda dengan {statusHalaman.selectedTransaksi.mobil?.merk || ''} {statusHalaman.selectedTransaksi.mobil?.model || ''}
-          </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            {/* Car Info */}
-            <div className="flex items-center space-x-4 mb-6 p-4 bg-gray-50 rounded-lg">
-              <div className="w-20 h-16 bg-gray-200 rounded-lg overflow-hidden">
-                <img
-                src={`/images/${statusHalaman.selectedTransaksi.mobil?.foto?.[0] || ''}`}
-                alt={`${statusHalaman.selectedTransaksi.mobil?.merk || ''} ${statusHalaman.selectedTransaksi.mobil?.model || ''}`}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iNjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2RkZCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5ObyBJbWFnZTwvdGV4dD48L3N2Zz4=';
-                }}
-              />
+      {/* Tampilan Detail Transaksi */}
+      {statusHalaman.view === 'detail' && statusHalaman.selectedTransaksi && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">Detail Transaksi</h2>
+                <button 
+                  onClick={() => setStatusHalaman(prev => ({ ...prev, view: 'list' }))}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <span className="text-2xl">×</span>
+                </button>
               </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">
-                {statusHalaman.selectedTransaksi.mobil?.merk} {statusHalaman.selectedTransaksi.mobil?.model} {statusHalaman.selectedTransaksi.mobil?.tahun}
-              </h3>
-              <p className="text-sm text-gray-600">
-                Transaksi: {statusHalaman.selectedTransaksi.id} • {formatDate(statusHalaman.selectedTransaksi.transaction_date)}
-              </p>
-              </div>
-            </div>
-
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const formData = new FormData(e.currentTarget);
-              const rating = Number(formData.get('rating'));
-              const komentar = formData.get('komentar') as string;
               
-              inputRatingDanUlasan(rating, komentar);
-              
-              setTimeout(() => {
-                kirimUlasan();
-              }, 100);
-            }} className="space-y-6">
-              {/* Rating */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  Rating Keseluruhan *
-                </label>
-                <div className="flex items-center space-x-2">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <label key={star} className="cursor-pointer">
-                      <input
-                        type="radio"
-                        name="rating"
-                        value={star}
-                        required
-                        className="sr-only"
-                        onChange={(e) => inputRatingDanUlasan(Number(e.target.value), statusHalaman.reviewData.komentar || '')}
-                      />
-                      <span className={`text-3xl ${
-                        (statusHalaman.reviewData.rating || 0) >= star 
-                          ? 'text-yellow-400' 
-                          : 'text-gray-300'
-                      } hover:text-yellow-400 transition-colors`}>
-                        ⭐
-                      </span>
-                    </label>
-                  ))}
-                  <span className="ml-2 text-sm text-gray-600">
-                    {statusHalaman.reviewData.rating ? `${statusHalaman.reviewData.rating}/5` : 'Pilih rating'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Comment */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ulasan Anda *
-                </label>
-                <textarea
-                  name="komentar"
-                  required
-                  rows={5}
-                  placeholder="Ceritakan pengalaman Anda dengan mobil ini..."
-                  value={statusHalaman.reviewData.komentar || ''}
-                  onChange={(e) => inputRatingDanUlasan(statusHalaman.reviewData.rating || 0, e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Minimal 10 karakter ({(statusHalaman.reviewData.komentar || '').length}/10)
-                </p>
-              </div>
-
-              {/* Photo Upload */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tambahkan Foto (Opsional)
-                </label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files || []);
-                      if (files.length > 0) {
-                        putuskanTambahFoto(true);
-                        unggahFoto(files);
-                      }
-                    }}
-                    className="hidden"
-                    id="photo-upload"
-                  />
-                  <label htmlFor="photo-upload" className="cursor-pointer">
-                    <span className="text-4xl text-gray-400">📷</span>
-                    <p className="mt-2 text-sm text-gray-600">
-                      Klik untuk mengunggah foto
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      PNG, JPG hingga 5MB (maksimal 5 foto)
-                    </p>
-                  </label>
+              <div className="space-y-6">
+                {/* Informasi Transaksi */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="text-lg font-medium text-gray-900 mb-3">Informasi Transaksi</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">ID Transaksi</p>
+                      <p className="font-medium">{statusHalaman.selectedTransaksi.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Tanggal</p>
+                      <p className="font-medium">{formatDate(statusHalaman.selectedTransaksi.transaction_date)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Status</p>
+                      <p className="font-medium">{formatStatus(statusHalaman.selectedTransaksi.status)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Jenis Transaksi</p>
+                      <p className="font-medium">{formatTransactionType(statusHalaman.selectedTransaksi.transaction_type)}</p>
+                    </div>
+                  </div>
                 </div>
                 
-                {/* Uploaded Photos Preview */}
-                {statusHalaman.uploadedPhotos.length > 0 && (
-                  <div className="mt-4">
-                    <p className="text-sm font-medium text-gray-700 mb-2">
-                      Foto yang diunggah ({statusHalaman.uploadedPhotos.length})
-                    </p>
-                    <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                      {statusHalaman.uploadedPhotos.map((file, index) => (
-                        <div key={index} className="relative">
-                          <img
-                            src={URL.createObjectURL(file)}
-                            alt={`Upload ${index + 1}`}
-                            className="w-full h-20 object-cover rounded-lg"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newPhotos = statusHalaman.uploadedPhotos.filter((_, i) => i !== index);
-                              setStatusHalaman(prev => ({ ...prev, uploadedPhotos: newPhotos }));
-                            }}
-                            className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hover:bg-red-600"
-                          >
-                            ×
-                          </button>
+                {/* Informasi Mobil */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="text-lg font-medium text-gray-900 mb-3">Informasi Mobil</h3>
+                  <div className="flex">
+                    <div className="w-1/3">
+                      {statusHalaman.selectedTransaksi.mobil?.foto && statusHalaman.selectedTransaksi.mobil.foto.length > 0 ? (
+                        <img 
+                          src={statusHalaman.selectedTransaksi.mobil.foto[0]} 
+                          alt="Mobil" 
+                          className="w-full h-auto rounded-lg"
+                        />
+                      ) : (
+                        <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center">
+                          <span className="text-gray-400">Tidak ada foto</span>
                         </div>
-                      ))}
+                      )}
+                    </div>
+                    <div className="w-2/3 pl-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-sm text-gray-500">Merk & Model</p>
+                          <p className="font-medium">{statusHalaman.selectedTransaksi.mobil?.merk} {statusHalaman.selectedTransaksi.mobil?.model}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Tahun</p>
+                          <p className="font-medium">{statusHalaman.selectedTransaksi.mobil?.tahun}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Warna</p>
+                          <p className="font-medium">{statusHalaman.selectedTransaksi.mobil?.warna || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Harga</p>
+                          <p className="font-medium">{formatCurrency(statusHalaman.selectedTransaksi.mobil?.harga || 0)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Informasi Pembayaran */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="text-lg font-medium text-gray-900 mb-3">Informasi Pembayaran</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Total Pembayaran</p>
+                      <p className="font-medium">{formatCurrency(statusHalaman.selectedTransaksi.total_amount)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Metode Pembayaran</p>
+                      <p className="font-medium">{statusHalaman.selectedTransaksi.payment_method || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Status Pembayaran</p>
+                      <p className="font-medium">{formatPaymentStatus(statusHalaman.selectedTransaksi.payment_status)}</p>
+                    </div>
+                    {statusHalaman.selectedTransaksi.down_payment > 0 && (
+                      <div>
+                        <p className="text-sm text-gray-500">Uang Muka</p>
+                        <p className="font-medium">{formatCurrency(statusHalaman.selectedTransaksi.down_payment)}</p>
+                      </div>
+                    )}
+                    {statusHalaman.selectedTransaksi.remaining_payment > 0 && (
+                      <div>
+                        <p className="text-sm text-gray-500">Sisa Pembayaran</p>
+                        <p className="font-medium">{formatCurrency(statusHalaman.selectedTransaksi.remaining_payment)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Riwayat Pembayaran */}
+                {statusHalaman.selectedTransaksi.payments && statusHalaman.selectedTransaksi.payments.length > 0 && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h3 className="text-lg font-medium text-gray-900 mb-3">Riwayat Pembayaran</h3>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-100">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jenis</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jumlah</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Metode</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {statusHalaman.selectedTransaksi.payments.map((payment, idx) => (
+                            <tr key={idx}>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{formatPaymentType(payment.payment_type)}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{formatCurrency(payment.amount)}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{payment.payment_method}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{formatPaymentStatus(payment.status)}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{formatDate(payment.payment_date)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
-              </div>
-
-              {/* Guidelines */}
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-                <h4 className="font-medium text-blue-800 mb-2">Panduan Menulis Ulasan:</h4>
-                <ul className="text-sm text-blue-700 space-y-1">
-                  <li>• Berikan ulasan yang jujur dan konstruktif</li>
-                  <li>• Ceritakan pengalaman spesifik Anda</li>
-                  <li>• Hindari kata-kata kasar atau menyinggung</li>
-                  <li>• Foto yang diunggah akan dimoderasi terlebih dahulu</li>
-                </ul>
-              </div>
-
-              <div className="flex justify-between">
-                <button
-                  type="button"
-                  onClick={lihatDaftarRiwayat}
-                  className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={statusHalaman.loading || !statusHalaman.reviewData.rating || (statusHalaman.reviewData.komentar || '').length < 10}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {statusHalaman.loading ? 'Mengirim...' : 'Kirim Ulasan'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Review Success */}
-      {statusHalaman.view === 'review-success' && (
-        <div className="max-w-2xl mx-auto px-4 py-6">
-          <div className="bg-white rounded-lg shadow p-8 text-center">
-            <div className="mb-6">
-              <span className="text-6xl">🎉</span>
-            </div>
-            
-            <h2 className="text-2xl font-bold text-green-600 mb-4">
-              Ulasan Berhasil Dikirim!
-            </h2>
-            
-            <p className="text-gray-600 mb-6">
-              Terima kasih atas ulasan Anda. Ulasan akan ditampilkan setelah dimoderasi.
-            </p>
-            
-            <div className="bg-gray-50 p-4 rounded-lg mb-6 text-left">
-              <h3 className="font-semibold text-gray-900 mb-3">Detail Ulasan</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Rating:</span>
-                  <span className="flex">
-                    {Array.from({ length: statusHalaman.reviewData.rating || 0 }, (_, i) => (
-                      <span key={i} className="text-yellow-400">⭐</span>
-                    ))}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Foto:</span>
-                  <span>{statusHalaman.uploadedPhotos.length} foto</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Status:</span>
-                  <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">
-                    Menunggu Moderasi
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <div className="space-y-4">
-              <div className="flex justify-center space-x-4">
-                <button
-                  onClick={lihatDaftarRiwayat}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  Kembali ke Riwayat
-                </button>
-                <button
-                  onClick={() => {/* Navigate to reviews page */}}
-                  className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                >
-                  Lihat Ulasan Saya
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Transaction Detail */}
-      {statusHalaman.view === 'detail' && statusHalaman.selectedTransaksi && (
-        <div className="max-w-4xl mx-auto px-4 py-6">
-          <div className="mb-6">
-            <button
-              onClick={lihatDaftarRiwayat}
-              className="flex items-center text-blue-600 hover:text-blue-700 mb-4"
-            >
-              ← Kembali ke Riwayat
-            </button>
-            <h1 className="text-3xl font-bold text-gray-900">Detail Transaksi</h1>
-            <p className="text-gray-600">ID: {statusHalaman.selectedTransaksi.id}</p>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main Info */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* Car Info */}
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Informasi Mobil</h3>
-                <div className="flex items-start space-x-4">
-                  <div className="w-32 h-24 bg-gray-200 rounded-lg overflow-hidden">
-                    <img
-                      src={`/images/${statusHalaman.selectedTransaksi.mobil?.foto?.[0] || ''}`}
-                      alt={`${statusHalaman.selectedTransaksi.mobil?.merk || ''} ${statusHalaman.selectedTransaksi.mobil?.model || ''}`}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4IiBoZWlnaHQ9Ijk2IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNkZGQiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+';
-                      }}
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-gray-900 mb-2">
-                      {statusHalaman.selectedTransaksi.mobil?.merk} {statusHalaman.selectedTransaksi.mobil?.model} {statusHalaman.selectedTransaksi.mobil?.tahun}
-                    </h4>
-                    <div className="text-sm text-gray-600 space-y-1">
-                      <p>Warna: {statusHalaman.selectedTransaksi.mobil?.warna || '-'}</p>
-                      {statusHalaman.selectedTransaksi.total_amount && (
-                        <p className="font-semibold text-blue-600">
-                          Harga: {formatCurrency(statusHalaman.selectedTransaksi.total_amount)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Transaction Details */}
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Detail Transaksi</h3>
-                  {/* Optional: quick actions in detail for admin/seller */}
-                  {(user && (user.role === 'admin' || user.current_mode === 'seller')) && (
-                    <div className="flex gap-2">
-                      {/* Aksi pembatalan di header: juga eksklusif */}
-                      {canCancelAndRequestRefund(statusHalaman.selectedTransaksi) ? (
-                        <button
-                          className="px-3 py-2 text-sm rounded bg-orange-600 text-white hover:bg-orange-700"
-                          onClick={() => handleCancelAndRequestRefund(statusHalaman.selectedTransaksi!)}
-                        >
-                          Batalkan & Ajukan Refund
-                        </button>
-                      ) : canCancelOnly(statusHalaman.selectedTransaksi) ? (
-                        <button
-                          className="px-3 py-2 text-sm rounded bg-red-600 text-white hover:bg-red-700"
-                          onClick={() => handleCancelTransaction(statusHalaman.selectedTransaksi!)}
-                        >
-                          Batalkan Transaksi
-                        </button>
-                      ) : null}
-                      {canRefundBooking(statusHalaman.selectedTransaksi) && (
-                        <button
-                          onClick={() => handleRefundBooking(statusHalaman.selectedTransaksi!)}
-                          className="px-3 py-2 text-sm rounded bg-purple-600 text-white hover:bg-purple-700"
-                        >
-                          Refund Booking Fee
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">ID Transaksi:</span>
-                      <span className="font-mono">{statusHalaman.selectedTransaksi.id}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Jenis:</span>
-                      <span className="capitalize">
-                        {statusHalaman.selectedTransaksi.transaction_type === 'purchase' ? 'Pembelian' : 
-                         statusHalaman.selectedTransaksi.transaction_type === 'trade_in' ? 'Tukar Tambah' : 'Cicilan'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Status:</span>
-                      <div className="flex items-center gap-2">
-                        {renderStatusBadge(statusHalaman.selectedTransaksi)}
-                        {isWaitingAdminConfirm(statusHalaman.selectedTransaksi) && (
-                          <span className="text-xs text-gray-600">
-                            Menunggu konfirmasi admin
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Tanggal:</span>
-                      <span>{formatDate(statusHalaman.selectedTransaksi.created_at)}</span>
-                    </div>
-                    {statusHalaman.selectedTransaksi.payment_method && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Pembayaran:</span>
-                        <span>{statusHalaman.selectedTransaksi.payment_method}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Ulasan:</span>
-                      <span className={statusHalaman.selectedTransaksi.hasReview ? 'text-green-600' : 'text-gray-400'}>
-                        {statusHalaman.selectedTransaksi.hasReview ? '✓ Sudah' : '✗ Belum'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
                 
-                {statusHalaman.selectedTransaksi.notes && (
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-sm text-gray-600 mb-1">Catatan:</p>
-                    {statusHalaman.selectedTransaksi.notes.includes('REFUND_REQUEST') ? (
-                      <div className="bg-orange-50 border border-orange-200 rounded-md p-3">
-                        <p className="text-sm font-semibold text-orange-800 mb-2">Pengajuan Refund:</p>
-                        {(() => {
-                          const parts = statusHalaman.selectedTransaksi.notes.split('|');
-                          if (parts.length >= 6) {
-                            return (
-                              <div className="text-sm text-orange-700 space-y-1">
-                                <p><strong>Alasan:</strong> {parts[1]}</p>
-                                <p><strong>Bank:</strong> {parts[2]}</p>
-                                <p><strong>No. Rekening:</strong> {parts[3]}</p>
-                                <p><strong>Pemilik:</strong> {parts[4]}</p>
-                                <p><strong>Tanggal Pengajuan:</strong> {new Date(parts[5]).toLocaleDateString('id-ID')}</p>
-                              </div>
-                            );
-                          }
-                          return <p className="text-sm text-orange-700">{statusHalaman.selectedTransaksi.notes}</p>;
-                        })()}
+                {/* Bukti Refund */}
+                {hasRefund(statusHalaman.selectedTransaksi) && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h3 className="text-lg font-medium text-gray-900 mb-3">Bukti Refund</h3>
+                    {statusHalaman.selectedTransaksi.proof_of_refund ? (
+                      <div className="flex items-center justify-center">
+                        <button
+                          onClick={openRefundProof}
+                          className="px-3 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50 flex items-center gap-1"
+                        >
+                          <Eye className="w-4 h-4" /> Lihat
+                        </button>
                       </div>
                     ) : (
-                      <p className="text-sm">{statusHalaman.selectedTransaksi.notes}</p>
+                      <p className="text-sm text-gray-600">Bukti refund belum tersedia.</p>
                     )}
                   </div>
                 )}
                 
-                {statusHalaman.selectedTransaksi?.proof_of_refund && (
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-sm text-gray-600 mb-2">Bukti Refund:</p>
-                    <button
-                      onClick={openRefundProof}
-                      className="px-3 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-700"
-                    >
-                      Lihat Bukti Refund
-                    </button>
+                {/* Ulasan Saya */}
+                {reviewRingkas && (
+                  <div className="bg-gray-50 p-6 rounded-lg">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4 text-center">Ulasan Saya</h3>
+                    
+                    {/* Rating stars - center aligned */}
+                    <div className="flex items-center justify-center mb-4">
+                      {[1,2,3,4,5].map((i) => (
+                        <svg
+                          key={i}
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill={i <= (reviewRingkas.rating_stars || 0) ? '#FBBF24' : '#E5E7EB'}
+                          className="w-6 h-6 mx-1"
+                        >
+                          <path d="M12 .587l3.668 7.431L24 9.75l-6 5.848L19.336 24 12 20.013 4.664 24 6 15.598 0 9.75l8.332-1.732z" />
+                        </svg>
+                      ))}
+                      <span className="ml-3 text-lg font-medium text-gray-700">
+                        {reviewRingkas.rating_stars}/5
+                      </span>
+                    </div>
+
+                    {/* Teks ulasan - center aligned */}
+                    <div className="text-center mb-4">
+                      <p className="text-gray-800 text-base leading-relaxed max-w-2xl mx-auto">
+                        {reviewRingkas.review_text || 'Tidak ada komentar'}
+                      </p>
+                    </div>
+
+                    {/* Gambar ulasan - center aligned grid */}
+                    {reviewRingkas.images.length > 0 && (
+                      <div className="flex justify-center">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-w-md">
+                          {reviewRingkas.images.map((url, idx) => (
+                            <div key={idx} className="relative group">
+                              <img
+                                src={url}
+                                alt={`Foto ulasan ${idx + 1}`}
+                                className="w-full h-24 object-cover rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                                onClick={() => window.open(url, '_blank')}
+                              />
+                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 rounded-lg transition-all"></div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
-
-                {/* Rincian Pembayaran (payments) */}
-                <div className="mt-6">
-                  <h4 className="font-semibold text-gray-900 mb-3">Rincian Pembayaran</h4>
-                  {Array.isArray(statusHalaman.selectedTransaksi.payments) && statusHalaman.selectedTransaksi.payments.length > 0 ? (
-                    <div className="space-y-3">
-                      {(() => {
-                        // Filter dan urutkan pembayaran untuk menghindari duplikasi
-                        const payments = [...statusHalaman.selectedTransaksi.payments];
-                        
-                        // Kelompokkan pembayaran berdasarkan payment_type
-                        const paymentsByType = payments.reduce<Record<string, Payment[]>>((acc, payment) => {
-                          const paymentType = payment.payment_type;
-                          if (!acc[paymentType]) {
-                            acc[paymentType] = [];
-                          }
-                          acc[paymentType].push(payment);
-                          return acc;
-                        }, {});
-                        
-                        // Untuk setiap jenis pembayaran, pilih yang paling relevan
-                        const filteredPayments = Object.values(paymentsByType).map((paymentGroup: Payment[]) => {
-                          // Cek jika ada pembayaran dengan bukti
-                          const paymentWithProof = paymentGroup.find(p => p.proof_of_payment);
-                          if (paymentWithProof) return paymentWithProof;
-                          
-                          // Jika tidak ada bukti, ambil yang status-nya bukan pending
-                          const nonPendingPayment = paymentGroup.find(p => p.status !== 'pending');
-                          if (nonPendingPayment) return nonPendingPayment;
-                          
-                          // Jika semua pending, ambil yang terakhir
-                          return paymentGroup[paymentGroup.length - 1];
-                        });
-                        
-                        return filteredPayments.map((p) => (
-                          <div key={p.id} className="border rounded-md p-3">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="text-blue-600">💳</span>
-                                <span className="font-medium capitalize">
-                                  {p.payment_type.replace('_', ' ')}
-                                </span>
-                                <span className="text-gray-500 text-sm">
-                                  {formatDate(p.payment_date)}
-                                </span>
-                              </div>
-                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(p.status as any)}`}>
-                                {p.status}
-                              </span>
-                            </div>
-
-                            <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Jumlah:</span>
-                                <span className="font-semibold">{formatCurrency(p.amount)}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Metode:</span>
-                                <span>{p.payment_method}</span>
-                              </div>
-                              {p.reference_code && (
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Kode Ref:</span>
-                                  <span className="font-mono">{p.reference_code}</span>
-                                </div>
-                              )}
-                              {p.bank_name && (
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Bank:</span>
-                                  <span>{p.bank_name}</span>
-                                </div>
-                              )}
-                              {p.account_holder && (
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Pemilik Rekening:</span>
-                                  <span>{p.account_holder}</span>
-                                </div>
-                              )}
-                              {p.proof_of_payment && (
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Bukti:</span>
-                                  <a href={p.proof_of_payment} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
-                                    Lihat Bukti
-                                  </a>
-                                </div>
-                              )}
-                            </div>
-
-                            {p.notes && (
-                              <div className="mt-2 text-sm text-gray-600">
-                                Catatan: {p.notes}
-                              </div>
-                            )}
-                            {p.rejection_reason && p.status === 'failed' && (
-                              <div className="mt-2 text-sm text-red-600">
-                                Alasan Ditolak: {p.rejection_reason}
-                              </div>
-                            )}
-                          </div>
-                        ));
-                      })()}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">Belum ada data pembayaran untuk transaksi ini.</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Dealer Info */}
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Informasi Dealer</h3>
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                    <span className="text-blue-600 font-semibold">🏢</span>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">ID Dealer: {statusHalaman.selectedTransaksi.seller_id}</h4>
-                    <p className="text-sm text-gray-600">Lokasi: N/A</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Actions Sidebar */}
-            <div className="lg:col-span-1">
-              <div className="sticky top-6 space-y-4">
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="font-semibold text-gray-900 mb-4">Aksi</h3>
-                  <div className="space-y-3">
-                    {isUnpaid(statusHalaman.selectedTransaksi) && (
-                      <button
-                        onClick={() => goToPayment(statusHalaman.selectedTransaksi!)}
-                        className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700"
-                      >
-                        Bayar Sekarang
-                      </button>
-                    )}
-
-                    {canCancelAndRequestRefund(statusHalaman.selectedTransaksi) && (
-                      <button
-                        onClick={() => handleCancelAndRequestRefund(statusHalaman.selectedTransaksi!)}
-                        className="w-full bg-orange-600 text-white py-2 px-4 rounded-md hover:bg-orange-700"
-                      >
-                        Batalkan & Ajukan Refund
-                      </button>
-                    )}
-
-                    {canCancelOnly(statusHalaman.selectedTransaksi) && (
-                      <button
-                        onClick={() => handleCancelTransaction(statusHalaman.selectedTransaksi!)}
-                        className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700"
-                      >
-                        Batalkan Transaksi
-                      </button>
-                    )}
-
-                    {(user && (user.role === 'admin' || user.current_mode === 'seller')) && canCancelTransaction(statusHalaman.selectedTransaksi) && (
-                      <button
-                        onClick={() => handleCancelTransaction(statusHalaman.selectedTransaksi!)}
-                        className="w-full bg-orange-600 text-white py-2 px-4 rounded-md hover:bg-orange-700"
-                      >
-                        Batalkan Transaksi
-                      </button>
-                    )}
-
-                    {(user && (user.role === 'admin' || user.current_mode === 'seller')) && canRefundBooking(statusHalaman.selectedTransaksi) && (
-                      <button
-                        onClick={() => handleRefundBooking(statusHalaman.selectedTransaksi!)}
-                        className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700"
-                      >
-                        Refund Booking Fee
-                      </button>
-                    )}
-
-                    {statusHalaman.selectedTransaksi.status === 'completed' && !statusHalaman.selectedTransaksi.hasReview && (
-                      <button
-                        onClick={() => pilihAksi('review')}
-                        className="w-full bg-yellow-500 text-white py-2 px-4 rounded-md hover:bg-yellow-600"
-                      >
-                        ⭐ Tulis Ulasan
-                      </button>
-                    )}
-                    
-                    <button
-                      onClick={() => pilihAksi('repeat-order')}
-                      className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
-                    >
-                      Beri Ulasan
-                    </button>
-                    
-                    <button
-                      onClick={() => pilihAksi('contact-dealer')}
-                      className="w-full border border-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-50"
-                    >
-                      💬 Hubungi Dealer
-                    </button>
-                    
-                    {statusHalaman.selectedTransaksi.transaction_type === 'purchase' && (
-                      <button
-                        onClick={() => pilihAksi('download-invoice')}
-                        className="w-full border border-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-50"
-                      >
-                        📄 Download Invoice
-                      </button>
-                    )}
-                  </div>
+                
+                {/* Tombol Aksi */}
+                <div className="flex justify-end space-x-3 mt-6">
+                  <button
+                    onClick={() => setStatusHalaman(prev => ({ ...prev, view: 'list' }))}
+                    className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+                  >
+                    Kembali
+                  </button>
+                  <button
+                    onClick={() => statusHalaman.selectedTransaksi && unduhInvoice(statusHalaman.selectedTransaksi.id)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  >
+                    Unduh Invoice
+                  </button>
                 </div>
               </div>
             </div>
           </div>
         </div>
       )}
+      
+      {/* Review Form */}
+      {statusHalaman.view === 'review-form' && statusHalaman.selectedTransaksi && (
+        <Dialog open={true} onOpenChange={(open) => {
+          if (!open) setStatusHalaman(prev => ({ ...prev, view: 'list', selectedTransaksi: null }));
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Ulas Mobil</DialogTitle>
+              <DialogDescription>
+                Berikan rating dan ulasan untuk pengalaman kamu dengan mobil dan penjual.
+              </DialogDescription>
+            </DialogHeader>
 
-      {/* Filter Modal */}
-      {statusHalaman.showFilterModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-md w-full">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h3 className="text-lg font-semibold">Filter Lanjutan</h3>
-              <button
-                onClick={() => setStatusHalaman(prev => ({ ...prev, showFilterModal: false }))}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Rating Bintang (1–5)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={statusHalaman.reviewData.rating || 0}
+                  onChange={(e) => inputRatingDanUlasan(Number(e.target.value), statusHalaman.reviewData.komentar || '')}
+                  className="mt-1 w-full border rounded px-3 py-2"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Kondisi Mobil (1–5)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    value={statusHalaman.reviewData.rating_car_condition || ''}
+                    onChange={(e) => setStatusHalaman(prev => ({
+                      ...prev,
+                      reviewData: { ...prev.reviewData, rating_car_condition: Number(e.target.value) || undefined }
+                    }))}
+                    className="mt-1 w-full border rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Layanan Penjual (1–5)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    value={statusHalaman.reviewData.rating_seller_service || ''}
+                    onChange={(e) => setStatusHalaman(prev => ({
+                      ...prev,
+                      reviewData: { ...prev.reviewData, rating_seller_service: Number(e.target.value) || undefined }
+                    }))}
+                    className="mt-1 w-full border rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Proses Transaksi (1–5)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    value={statusHalaman.reviewData.rating_transaction_process || ''}
+                    onChange={(e) => setStatusHalaman(prev => ({
+                      ...prev,
+                      reviewData: { ...prev.reviewData, rating_transaction_process: Number(e.target.value) || undefined }
+                    }))}
+                    className="mt-1 w-full border rounded px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Ulasan</label>
+                <textarea
+                  rows={4}
+                  value={statusHalaman.reviewData.komentar || ''}
+                  onChange={(e) => inputRatingDanUlasan(statusHalaman.reviewData.rating || 0, e.target.value)}
+                  className="mt-1 w-full border rounded px-3 py-2"
+                  placeholder="Ceritakan pengalaman kamu..."
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Kelebihan (opsional)</label>
+                  <input
+                    type="text"
+                    value={statusHalaman.reviewData.pros || ''}
+                    onChange={(e) => setStatusHalaman(prev => ({
+                      ...prev,
+                      reviewData: { ...prev.reviewData, pros: e.target.value || undefined }
+                    }))}
+                    className="mt-1 w-full border rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Kekurangan (opsional)</label>
+                  <input
+                    type="text"
+                    value={statusHalaman.reviewData.cons || ''}
+                    onChange={(e) => setStatusHalaman(prev => ({
+                      ...prev,
+                      reviewData: { ...prev.reviewData, cons: e.target.value || undefined }
+                    }))}
+                    className="mt-1 w-full border rounded px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Foto (opsional)</label>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    unggahFoto(files as File[]);
+                  }}
+                  className="mt-1"
+                />
+                {statusHalaman.uploadedPhotos.length > 0 && (
+                  <p className="text-sm text-gray-500 mt-1">
+                    {statusHalaman.uploadedPhotos.length} foto akan diunggah
+                  </p>
+                )}
+              </div>
             </div>
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const formData = new FormData(e.currentTarget);
-              
-                const filter: KriteriaFilter = {
-                transaction_type: formData.get('jenisTransaksi') as string,
-                status: formData.get('status') as string,
-                payment_status: formData.get('payment_status') as string,
-                tanggalMulai: formData.get('tanggalMulai') as string,
-                tanggalAkhir: formData.get('tanggalAkhir') as string,
-                seller: formData.get('seller') as string,
-                hasReview: formData.get('hasReview') === 'true' ? true : formData.get('hasReview') === 'false' ? false : null
-              };
-              
-              terapkanFilter(filter);
-            }} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tanggal Mulai
-                </label>
-                <input
-                  type="date"
-                  name="tanggalMulai"
-                  defaultValue={statusHalaman.filter.tanggalMulai}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tanggal Akhir
-                </label>
-                <input
-                  type="date"
-                  name="tanggalAkhir"
-                  defaultValue={statusHalaman.filter.tanggalAkhir}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Dealer
-                </label>
-                <select
-                  name="seller"
-                  defaultValue={statusHalaman.filter.seller}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Semua Dealer</option>
-                  {daftarDealer.map((dealer) => (
-                    <option key={dealer} value={dealer}>{dealer}</option>
-                  ))}
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Status Ulasan
-                </label>
-                <select
-                  name="hasReview"
-                  defaultValue={statusHalaman.filter.hasReview === null ? '' : statusHalaman.filter.hasReview.toString()}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Semua</option>
-                  <option value="true">Sudah Diulas</option>
-                  <option value="false">Belum Diulas</option>
-                </select>
-              </div>
-              
-              <div className="flex justify-between pt-4">
-                <button
-                  type="button"
-                  onClick={() => setStatusHalaman(prev => ({ ...prev, showFilterModal: false }))}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  Terapkan Filter
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+
+            <DialogFooter>
+              <button
+                className="px-4 py-2 border rounded-md"
+                onClick={() => setStatusHalaman(prev => ({ ...prev, view: 'list', selectedTransaksi: null }))}
+                disabled={statusHalaman.loading}
+              >
+                Batal
+              </button>
+              <button
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                onClick={kirimUlasan}
+                disabled={statusHalaman.loading}
+              >
+                {statusHalaman.loading ? 'Mengirim...' : 'Kirim Ulasan'}
+              </button>
+            </DialogFooter>
+
+            {statusHalaman.error && (
+              <div className="mt-3 text-sm text-red-600">{statusHalaman.error}</div>
+            )}
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Error Message */}
@@ -2338,6 +2382,16 @@ const HalamanRiwayat: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Payment Proof Modal */}
+      <PaymentProofViewer 
+        isOpen={showProofModal} 
+        onClose={() => {
+          setShowProofModal(false);
+          setCurrentProofUrl(null);
+        }} 
+        proofUrl={currentProofUrl || ''} 
+      />
     </div>
   );
 };

@@ -957,6 +957,15 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
         </span>
       );
     }
+    
+    // Ubah: jika pembuktian booking ditolak, tampilkan Booking Rejected
+    if (bookingStatus === 'booking_pending' && hasFailedPayment(transaction)) {
+      return (
+        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Booking Rejected
+        </span>
+      );
+    }
 
     // Mapping label eksplisit untuk status booking
     switch (bookingStatus) {
@@ -1007,7 +1016,7 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
             paymentStatus
           )}`}
         >
-          {paymentStatus}
+          {formatPaymentStatusLabelWithContext(transaction)}
         </span>
       </div>
     );
@@ -1018,7 +1027,7 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
     const paymentStatus = getDisplayPaymentStatus(transaction);
     return (
       <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getPaymentStatusBadgeColor(paymentStatus)}`}>
-        {formatPaymentStatusLabel(paymentStatus)}
+        {formatPaymentStatusLabelWithContext(transaction)}
       </span>
     );
   }; 
@@ -1199,6 +1208,20 @@ const HalamanKelolaTransaksiUser: React.FC = () => {
       default:
         return status ? status.charAt(0).toUpperCase() + status.slice(1) : '-';
     }
+  };
+  
+  const formatPaymentStatusLabelWithContext = (transaction: TransactionWithPayments) => {
+    const paymentStatus = getDisplayPaymentStatus(transaction);
+    if (paymentStatus === 'paid') {
+      if (transaction.transaction.final_payment_completed_at || transaction.transaction.status === 'completed') {
+        return 'Full Paid';
+      }
+      if (hasBookingFeeSuccess(transaction) || transaction.transaction.booking_status === 'booking_paid') {
+        return 'Confirmed';
+      }
+      return 'Paid';
+    }
+    return formatPaymentStatusLabel(paymentStatus);
   };
 
   // Fungsi untuk mendapatkan warna badge berdasarkan status pembayaran

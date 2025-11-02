@@ -75,6 +75,14 @@ export interface CarWithRelations extends Car {
     seller_verification_status?: string;
     seller_total_sales?: number;
   };
+  active_transaction?: {
+    id: string;
+    status: 'pending' | 'confirmed' | 'processing' | 'completed' | 'cancelled';
+    booking_status?: 'booking_pending' | 'booking_confirmed' | 'booking_cancelled';
+    booking_expires_at?: string;
+  };
+  available_for_booking?: boolean;
+  computed_availability?: 'available' | 'processing' | 'reserved' | 'sold';
 }
 
 export interface CarFilters {
@@ -106,6 +114,47 @@ export interface CarsResponse {
   page: number;
   limit: number;
   total_pages: number;
+}
+
+export type ActiveTransactionLite = {
+  id: string;
+  status: 'pending' | 'confirmed' | 'processing' | 'completed' | 'cancelled' | 'refunded';
+  booking_status?: string | null;
+  booking_expires_at?: string | null;
+};
+
+export type CatalogDisplay = {
+  label: 'Tersedia' | 'Sedang Diproses' | 'Direservasi' | 'Terjual';
+  badgeColor: 'green' | 'yellow' | 'orange' | 'gray';
+  canBook: boolean;
+  expiresAt?: string | null;
+};
+
+export function computeCatalogDisplay(
+  carStatus: string,
+  activeTx?: ActiveTransactionLite
+): CatalogDisplay {
+  const hasActiveTx =
+    !!activeTx &&
+    ['pending', 'confirmed', 'processing'].includes(activeTx.status) &&
+    activeTx.booking_status !== 'booking_cancelled';
+
+  if (carStatus === 'sold') {
+    return { label: 'Terjual', badgeColor: 'gray', canBook: false };
+  }
+  if (carStatus === 'reserved') {
+    return { label: 'Direservasi', badgeColor: 'orange', canBook: false };
+  }
+  if (carStatus === 'available' && hasActiveTx) {
+    return {
+      label: 'Sedang Diproses',
+      badgeColor: 'yellow',
+      canBook: false,
+      expiresAt: activeTx.booking_expires_at || null
+    };
+  }
+  // available & no active tx
+  return { label: 'Tersedia', badgeColor: 'green', canBook: true };
 }
 
 // ==================== CAR SERVICE ====================
@@ -250,12 +299,58 @@ class CarService {
         console.error('Error fetching cars:', error);
         throw error;
       }
+      
+      // Get active transactions for these cars to determine real availability
+      const carIds = data?.map(car => car.id) || [];
+      let activeTransactions: Record<string, any> = {};
+      
+      if (carIds.length > 0) {
+        const { data: transactions, error: txError } = await supabase
+          .from('transactions')
+          .select('id, car_id, status, booking_status, booking_expires_at')
+          .in('car_id', carIds)
+          .in('status', ['pending', 'confirmed', 'processing'])
+          .neq('booking_status', 'booking_cancelled');
+          
+        if (!txError && transactions) {
+          // Create a map of car_id to transaction
+          activeTransactions = transactions.reduce((acc, tx) => {
+            acc[tx.car_id] = tx;
+            return acc;
+          }, {} as Record<string, any>);
+        }
+      }
+      
+      // Enhance car data with computed availability
+      const enhancedData = data?.map(car => {
+        const activeTx = activeTransactions[car.id];
+        const availableForBooking = !activeTx;
+        
+        let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
+        
+        if (car.status === 'sold') {
+          computedAvailability = 'sold';
+        } else if (car.status === 'reserved') {
+          computedAvailability = 'reserved';
+        } else if (activeTx) {
+          computedAvailability = 'processing';
+        } else {
+          computedAvailability = 'available';
+        }
+        
+        return {
+          ...car,
+          active_transaction: activeTx || undefined,
+          available_for_booking: availableForBooking,
+          computed_availability: computedAvailability
+        };
+      }) || [];
 
       const total = count || 0;
       const total_pages = Math.ceil(total / limit);
 
       return {
-        data: data || [],
+        data: enhancedData,
         total,
         page,
         limit,
@@ -285,14 +380,29 @@ class CarService {
       }
 
       // Fetch related data in parallel
-      const [brand, model, category, images, specs, seller] = await Promise.all([
+      const [brand, model, category, images, specs, seller, activeTx] = await Promise.all([
         supabase.from('car_brands').select('*').eq('id', car.brand_id).single(),
         supabase.from('car_models').select('*').eq('id', car.model_id).single(),
         supabase.from('car_categories').select('*').eq('id', car.category_id).single(),
         supabase.from('car_images').select('*').eq('car_id', car.id).order('display_order'),
         supabase.from('car_specifications').select('*').eq('car_id', car.id).maybeSingle(),
-        supabase.from('users').select('id, username, full_name, phone_number, address, city, province, postal_code, seller_rating, seller_type, seller_verification_status, seller_total_sales').eq('id', car.seller_id).single()
+        supabase.from('users').select('id, username, full_name, phone_number, address, city, province, postal_code, seller_rating, seller_type, seller_verification_status, seller_total_sales').eq('id', car.seller_id).single(),
+        supabase.from('transactions').select('id, status, booking_status, booking_expires_at').eq('car_id', car.id).in('status', ['pending', 'confirmed', 'processing']).neq('booking_status', 'booking_cancelled').maybeSingle()
       ]);
+      
+      // Determine computed availability
+      let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
+      const availableForBooking = !activeTx.data;
+      
+      if (car.status === 'sold') {
+        computedAvailability = 'sold';
+      } else if (car.status === 'reserved') {
+        computedAvailability = 'reserved';
+      } else if (activeTx.data) {
+        computedAvailability = 'processing';
+      } else {
+        computedAvailability = 'available';
+      }
 
       // Combine all data
       const result = {
@@ -302,7 +412,10 @@ class CarService {
         car_categories: category.data || null,
         car_images: images.data || [],
         car_specifications: specs.data || null,
-        users: seller.data || null
+        users: seller.data || null,
+        active_transaction: activeTx.data || null,
+        available_for_booking: availableForBooking,
+        computed_availability: computedAvailability
       };
 
       return result;
@@ -358,8 +471,54 @@ class CarService {
         console.error('Error fetching featured cars:', error);
         return [];
       }
+      
+      // Get active transactions for these cars to determine real availability
+      const carIds = data?.map(car => car.id) || [];
+      let activeTransactions: Record<string, any> = {};
+      
+      if (carIds.length > 0) {
+        const { data: transactions, error: txError } = await supabase
+          .from('transactions')
+          .select('id, car_id, status, booking_status, booking_expires_at')
+          .in('car_id', carIds)
+          .in('status', ['pending', 'confirmed', 'processing'])
+          .neq('booking_status', 'booking_cancelled');
+          
+        if (!txError && transactions) {
+          // Create a map of car_id to transaction
+          activeTransactions = transactions.reduce((acc, tx) => {
+            acc[tx.car_id] = tx;
+            return acc;
+          }, {} as Record<string, any>);
+        }
+      }
+      
+      // Enhance car data with computed availability
+      const enhancedData = data?.map(car => {
+        const activeTx = activeTransactions[car.id];
+        const availableForBooking = !activeTx;
+        
+        let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
+        
+        if (car.status === 'sold') {
+          computedAvailability = 'sold';
+        } else if (car.status === 'reserved') {
+          computedAvailability = 'reserved';
+        } else if (activeTx) {
+          computedAvailability = 'processing';
+        } else {
+          computedAvailability = 'available';
+        }
+        
+        return {
+          ...car,
+          active_transaction: activeTx || undefined,
+          available_for_booking: availableForBooking,
+          computed_availability: computedAvailability
+        };
+      }) || [];
 
-      return data || [];
+      return enhancedData;
     } catch (error) {
       console.error('Error in getFeaturedCars:', error);
       return [];
@@ -389,8 +548,54 @@ class CarService {
         console.error('Error fetching latest cars:', error);
         return [];
       }
+      
+      // Get active transactions for these cars to determine real availability
+      const carIds = data?.map(car => car.id) || [];
+      let activeTransactions: Record<string, any> = {};
+      
+      if (carIds.length > 0) {
+        const { data: transactions, error: txError } = await supabase
+          .from('transactions')
+          .select('id, car_id, status, booking_status, booking_expires_at')
+          .in('car_id', carIds)
+          .in('status', ['pending', 'confirmed', 'processing'])
+          .neq('booking_status', 'booking_cancelled');
+          
+        if (!txError && transactions) {
+          // Create a map of car_id to transaction
+          activeTransactions = transactions.reduce((acc, tx) => {
+            acc[tx.car_id] = tx;
+            return acc;
+          }, {} as Record<string, any>);
+        }
+      }
+      
+      // Enhance car data with computed availability
+      const enhancedData = data?.map(car => {
+        const activeTx = activeTransactions[car.id];
+        const availableForBooking = !activeTx;
+        
+        let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
+        
+        if (car.status === 'sold') {
+          computedAvailability = 'sold';
+        } else if (car.status === 'reserved') {
+          computedAvailability = 'reserved';
+        } else if (activeTx) {
+          computedAvailability = 'processing';
+        } else {
+          computedAvailability = 'available';
+        }
+        
+        return {
+          ...car,
+          active_transaction: activeTx || undefined,
+          available_for_booking: availableForBooking,
+          computed_availability: computedAvailability
+        };
+      }) || [];
 
-      return data || [];
+      return enhancedData;
     } catch (error) {
       console.error('Error in getLatestCars:', error);
       return [];
@@ -1708,6 +1913,74 @@ class CarService {
         models: [],
         categories: []
       };
+    }
+  }
+  
+  /**
+   * Check if a car is available for booking
+   */
+  async isCarAvailableForBooking(carId: string): Promise<boolean> {
+    try {
+      // Cek status mobil
+      const { data: car, error: carErr } = await supabase
+        .from('cars')
+        .select('status')
+        .eq('id', carId)
+        .single();
+
+      if (carErr || !car) return false;
+      if (car.status !== 'available') return false;
+
+      // Cek transaksi aktif
+      const { data: activeTx, error: txErr } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('car_id', carId)
+        .in('status', ['pending', 'confirmed', 'processing'])
+        .neq('booking_status', 'booking_cancelled')
+        .limit(1);
+
+      if (txErr) return false;
+      return !activeTx || activeTx.length === 0;
+    } catch (error) {
+      console.error('Error checking car availability:', error);
+      return false;
+    }
+  }
+  
+  /**
+   * Get computed availability status for a car
+   */
+  async getComputedAvailability(carId: string): Promise<'available' | 'processing' | 'reserved' | 'sold'> {
+    try {
+      // Fetch car status
+      const { data: car, error: carErr } = await supabase
+        .from('cars')
+        .select('status')
+        .eq('id', carId)
+        .single();
+
+      if (carErr || !car) return 'sold'; // Default to sold if error or not found
+      
+      if (car.status === 'sold') return 'sold';
+      if (car.status === 'reserved') return 'reserved';
+      if (car.status !== 'available') return 'sold'; // Any other status (rejected, pending) treated as not available
+      
+      // Check for active transactions
+      const { data: activeTx, error: txErr } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('car_id', carId)
+        .in('status', ['pending', 'confirmed', 'processing'])
+        .neq('booking_status', 'booking_cancelled')
+        .limit(1);
+
+      if (txErr) return 'sold'; // Default to sold if error
+      
+      return activeTx && activeTx.length > 0 ? 'processing' : 'available';
+    } catch (error) {
+      console.error('Error getting computed availability:', error);
+      return 'sold'; // Default to sold if any error
     }
   }
 }

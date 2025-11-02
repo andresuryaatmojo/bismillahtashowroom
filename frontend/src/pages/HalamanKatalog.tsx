@@ -1,3 +1,4 @@
+// Tambahkan import computeCatalogDisplay dan gunakan computed availability untuk list
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -101,12 +102,10 @@ const HalamanKatalog: React.FC = () => {
         sort_by: sortBy
       });
       
-      // Client-side guard: hanya tampilkan mobil berstatus 'available'
-      const visibleCars = (response.data || []).filter(car => car.status === 'available');
-      
+      // REVISI: gunakan computed availability; jangan filter hanya status 'available'
+      const visibleCars = response.data || [];
       setCars(visibleCars);
-      // Opsional: sesuaikan total agar konsisten dengan daftar yang tampil
-      setTotalCars(visibleCars.length);
+      setTotalCars(response.total ?? visibleCars.length);
     } catch (error) {
       console.error('Error fetching cars:', error);
     } finally {
@@ -648,3 +647,5 @@ const HalamanKatalog: React.FC = () => {
 };
 
 export default HalamanKatalog;
+
+
