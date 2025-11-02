@@ -28,7 +28,7 @@ import HalamanKemitraan from './pages/HalamanKemitraan';
 import HalamanKonten from './pages/HalamanKonten';
 import HalamanLaporan from './pages/HalamanLaporan';
 import HalamanPembelian from './pages/HalamanPembelian';
-import HalamanPerbandingan from './pages/HalamanPerbandingan';
+import HalamanPerbandinganMobil from './pages/HalamanPerbandinganMobil';
 import HalamanRiwayat from './pages/HalamanRiwayat';
 import HalamanRiwayatTestDrive from './pages/HalamanRiwayatTestDrive';
 import HalamanSimulasiKredit from './pages/HalamanSimulasiKredit';
@@ -114,7 +114,7 @@ const AppContent: React.FC = () => {
           
           <Route path="/kemitraan" element={<HalamanKemitraan />} />
           <Route path="/simulasi" element={<HalamanSimulasiKredit />} />
-          <Route path="/perbandingan" element={<HalamanPerbandingan />} />
+          <Route path="/perbandingan" element={<HalamanPerbandinganMobil />} />
           <Route path="/test-drive" element={<HalamanTestDrive />} />
           <Route path="/trade-in" element={<HalamanTradeIn />} />
           <Route path="/mobil/:id" element={<HalamanDetailMobil />} />

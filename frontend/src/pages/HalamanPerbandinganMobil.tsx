@@ -1,120 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import KontrollerPerbandingan from '../controllers/KontrollerPerbandingan';
+import { comparisonService, CarForComparison, ComparisonResult } from '../services/comparisonService';
 
-// Helper function to map controller car format to page car format
-const mapControllerCarToPageCar = (controllerCar: any): MobilPerbandingan => {
-  return {
-    id: controllerCar.id,
-    name: controllerCar.nama || controllerCar.name || '',
-    brand: controllerCar.brand || '',
-    model: controllerCar.model || '',
-    variant: controllerCar.variant || '',
-    year: controllerCar.year || new Date().getFullYear(),
-    price: controllerCar.price || controllerCar.harga || 0,
-    image: controllerCar.image || controllerCar.gambar || '',
-    specifications: controllerCar.specifications || controllerCar.spesifikasi || {
-      engine: '',
-      transmission: '',
-      fuelType: '',
-      fuelConsumption: '',
-      power: '',
-      torque: '',
-      acceleration: '',
-      topSpeed: '',
-      seatingCapacity: 5,
-      dimensions: {
-        length: 0,
-        width: 0,
-        height: 0,
-        wheelbase: 0
-      },
-      weight: 0,
-      groundClearance: 0,
-      fuelTankCapacity: 0
-    },
-    features: controllerCar.features || controllerCar.fitur || {
-      safety: [],
-      comfort: [],
-      technology: [],
-      exterior: [],
-      interior: []
-    },
-    rating: controllerCar.rating || {
-      overall: 0,
-      safety: 0,
-      comfort: 0,
-      performance: 0,
-      fuelEconomy: 0,
-      valueForMoney: 0
-    },
-    pros: controllerCar.pros || controllerCar.kelebihan || [],
-    cons: controllerCar.cons || controllerCar.kekurangan || [],
-    availability: controllerCar.availability || controllerCar.ketersediaan || {
-      inStock: true,
-      estimatedDelivery: '1-2 weeks',
-      dealerCount: 1
-    }
-  };
-};
-
-// Interface untuk mobil yang dibandingkan (format halaman)
-interface MobilPerbandingan {
-  id: string;
-  name: string;
-  brand: string;
-  model: string;
-  variant: string;
-  year: number;
-  price: number;
-  image: string;
-  specifications: {
-    engine: string;
-    transmission: string;
-    fuelType: string;
-    fuelConsumption: string;
-    power: string;
-    torque: string;
-    acceleration: string;
-    topSpeed: string;
-    seatingCapacity: number;
-    dimensions: {
-      length: number;
-      width: number;
-      height: number;
-      wheelbase: number;
-    };
-    weight: number;
-    groundClearance: number;
-    fuelTankCapacity: number;
-  };
-  features: {
-    safety: string[];
-    comfort: string[];
-    technology: string[];
-    exterior: string[];
-    interior: string[];
-  };
-  rating: {
-    overall: number;
-    safety: number;
-    comfort: number;
-    performance: number;
-    fuelEconomy: number;
-    valueForMoney: number;
-  };
-  pros: string[];
-  cons: string[];
-  availability: {
-    inStock: boolean;
-    estimatedDelivery: string;
-    dealerCount: number;
-  };
-}
 
 // Interface untuk hasil perbandingan
 interface HasilPerbandingan {
-  cars: MobilPerbandingan[];
+  cars: CarForComparison[];
   winner: {
     overall: string;
     categories: {
@@ -144,8 +35,8 @@ interface HasilPerbandingan {
 interface StateHalaman {
   loading: boolean;
   error: string | null;
-  availableCars: MobilPerbandingan[];
-  selectedCars: (MobilPerbandingan | null)[];
+  availableCars: CarForComparison[];
+  selectedCars: (CarForComparison | null)[];
   comparisonResult: HasilPerbandingan | null;
   showCarSelector: boolean;
   selectorPosition: number; // 0 for first car, 1 for second car
@@ -156,11 +47,10 @@ interface StateHalaman {
   shareUrl: string;
 }
 
-const HalamanPerbandingan: React.FC = () => {
+const HalamanPerbandinganMobil: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const kontrollerPerbandingan = new KontrollerPerbandingan();
-
+  
   // State management
   const [state, setState] = useState<StateHalaman>({
     loading: true,
@@ -178,89 +68,40 @@ const HalamanPerbandingan: React.FC = () => {
   });
 
   /**
-   * Akses halaman perbandingan - memuat data mobil yang tersedia
+   * Akses halaman perbandingan - memuat data mobil yang tersedia dari Supabase
    */
   const aksesHalamanPerbandingan = useCallback(async () => {
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
 
-      const result = await kontrollerPerbandingan.muatHalamanPerbandingan([], {
-        availability: true
-      });
-
-      // Map controller MobilPerbandingan to page MobilPerbandingan format
-      const mappedCars = result.mobilTersedia.map(car => ({
-        id: car.id,
-        name: `${car.brand} ${car.model} ${car.variant}`,
-        brand: car.brand,
-        model: car.model,
-        variant: car.variant,
-        year: car.year,
-        price: car.price,
-        image: car.mainImage,
-        specifications: {
-          engine: `${car.engine.capacity}cc ${car.engine.configuration}`,
-          transmission: car.transmission,
-          fuelType: car.fuelType,
-          fuelConsumption: `${car.performance.fuelConsumption.combined} km/l`,
-          power: `${car.engine.power} HP`,
-          torque: `${car.engine.torque} Nm`,
-          acceleration: `${car.performance.acceleration}s (0-100 km/h)`,
-          topSpeed: `${car.performance.topSpeed} km/h`,
-          seatingCapacity: typeof car.specifications.seating?.capacity === 'number' ? car.specifications.seating.capacity : 5,
-          dimensions: {
-            length: car.dimensions.length,
-            width: car.dimensions.width,
-            height: car.dimensions.height,
-            wheelbase: car.dimensions.wheelbase,
-          },
-          weight: car.dimensions.weight,
-          groundClearance: car.dimensions.groundClearance,
-          fuelTankCapacity: typeof car.specifications.fuel?.tankCapacity === 'number' ? car.specifications.fuel.tankCapacity : 0,
-        },
-        features: car.features,
-        rating: {
-          overall: car.ratings.overall,
-          safety: car.ratings.safety,
-          comfort: car.ratings.comfort,
-          performance: car.ratings.performance,
-          fuelEconomy: car.ratings.fuelEconomy,
-          valueForMoney: car.ratings.valueForMoney,
-        },
-        pros: Array.isArray(car.specifications.highlights?.pros) ? car.specifications.highlights.pros : [],
-        cons: Array.isArray(car.specifications.highlights?.cons) ? car.specifications.highlights.cons : [],
-        availability: {
-          inStock: car.availability.inStock,
-          estimatedDelivery: car.availability.estimatedDelivery,
-          dealerCount: car.availability.locations.length,
-        },
-      }));
+      // Fetch available cars from Supabase
+      const availableCars = await comparisonService.getAvailableCars(undefined, 50);
 
       setState(prev => ({
         ...prev,
         loading: false,
-        availableCars: mappedCars
+        availableCars
       }));
 
       // Load cars from URL params if available
       const car1Id = searchParams.get('car1');
       const car2Id = searchParams.get('car2');
-      
+
       if (car1Id || car2Id) {
-        const selectedCars: (MobilPerbandingan | null)[] = [null, null];
-        
+        const selectedCars: (CarForComparison | null)[] = [null, null];
+
         if (car1Id) {
-          const car1 = mappedCars.find(car => car.id === car1Id);
+          const car1 = availableCars.find(car => car.id === car1Id);
           if (car1) selectedCars[0] = car1;
         }
-        
+
         if (car2Id) {
-          const car2 = mappedCars.find(car => car.id === car2Id);
+          const car2 = availableCars.find(car => car.id === car2Id);
           if (car2) selectedCars[1] = car2;
         }
-        
+
         setState(prev => ({ ...prev, selectedCars }));
-        
+
         // Auto compare if both cars are selected
         if (selectedCars[0] && selectedCars[1]) {
           await performComparison(selectedCars[0], selectedCars[1]);
@@ -368,17 +209,16 @@ const HalamanPerbandingan: React.FC = () => {
         return;
       }
 
-      const result = await kontrollerPerbandingan.sharePerbandingan(
+      const shareUrl = await comparisonService.generateShareLink(
         state.selectedCars[0].id,
-        state.selectedCars[1].id,
-        'link'
+        state.selectedCars[1].id
       );
 
-      if (result.success && result.shareUrl) {
+      if (shareUrl) {
         setState(prev => ({
           ...prev,
           showShareModal: true,
-          shareUrl: result.shareUrl!
+          shareUrl
         }));
       }
 
@@ -393,18 +233,18 @@ const HalamanPerbandingan: React.FC = () => {
    * @param position - Posisi mobil yang akan dihapus (0 atau 1)
    */
   const hapusMobil = useCallback((position?: number) => {
-    const positionToRemove = position !== undefined ? position : 
-      (state.selectedCars[0] && state.selectedCars[1] ? 
-        (Math.random() > 0.5 ? 0 : 1) : 
+    const positionToRemove = position !== undefined ? position :
+      (state.selectedCars[0] && state.selectedCars[1] ?
+        (Math.random() > 0.5 ? 0 : 1) :
         (state.selectedCars[0] ? 0 : 1));
 
     setState(prev => {
       const newSelectedCars = [...prev.selectedCars];
       newSelectedCars[positionToRemove] = null;
-      
+
       return {
         ...prev,
-        selectedCars: newSelectedCars as [MobilPerbandingan | null, MobilPerbandingan | null],
+        selectedCars: newSelectedCars as [CarForComparison | null, CarForComparison | null],
         comparisonResult: null
       };
     });
@@ -465,78 +305,27 @@ const HalamanPerbandingan: React.FC = () => {
    * Perform actual comparison between two cars
    */
   const performComparison = useCallback(async (
-    car1: MobilPerbandingan, 
-    car2: MobilPerbandingan, 
+    car1: CarForComparison,
+    car2: CarForComparison,
     criteria?: string
   ) => {
     try {
       setState(prev => ({ ...prev, loading: true }));
 
-      const controllerResult = await kontrollerPerbandingan.lakukanPerbandingan(
-        [car1.id, car2.id],
-        {
-          prioritas: {
-            price: 5,
-            performance: 4,
-            fuelEconomy: 4,
-            safety: 5,
-            comfort: 3
-          },
-          budget: {
-            max: 1000000000,
-            downPayment: 200000000,
-            monthlyPayment: 10000000
-          },
-          usage: {
-            dailyCommute: true,
-            familyTrips: true,
-            businessUse: false,
-            offRoad: false,
-            cityDriving: true,
-            highwayDriving: false
-          },
-          preferences: {
-            fuelEconomy: 4,
-            performance: 4,
-            comfort: 3,
-            safety: 5,
-            technology: 3,
-            reliability: 4,
-            brandPrestige: 2
-          }
-        }
-      );
+      // Perform comparison using the new service
+      const comparisonResult = await comparisonService.compareCars(car1.id, car2.id);
 
-      // Convert controller result to page format
+      if (!comparisonResult) {
+        throw new Error('Failed to perform comparison');
+      }
+
+      // Convert to page format (keeping the same structure for UI compatibility)
       const result: HasilPerbandingan = {
-        cars: controllerResult.mobil.map(car => mapControllerCarToPageCar(car)),
-        winner: {
-          overall: controllerResult.mobil[controllerResult.summary.overall.winner]?.id || '',
-          categories: {
-            price: controllerResult.mobil[controllerResult.recommendations.bestValue]?.id || '',
-            performance: controllerResult.mobil[controllerResult.recommendations.bestPerformance]?.id || '',
-            fuelEconomy: controllerResult.mobil[controllerResult.recommendations.bestFuelEconomy]?.id || '',
-            safety: controllerResult.mobil[controllerResult.recommendations.bestSafety]?.id || '',
-            comfort: controllerResult.mobil[controllerResult.recommendations.bestComfort]?.id || '',
-            features: controllerResult.mobil[controllerResult.recommendations.bestOverall]?.id || ''
-          }
-        },
-        comparison: Object.keys(controllerResult.perbandingan).reduce((acc, kategori) => {
-          Object.keys(controllerResult.perbandingan[kategori]).forEach(kriteria => {
-            const data = controllerResult.perbandingan[kategori][kriteria];
-            acc[`${kategori}_${kriteria}`] = {
-              car1: data.values[0],
-              car2: data.values[1],
-              advantage: data.winner === 0 ? 'car1' : data.winner === 1 ? 'car2' : 'equal'
-            };
-          });
-          return acc;
-        }, {} as any),
-        recommendation: controllerResult.summary.overall.reasons.join('. '),
-        score: {
-          car1: controllerResult.summary.overall.scores[0] || 0,
-          car2: controllerResult.summary.overall.scores[1] || 0
-        }
+        cars: comparisonResult.cars,
+        winner: comparisonResult.winner,
+        comparison: comparisonResult.comparison,
+        recommendation: comparisonResult.recommendation,
+        score: comparisonResult.score
       };
 
       setState(prev => ({
@@ -585,9 +374,12 @@ const HalamanPerbandingan: React.FC = () => {
                          car.brand.toLowerCase().includes(state.searchQuery.toLowerCase());
     const matchesBrand = !state.filterBrand || car.brand === state.filterBrand;
     const matchesPrice = car.price >= state.filterPriceRange[0] && car.price <= state.filterPriceRange[1];
-    
+
     return matchesSearch && matchesBrand && matchesPrice;
   });
+
+  // Get unique brands from available cars
+  const availableBrands = Array.from(new Set(state.availableCars.map(car => car.brand))).sort();
 
   /**
    * Copy share URL to clipboard
@@ -664,6 +456,21 @@ const HalamanPerbandingan: React.FC = () => {
                   <p className="text-2xl font-bold text-blue-600 mt-2">
                     Rp {state.selectedCars[0].price.toLocaleString('id-ID')}
                   </p>
+                  <div className="mt-2 flex items-center space-x-2">
+                    <span className="text-sm text-gray-500">Rating:</span>
+                    <span className="text-sm font-semibold text-yellow-600">
+                      ⭐ {state.selectedCars[0].rating.overall}/5
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center space-x-2">
+                    <span className={`text-sm px-2 py-1 rounded ${
+                      state.selectedCars[0].availability.inStock
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {state.selectedCars[0].availability.inStock ? 'Tersedia' : 'Tidak Tersedia'}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex space-x-2">
                   <button
@@ -710,6 +517,21 @@ const HalamanPerbandingan: React.FC = () => {
                   <p className="text-2xl font-bold text-blue-600 mt-2">
                     Rp {state.selectedCars[1].price.toLocaleString('id-ID')}
                   </p>
+                  <div className="mt-2 flex items-center space-x-2">
+                    <span className="text-sm text-gray-500">Rating:</span>
+                    <span className="text-sm font-semibold text-yellow-600">
+                      ⭐ {state.selectedCars[1].rating.overall}/5
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center space-x-2">
+                    <span className={`text-sm px-2 py-1 rounded ${
+                      state.selectedCars[1].availability.inStock
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {state.selectedCars[1].availability.inStock ? 'Tersedia' : 'Tidak Tersedia'}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex space-x-2">
                   <button
@@ -801,7 +623,7 @@ const HalamanPerbandingan: React.FC = () => {
             {/* Detailed Comparison */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h3 className="text-xl font-bold text-gray-800 mb-6">Perbandingan Detail</h3>
-              
+
               {/* Specifications Comparison */}
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -823,6 +645,11 @@ const HalamanPerbandingan: React.FC = () => {
                       </td>
                     </tr>
                     <tr className="border-b">
+                      <td className="py-3 px-4 font-medium">Tahun</td>
+                      <td className="py-3 px-4 text-center">{state.selectedCars[0]?.year}</td>
+                      <td className="py-3 px-4 text-center">{state.selectedCars[1]?.year}</td>
+                    </tr>
+                    <tr className="border-b">
                       <td className="py-3 px-4 font-medium">Mesin</td>
                       <td className="py-3 px-4 text-center">{state.selectedCars[0]?.specifications.engine}</td>
                       <td className="py-3 px-4 text-center">{state.selectedCars[1]?.specifications.engine}</td>
@@ -831,6 +658,11 @@ const HalamanPerbandingan: React.FC = () => {
                       <td className="py-3 px-4 font-medium">Transmisi</td>
                       <td className="py-3 px-4 text-center">{state.selectedCars[0]?.specifications.transmission}</td>
                       <td className="py-3 px-4 text-center">{state.selectedCars[1]?.specifications.transmission}</td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="py-3 px-4 font-medium">Bahan Bakar</td>
+                      <td className="py-3 px-4 text-center capitalize">{state.selectedCars[0]?.specifications.fuelType}</td>
+                      <td className="py-3 px-4 text-center capitalize">{state.selectedCars[1]?.specifications.fuelType}</td>
                     </tr>
                     <tr className="border-b">
                       <td className="py-3 px-4 font-medium">Konsumsi BBM</td>
@@ -847,6 +679,27 @@ const HalamanPerbandingan: React.FC = () => {
                       <td className="py-3 px-4 text-center">{state.selectedCars[0]?.specifications.seatingCapacity} orang</td>
                       <td className="py-3 px-4 text-center">{state.selectedCars[1]?.specifications.seatingCapacity} orang</td>
                     </tr>
+                    <tr className="border-b">
+                      <td className="py-3 px-4 font-medium">Status Ketersediaan</td>
+                      <td className="py-3 px-4 text-center">
+                        <span className={`text-sm px-2 py-1 rounded ${
+                          state.selectedCars[0]?.availability.inStock
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {state.selectedCars[0]?.availability.inStock ? 'Tersedia' : 'Tidak Tersedia'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className={`text-sm px-2 py-1 rounded ${
+                          state.selectedCars[1]?.availability.inStock
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {state.selectedCars[1]?.availability.inStock ? 'Tersedia' : 'Tidak Tersedia'}
+                        </span>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -856,7 +709,7 @@ const HalamanPerbandingan: React.FC = () => {
                 <h4 className="text-lg font-semibold mb-4">Rating Perbandingan</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {['safety', 'comfort', 'performance', 'fuelEconomy', 'valueForMoney'].map((category) => {
-                    const categoryKey = category as keyof MobilPerbandingan['rating'];
+                    const categoryKey = category as keyof CarForComparison['rating'];
                     return (
                       <div key={category} className="space-y-2">
                         <div className="flex justify-between">
@@ -867,26 +720,26 @@ const HalamanPerbandingan: React.FC = () => {
                             <div className="bg-gray-200 rounded-full h-2">
                               <div
                                 className="bg-blue-600 h-2 rounded-full"
-                                style={{ 
-                                  width: `${(state.selectedCars[0]?.rating[categoryKey] || 0) * 20}%` 
+                                style={{
+                                  width: `${(state.selectedCars[0]?.rating[categoryKey as keyof CarForComparison['rating']] || 0) * 20}%`
                                 }}
                               ></div>
                             </div>
                             <span className="text-sm text-gray-600">
-                              {(state.selectedCars[0]?.rating[categoryKey] || 0)}/5
+                              {(state.selectedCars[0]?.rating[categoryKey as keyof CarForComparison['rating']] || 0)}/5
                             </span>
                           </div>
                           <div className="flex-1">
                             <div className="bg-gray-200 rounded-full h-2">
                               <div
                                 className="bg-green-600 h-2 rounded-full"
-                                style={{ 
-                                  width: `${(state.selectedCars[1]?.rating[categoryKey] || 0) * 20}%` 
+                                style={{
+                                  width: `${(state.selectedCars[1]?.rating[categoryKey as keyof CarForComparison['rating']] || 0) * 20}%`
                                 }}
                               ></div>
                             </div>
                             <span className="text-sm text-gray-600">
-                              {(state.selectedCars[1]?.rating[categoryKey] || 0)}/5
+                              {(state.selectedCars[1]?.rating[categoryKey as keyof CarForComparison['rating']] || 0)}/5
                             </span>
                           </div>
                         </div>
@@ -933,7 +786,7 @@ const HalamanPerbandingan: React.FC = () => {
                     className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Semua Merek</option>
-                    {Array.from(new Set(state.availableCars.map(car => car.brand))).map(brand => (
+                    {availableBrands.map(brand => (
                       <option key={brand} value={brand}>{brand}</option>
                     ))}
                   </select>
@@ -958,6 +811,16 @@ const HalamanPerbandingan: React.FC = () => {
                       <p className="text-lg font-bold text-blue-600 mt-2">
                         Rp {car.price.toLocaleString('id-ID')}
                       </p>
+                      <div className="mt-1 flex items-center justify-between">
+                        <span className="text-xs text-gray-500">⭐ {car.rating.overall}/5</span>
+                        <span className={`text-xs px-1 py-0.5 rounded ${
+                          car.availability.inStock
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {car.availability.inStock ? 'Tersedia' : 'Tidak Tersedia'}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1034,4 +897,4 @@ const HalamanPerbandingan: React.FC = () => {
   );
 };
 
-export default HalamanPerbandingan;
+export default HalamanPerbandinganMobil;

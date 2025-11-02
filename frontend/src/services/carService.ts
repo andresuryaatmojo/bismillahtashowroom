@@ -83,6 +83,53 @@ export interface CarWithRelations extends Car {
   };
   available_for_booking?: boolean;
   computed_availability?: 'available' | 'processing' | 'reserved' | 'sold';
+  car_specifications?: {
+    id?: string;
+    car_id?: string;
+    engine_type?: string;
+    engine_capacity?: number;
+    power?: string;
+    torque?: string;
+    acceleration?: string;
+    top_speed?: string;
+    fuel_consumption?: string;
+    seating_capacity?: number;
+    length?: number;
+    width?: number;
+    height?: number;
+    wheelbase?: number;
+    weight?: number;
+    ground_clearance?: number;
+    fuel_tank_capacity?: number;
+    safety_features?: string;
+    comfort_features?: string;
+    technology_features?: string;
+    exterior_features?: string;
+    interior_features?: string;
+  } | null | Array<{
+    id?: string;
+    car_id?: string;
+    engine_type?: string;
+    engine_capacity?: number;
+    power?: string;
+    torque?: string;
+    acceleration?: string;
+    top_speed?: string;
+    fuel_consumption?: string;
+    seating_capacity?: number;
+    length?: number;
+    width?: number;
+    height?: number;
+    wheelbase?: number;
+    weight?: number;
+    ground_clearance?: number;
+    fuel_tank_capacity?: number;
+    safety_features?: string;
+    comfort_features?: string;
+    technology_features?: string;
+    exterior_features?: string;
+    interior_features?: string;
+  }>;
 }
 
 export interface CarFilters {
