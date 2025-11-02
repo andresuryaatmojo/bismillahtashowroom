@@ -15,75 +15,36 @@ import {
   TrendingUp
 } from 'lucide-react';
 
-// Types
-interface FinancialPartner {
-  id: string;
-  name: string;
-  code: string;
-}
-
-interface CreditParameter {
-  id: string;
-  financial_partner_id: string;
-  financial_partner_name?: string;
-  name: string;
-  min_dp_percentage: number;
-  max_dp_percentage: number;
-  tenor_months: number;
-  interest_rate_yearly: number;
-  interest_type: 'flat' | 'efektif' | 'anuitas';
-  admin_fee: number;
-  provision_fee_percentage: number;
-  fidusia_fee: number;
-  insurance_tlo_percentage: number;
-  insurance_allrisk_percentage: number;
-  life_insurance_percentage: number;
-  min_otr?: number;
-  max_otr?: number;
-  is_active: boolean;
-  effective_date: string;
-  expired_date?: string;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface FormData {
-  financial_partner_id: string;
-  name: string;
-  min_dp_percentage: string;
-  max_dp_percentage: string;
-  tenor_months: string;
-  interest_rate_yearly: string;
-  interest_type: 'flat' | 'efektif' | 'anuitas';
-  admin_fee: string;
-  provision_fee_percentage: string;
-  fidusia_fee: string;
-  insurance_tlo_percentage: string;
-  insurance_allrisk_percentage: string;
-  life_insurance_percentage: string;
-  min_otr: string;
-  max_otr: string;
-  is_active: boolean;
-  effective_date: string;
-  expired_date: string;
-  notes: string;
-}
+// Import types and services
+import {
+  CreditParameter,
+  CreditParameterWithPartner,
+  CreditParameterFormData,
+  CreditParameterPayload,
+  FinancialPartner
+} from '../types/credit-parameters';
+import {
+  fetchCreditParameters,
+  fetchFinancialPartners,
+  createCreditParameter,
+  updateCreditParameter,
+  deleteCreditParameter
+} from '../services/creditParameters';
 
 const HalamanParameterKredit: React.FC = () => {
-  const [parameters, setParameters] = useState<CreditParameter[]>([]);
-  const [filteredParameters, setFilteredParameters] = useState<CreditParameter[]>([]);
+  const [parameters, setParameters] = useState<CreditParameterWithPartner[]>([]);
+  const [filteredParameters, setFilteredParameters] = useState<CreditParameterWithPartner[]>([]);
   const [partners, setPartners] = useState<FinancialPartner[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [editingParameter, setEditingParameter] = useState<CreditParameter | null>(null);
-  const [deletingParameter, setDeletingParameter] = useState<CreditParameter | null>(null);
+  const [editingParameter, setEditingParameter] = useState<CreditParameterWithPartner | null>(null);
+  const [deletingParameter, setDeletingParameter] = useState<CreditParameterWithPartner | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterPartner, setFilterPartner] = useState('');
   const [filterActive, setFilterActive] = useState('all');
   const [loading, setLoading] = useState(false);
 
-  const [formData, setFormData] = useState<FormData>({
+  const [formData, setFormData] = useState<CreditParameterFormData>({
     financial_partner_id: '',
     name: '',
     min_dp_percentage: '20',
@@ -141,18 +102,8 @@ const HalamanParameterKredit: React.FC = () => {
 
   const fetchPartners = async () => {
     try {
-      // TODO: Replace with actual API call
-      // const response = await fetch('/api/financial-partners?is_active=true');
-      // const data = await response.json();
-      // setPartners(data);
-
-      // Dummy data
-      const dummyPartners: FinancialPartner[] = [
-        { id: '1', name: 'Bank Mandiri', code: 'BM001' },
-        { id: '2', name: 'BCA Finance', code: 'BCA001' },
-        { id: '3', name: 'Astra Credit', code: 'ACC001' }
-      ];
-      setPartners(dummyPartners);
+      const data = await fetchFinancialPartners();
+      setPartners(data);
     } catch (error) {
       console.error('Error fetching partners:', error);
     }
@@ -161,39 +112,8 @@ const HalamanParameterKredit: React.FC = () => {
   const fetchParameters = async () => {
     try {
       setLoading(true);
-      // TODO: Replace with actual API call
-      // const response = await fetch('/api/credit-parameters');
-      // const data = await response.json();
-      // setParameters(data);
-
-      // Dummy data
-      const dummyData: CreditParameter[] = [
-        {
-          id: '1',
-          financial_partner_id: '1',
-          financial_partner_name: 'Bank Mandiri',
-          name: 'Paket Mandiri 1 Tahun',
-          min_dp_percentage: 20,
-          max_dp_percentage: 50,
-          tenor_months: 12,
-          interest_rate_yearly: 8,
-          interest_type: 'flat',
-          admin_fee: 0,
-          provision_fee_percentage: 1,
-          fidusia_fee: 500000,
-          insurance_tlo_percentage: 0.4,
-          insurance_allrisk_percentage: 2,
-          life_insurance_percentage: 0.5,
-          min_otr: 50000000,
-          max_otr: 500000000,
-          is_active: true,
-          effective_date: '2025-01-01',
-          notes: 'Promo spesial',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
-      ];
-      setParameters(dummyData);
+      const data = await fetchCreditParameters();
+      setParameters(data);
     } catch (error) {
       console.error('Error fetching parameters:', error);
     } finally {
@@ -206,7 +126,7 @@ const HalamanParameterKredit: React.FC = () => {
     setLoading(true);
 
     try {
-      const payload = {
+      const payload: CreditParameterPayload = {
         financial_partner_id: formData.financial_partner_id,
         name: formData.name,
         min_dp_percentage: parseFloat(formData.min_dp_percentage),
@@ -229,47 +149,19 @@ const HalamanParameterKredit: React.FC = () => {
       };
 
       if (editingParameter) {
-        // TODO: Replace with actual API call
-        // await fetch(`/api/credit-parameters/${editingParameter.id}`, {
-        //   method: 'PUT',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify(payload)
-        // });
-
-        setParameters(parameters.map(p =>
-          p.id === editingParameter.id
-            ? {
-                ...p,
-                ...payload,
-                min_otr: payload.min_otr || undefined,
-                max_otr: payload.max_otr || undefined,
-                expired_date: payload.expired_date || undefined,
-                notes: payload.notes || undefined,
-                financial_partner_name: partners.find(pt => pt.id === payload.financial_partner_id)?.name,
-                updated_at: new Date().toISOString()
-              }
-            : p
-        ));
-      } else {
-        // TODO: Replace with actual API call
-        // const response = await fetch('/api/credit-parameters', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify(payload)
-        // });
-
-        const newParameter: CreditParameter = {
-          id: Date.now().toString(),
-          ...payload,
-          min_otr: payload.min_otr || undefined,
-          max_otr: payload.max_otr || undefined,
-          expired_date: payload.expired_date || undefined,
-          notes: payload.notes || undefined,
-          financial_partner_name: partners.find(p => p.id === payload.financial_partner_id)?.name,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+        const updatedParameter = await updateCreditParameter(editingParameter.id, payload);
+        const updatedWithPartnerName: CreditParameterWithPartner = {
+          ...updatedParameter,
+          financial_partner_name: partners.find(pt => pt.id === payload.financial_partner_id)?.name || 'Unknown'
         };
-        setParameters([...parameters, newParameter]);
+        setParameters(parameters.map(p => p.id === editingParameter.id ? updatedWithPartnerName : p));
+      } else {
+        const newParameter = await createCreditParameter(payload);
+        const newWithPartnerName: CreditParameterWithPartner = {
+          ...newParameter,
+          financial_partner_name: partners.find(p => p.id === payload.financial_partner_id)?.name || 'Unknown'
+        };
+        setParameters([...parameters, newWithPartnerName]);
       }
 
       handleCloseModal();
@@ -287,11 +179,7 @@ const HalamanParameterKredit: React.FC = () => {
 
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // await fetch(`/api/credit-parameters/${deletingParameter.id}`, {
-      //   method: 'DELETE'
-      // });
-
+      await deleteCreditParameter(deletingParameter.id);
       setParameters(parameters.filter(p => p.id !== deletingParameter.id));
       setIsDeleteModalOpen(false);
       setDeletingParameter(null);
@@ -304,10 +192,10 @@ const HalamanParameterKredit: React.FC = () => {
     }
   };
 
-  const handleEdit = (parameter: CreditParameter) => {
+  const handleEdit = (parameter: CreditParameterWithPartner) => {
     setEditingParameter(parameter);
     setFormData({
-      financial_partner_id: parameter.financial_partner_id,
+      financial_partner_id: parameter.financial_partner_id || '',
       name: parameter.name,
       min_dp_percentage: parameter.min_dp_percentage.toString(),
       max_dp_percentage: parameter.max_dp_percentage.toString(),
@@ -593,14 +481,14 @@ const HalamanParameterKredit: React.FC = () => {
         {/* Add/Edit Modal */}
         {isModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-            <div className="bg-white rounded-lg max-w-4xl w-full my-8">
-              <div className="p-6 border-b sticky top-0 bg-white rounded-t-lg z-10">
+            <div className="bg-white rounded-lg max-w-4xl w-full my-8 max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col">
+              <div className="p-6 border-b bg-white rounded-t-lg flex-shrink-0">
                 <h2 className="text-2xl font-bold text-gray-900">
                   {editingParameter ? 'Edit Parameter Kredit' : 'Tambah Parameter Kredit Baru'}
                 </h2>
               </div>
 
-              <form onSubmit={handleSubmit} className="p-6">
+              <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 pb-20">
                 <div className="space-y-6">
                   {/* Basic Info Section */}
                   <div>
@@ -944,7 +832,7 @@ const HalamanParameterKredit: React.FC = () => {
                 </div>
 
                 {/* Form Actions */}
-                <div className="flex gap-3 mt-6 pt-6 border-t">
+                <div className="flex gap-3 mt-6 pt-6 border-t bg-white sticky bottom-0 pb-6">
                   <button
                     type="button"
                     onClick={handleCloseModal}

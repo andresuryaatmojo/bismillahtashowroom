@@ -13,32 +13,24 @@ import {
   TrendingUp,
   CheckCircle
 } from 'lucide-react';
-
-// Types
-interface FinancialPartner {
-  id: string;
-  name: string;
-  code: string;
-}
-
-interface CreditParameter {
-  id: string;
-  financial_partner_id: string;
-  financial_partner_name: string;
-  name: string;
-  min_dp_percentage: number;
-  max_dp_percentage: number;
-  tenor_months: number;
-  interest_rate_yearly: number;
-  interest_type: 'flat' | 'efektif' | 'anuitas';
-  admin_fee: number;
-  provision_fee_percentage: number;
-  fidusia_fee: number;
-  insurance_tlo_percentage: number;
-  insurance_allrisk_percentage: number;
-  life_insurance_percentage: number;
-  is_active: boolean;
-}
+import {
+  fetchCreditParameters,
+  fetchFinancialPartners
+} from '../services/creditParameters';
+import {
+  createCreditSimulationWithAuth
+} from '../services/creditSimulations';
+import {
+  fetchAvailableCars,
+  searchCarsForSimulation
+} from '../services/cars';
+import {
+  CreditParameterWithPartner,
+  FinancialPartner
+} from '../types/credit-parameters';
+import {
+  CarOption
+} from '../types/cars';
 
 interface SimulationResult {
   otr_price: number;
@@ -63,6 +55,7 @@ interface SimulationResult {
 
 const HalamanSimulasiKredit: React.FC = () => {
   // Form States
+  const [selectedCar, setSelectedCar] = useState<string>('');
   const [carPrice, setCarPrice] = useState<string>('199000000');
   const [downPayment, setDownPayment] = useState<string>('19900000');
   const [downPaymentPercentage, setDownPaymentPercentage] = useState<string>('10');
@@ -74,21 +67,38 @@ const HalamanSimulasiKredit: React.FC = () => {
 
   // Data States
   const [partners, setPartners] = useState<FinancialPartner[]>([]);
-  const [parameters, setParameters] = useState<CreditParameter[]>([]);
-  const [filteredParameters, setFilteredParameters] = useState<CreditParameter[]>([]);
+  const [parameters, setParameters] = useState<CreditParameterWithPartner[]>([]);
+  const [filteredParameters, setFilteredParameters] = useState<CreditParameterWithPartner[]>([]);
+  const [cars, setCars] = useState<CarOption[]>([]);
+  const [carSearch, setCarSearch] = useState<string>('');
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [simulationSaved, setSimulationSaved] = useState(false);
 
-  // Fixed fees
-  const FIXED_ADMIN_FEE = 1000000; // 1 Juta
-  const FIXED_FIDUSIA_FEE = 500000; // 500 Ribu
+  // Fixed fees (fallback values if not set in parameters)
+  const DEFAULT_ADMIN_FEE = 1000000; // 1 Juta
+  const DEFAULT_FIDUSIA_FEE = 500000; // 500 Ribu
 
   // Fetch data
   useEffect(() => {
     fetchPartners();
     fetchParameters();
+    fetchCars();
   }, []);
+
+  // Search cars when search term changes
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (carSearch) {
+        searchCars(carSearch);
+      } else {
+        fetchCars();
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [carSearch]);
 
   // Filter parameters by partner
   useEffect(() => {
@@ -117,97 +127,85 @@ const HalamanSimulasiKredit: React.FC = () => {
     }
   }, [carPrice, downPayment, selectedParameter, insuranceType, tenor]);
 
+  // Update tenor when parameter changes
+  useEffect(() => {
+    if (selectedParameter) {
+      const parameter = parameters.find(p => p.id === selectedParameter);
+      if (parameter) {
+        setTenor(parameter.tenor_months);
+      }
+    }
+  }, [selectedParameter, parameters]);
+
   const fetchPartners = async () => {
     try {
-      // TODO: Replace with actual API call
-      // const response = await fetch('/api/financial-partners?is_active=true');
-      // const data = await response.json();
-      // setPartners(data);
-
-      const dummyPartners: FinancialPartner[] = [
-        { id: '1', name: 'BCA Finance', code: 'BCA001' },
-        { id: '2', name: 'Bank Mandiri', code: 'BM001' },
-        { id: '3', name: 'Astra Credit', code: 'ACC001' }
-      ];
-      setPartners(dummyPartners);
+      setLoading(true);
+      const data = await fetchFinancialPartners();
+      setPartners(data);
     } catch (error) {
       console.error('Error fetching partners:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
   const fetchParameters = async () => {
     try {
-      // TODO: Replace with actual API call
-      // const response = await fetch('/api/credit-parameters?is_active=true');
-      // const data = await response.json();
-      // setParameters(data);
-
-      const dummyParameters: CreditParameter[] = [
-        {
-          id: '1',
-          financial_partner_id: '1',
-          financial_partner_name: 'BCA Finance',
-          name: 'Paket BCA 1 Tahun',
-          min_dp_percentage: 10,
-          max_dp_percentage: 50,
-          tenor_months: 12,
-          interest_rate_yearly: 8,
-          interest_type: 'flat',
-          admin_fee: FIXED_ADMIN_FEE,
-          provision_fee_percentage: 1,
-          fidusia_fee: FIXED_FIDUSIA_FEE,
-          insurance_tlo_percentage: 0.4,
-          insurance_allrisk_percentage: 2,
-          life_insurance_percentage: 0.5,
-          is_active: true
-        },
-        {
-          id: '2',
-          financial_partner_id: '1',
-          financial_partner_name: 'BCA Finance',
-          name: 'Paket BCA 3 Tahun',
-          min_dp_percentage: 10,
-          max_dp_percentage: 50,
-          tenor_months: 36,
-          interest_rate_yearly: 9,
-          interest_type: 'flat',
-          admin_fee: FIXED_ADMIN_FEE,
-          provision_fee_percentage: 1,
-          fidusia_fee: FIXED_FIDUSIA_FEE,
-          insurance_tlo_percentage: 0.4,
-          insurance_allrisk_percentage: 2,
-          life_insurance_percentage: 0.5,
-          is_active: true
-        },
-        {
-          id: '3',
-          financial_partner_id: '1',
-          financial_partner_name: 'BCA Finance',
-          name: 'Paket BCA 5 Tahun',
-          min_dp_percentage: 10,
-          max_dp_percentage: 50,
-          tenor_months: 60,
-          interest_rate_yearly: 10,
-          interest_type: 'flat',
-          admin_fee: FIXED_ADMIN_FEE,
-          provision_fee_percentage: 1,
-          fidusia_fee: FIXED_FIDUSIA_FEE,
-          insurance_tlo_percentage: 0.4,
-          insurance_allrisk_percentage: 2,
-          life_insurance_percentage: 0.5,
-          is_active: true
-        }
-      ];
-      setParameters(dummyParameters);
+      setLoading(true);
+      const data = await fetchCreditParameters();
+      setParameters(data);
     } catch (error) {
       console.error('Error fetching parameters:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCars = async () => {
+    try {
+      setLoading(true);
+      const data = await fetchAvailableCars(50);
+      console.log('Fetched cars:', data); // Debug log
+      setCars(data);
+    } catch (error) {
+      console.error('Error fetching cars:', error);
+      // Set empty array to prevent undefined issues
+      setCars([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const searchCars = async (searchTerm: string) => {
+    try {
+      setLoading(true);
+      const data = await searchCarsForSimulation(searchTerm, 50);
+      setCars(data);
+    } catch (error) {
+      console.error('Error searching cars:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCarSelection = (carId: string) => {
+    setSelectedCar(carId);
+    const selectedCarData = cars.find(car => car.id === carId);
+    if (selectedCarData) {
+      setCarPrice(selectedCarData.price.toString());
+      // Auto-calculate DP based on percentage
+      if (downPaymentPercentage) {
+        const dpAmount = (selectedCarData.price * parseFloat(downPaymentPercentage)) / 100;
+        setDownPayment(dpAmount.toString());
+      }
     }
   };
 
   const handleCarPriceChange = (value: string) => {
     const numValue = value.replace(/\D/g, '');
     setCarPrice(numValue);
-    
+    setSelectedCar(''); // Clear selected car when manual price is entered
+
     // Auto-calculate DP based on percentage
     if (downPaymentPercentage) {
       const dpAmount = (parseFloat(numValue) * parseFloat(downPaymentPercentage)) / 100;
@@ -244,7 +242,15 @@ const HalamanSimulasiKredit: React.FC = () => {
     const dp = parseFloat(downPayment) || 0;
     const dpPercentage = parseFloat(downPaymentPercentage) || 0;
 
-    // Validate DP - removed alert warning
+    // Validate OTR range
+    if (parameter.min_otr && otrPrice < parameter.min_otr) {
+      return;
+    }
+    if (parameter.max_otr && otrPrice > parameter.max_otr) {
+      return;
+    }
+
+    // Validate DP range
     if (dpPercentage < parameter.min_dp_percentage || dpPercentage > parameter.max_dp_percentage) {
       return;
     }
@@ -263,25 +269,29 @@ const HalamanSimulasiKredit: React.FC = () => {
     } else if (parameter.interest_type === 'efektif' || parameter.interest_type === 'anuitas') {
       // Effective rate calculation (simplified)
       const monthlyRate = parameter.interest_rate_yearly / 100 / 12;
-      monthlyInstallment = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, tenor)) / 
+      monthlyInstallment = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, tenor)) /
                           (Math.pow(1 + monthlyRate, tenor) - 1);
       totalInterest = (monthlyInstallment * tenor) - loanAmount;
     }
 
+    // Get fees from parameter or use defaults
+    const adminFee = parameter.admin_fee || DEFAULT_ADMIN_FEE;
+    const fidusiaFee = parameter.fidusia_fee || DEFAULT_FIDUSIA_FEE;
+
     // Calculate fees
     const provisionFee = loanAmount * (parameter.provision_fee_percentage / 100);
     const lifeInsurance = loanAmount * (parameter.life_insurance_percentage / 100);
-    
+
     // Calculate vehicle insurance
-    const insuranceRate = insuranceType === 'TLO' 
-      ? parameter.insurance_tlo_percentage 
+    const insuranceRate = insuranceType === 'TLO'
+      ? parameter.insurance_tlo_percentage
       : parameter.insurance_allrisk_percentage;
     const vehicleInsuranceYearly = otrPrice * (insuranceRate / 100);
     const insuranceYears = Math.ceil(tenor / 12);
     const vehicleInsuranceTotal = vehicleInsuranceYearly * insuranceYears;
 
     // Calculate totals
-    const totalInitialPayment = dp + FIXED_ADMIN_FEE + provisionFee + FIXED_FIDUSIA_FEE + 
+    const totalInitialPayment = dp + adminFee + provisionFee + fidusiaFee +
                                 lifeInsurance + vehicleInsuranceYearly;
     const totalPayment = totalInitialPayment + (monthlyInstallment * tenor);
 
@@ -295,9 +305,9 @@ const HalamanSimulasiKredit: React.FC = () => {
       interest_type: parameter.interest_type,
       monthly_installment: monthlyInstallment,
       total_interest: totalInterest,
-      admin_fee: FIXED_ADMIN_FEE,
+      admin_fee: adminFee,
       provision_fee: provisionFee,
-      fidusia_fee: FIXED_FIDUSIA_FEE,
+      fidusia_fee: fidusiaFee,
       life_insurance: lifeInsurance,
       vehicle_insurance_type: insuranceType,
       vehicle_insurance_yearly: vehicleInsuranceYearly,
@@ -309,7 +319,61 @@ const HalamanSimulasiKredit: React.FC = () => {
     setSimulationResult(result);
   };
 
+  const saveSimulationToDatabase = async (result: SimulationResult) => {
+    try {
+      const parameter = parameters.find(p => p.id === selectedParameter);
+      if (!parameter) return;
+
+      const payload = {
+        car_id: selectedCar || null,
+        credit_parameter_id: selectedParameter,
+        financial_partner_id: selectedPartner,
+        otr_price: result.otr_price,
+        down_payment: result.down_payment,
+        down_payment_percentage: result.down_payment_percentage,
+        loan_amount: result.loan_amount,
+        tenor_months: result.tenor_months,
+        interest_rate_yearly: result.interest_rate_yearly,
+        interest_type: result.interest_type,
+        monthly_installment: result.monthly_installment,
+        total_interest: result.total_interest,
+        admin_fee: result.admin_fee,
+        provision_fee: result.provision_fee,
+        fidusia_fee: result.fidusia_fee,
+        life_insurance: result.life_insurance,
+        vehicle_insurance_type: result.vehicle_insurance_type,
+        vehicle_insurance_yearly: result.vehicle_insurance_yearly,
+        vehicle_insurance_total: result.vehicle_insurance_total,
+        total_initial_payment: result.total_initial_payment,
+        total_payment: result.total_payment,
+        simulation_data: {
+          carPrice: carPrice,
+          selectedCar: selectedCar,
+          carTitle: selectedCar ? cars.find(car => car.id === selectedCar)?.title : null,
+          insuranceType: insuranceType,
+          location: location,
+          parameter_name: parameter.name,
+          financial_partner_name: parameter.financial_partner_name
+        },
+        is_saved: false,
+        notes: `Simulasi kredit - ${location || 'Tidak ada lokasi'}${selectedCar ? ` - ${cars.find(car => car.id === selectedCar)?.title}` : ''}`
+      };
+
+      const savedSimulation = await createCreditSimulationWithAuth(payload);
+      if (savedSimulation) {
+        setSimulationSaved(true);
+        console.log('Simulation saved successfully:', savedSimulation.id);
+      } else {
+        console.log('User not logged in, simulation not saved');
+      }
+    } catch (error) {
+      console.error('Error auto-saving simulation:', error);
+      // Don't show error to user, just log it
+    }
+  };
+
   const handleReset = () => {
+    setSelectedCar('');
     setCarPrice('199000000');
     setDownPayment('19900000');
     setDownPaymentPercentage('10');
@@ -319,6 +383,7 @@ const HalamanSimulasiKredit: React.FC = () => {
     setTenor(60);
     setLocation('');
     setSimulationResult(null);
+    setSimulationSaved(false);
   };
 
   const handleSaveSimulation = async () => {
@@ -326,24 +391,51 @@ const HalamanSimulasiKredit: React.FC = () => {
 
     setIsSaving(true);
     try {
+      const parameter = parameters.find(p => p.id === selectedParameter);
+      if (!parameter) return;
+
       const payload = {
-        // user_id will be set by backend based on auth
-        car_id: null, // Optional: link to specific car
+        car_id: selectedCar || null,
         credit_parameter_id: selectedParameter,
         financial_partner_id: selectedPartner,
-        ...simulationResult,
+        otr_price: simulationResult.otr_price,
+        down_payment: simulationResult.down_payment,
+        down_payment_percentage: simulationResult.down_payment_percentage,
+        loan_amount: simulationResult.loan_amount,
+        tenor_months: simulationResult.tenor_months,
+        interest_rate_yearly: simulationResult.interest_rate_yearly,
+        interest_type: simulationResult.interest_type,
+        monthly_installment: simulationResult.monthly_installment,
+        total_interest: simulationResult.total_interest,
+        admin_fee: simulationResult.admin_fee,
+        provision_fee: simulationResult.provision_fee,
+        fidusia_fee: simulationResult.fidusia_fee,
+        life_insurance: simulationResult.life_insurance,
+        vehicle_insurance_type: simulationResult.vehicle_insurance_type,
+        vehicle_insurance_yearly: simulationResult.vehicle_insurance_yearly,
+        vehicle_insurance_total: simulationResult.vehicle_insurance_total,
+        total_initial_payment: simulationResult.total_initial_payment,
+        total_payment: simulationResult.total_payment,
+        simulation_data: {
+          carPrice: carPrice,
+          selectedCar: selectedCar,
+          carTitle: selectedCar ? cars.find(car => car.id === selectedCar)?.title : null,
+          insuranceType: insuranceType,
+          location: location,
+          parameter_name: parameter.name,
+          financial_partner_name: parameter.financial_partner_name
+        },
         is_saved: true,
-        notes: `Simulasi kredit - ${location || 'Tidak ada lokasi'}`
+        notes: `Simulasi kredit - ${location || 'Tidak ada lokasi'}${selectedCar ? ` - ${cars.find(car => car.id === selectedCar)?.title}` : ''}`
       };
 
-      // TODO: Replace with actual API call
-      // const response = await fetch('/api/credit-simulations', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(payload)
-      // });
-
-      alert('Simulasi berhasil disimpan!');
+      const savedSimulation = await createCreditSimulationWithAuth(payload);
+      if (savedSimulation) {
+        setSimulationSaved(true);
+        alert('Simulasi berhasil disimpan!');
+      } else {
+        alert('Anda harus login untuk menyimpan simulasi');
+      }
     } catch (error) {
       console.error('Error saving simulation:', error);
       alert('Gagal menyimpan simulasi');
@@ -387,18 +479,88 @@ const HalamanSimulasiKredit: React.FC = () => {
               </div>
 
               <div className="space-y-6">
+                {/* Car Selection */}
+                <div>
+                  <label className="flex items-center gap-2 text-lg font-semibold text-gray-800 mb-3">
+                    Pilih Mobil
+                    <div className="relative group">
+                      <Info className="w-4 h-4 text-blue-600 cursor-help" />
+                      <div className="hidden group-hover:block absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-900 text-white text-xs rounded-lg z-10">
+                        Pilih mobil dari daftar atau masukkan harga manual
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Car Search */}
+                  <div className="mb-3">
+                    <input
+                      type="text"
+                      value={carSearch}
+                      onChange={(e) => setCarSearch(e.target.value)}
+                      placeholder="Cari mobil berdasarkan merek, model, atau judul..."
+                      className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  {/* Car Dropdown */}
+                  <select
+                    value={selectedCar}
+                    onChange={(e) => handleCarSelection(e.target.value)}
+                    disabled={loading}
+                    className="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white disabled:opacity-50 mb-3"
+                  >
+                    <option value="">
+                      {loading ? 'Memuat mobil...' : 'Pilih Mobil (Opsional)'}
+                    </option>
+                    {!loading && cars.length === 0 && (
+                      <option value="" disabled>
+                        Tidak ada mobil tersedia
+                      </option>
+                    )}
+                    {!loading && cars.map(car => (
+                      <option key={car.id} value={car.id}>
+                        {car.display_name} - {formatCurrency(car.price)} ({car.location_city})
+                      </option>
+                    ))}
+                  </select>
+
+  
+                  {/* Selected Car Info */}
+                  {selectedCar && (() => {
+                    const selectedCarData = cars.find(car => car.id === selectedCar);
+                    if (!selectedCarData) return null;
+                    return (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-3 mb-3">
+                        <div className="flex items-center gap-2 text-green-800 text-sm">
+                          <CheckCircle className="w-4 h-4" />
+                          <span>
+                            Mobil dipilih: {selectedCarData.title} ({selectedCarData.year}) - {formatCurrency(selectedCarData.price)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 {/* Car Price */}
                 <div>
                   <label className="block text-lg font-semibold text-gray-800 mb-3">
                     Harga Mobil (Rp)
+                    {selectedCar && <span className="text-sm font-normal text-gray-600 ml-2">(Auto dari mobil yang dipilih)</span>}
                   </label>
                   <input
                     type="text"
                     value={formatNumber(carPrice)}
                     onChange={(e) => handleCarPriceChange(e.target.value)}
-                    className="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={!!selectedCar}
+                    className="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="199.000.000"
                   />
+                  {selectedCar && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Untuk mengubah harga, pilih mobil lain atau kosongkan pilihan mobil
+                    </p>
+                  )}
                 </div>
 
                 {/* Down Payment */}
@@ -455,16 +617,78 @@ const HalamanSimulasiKredit: React.FC = () => {
                   <select
                     value={selectedPartner}
                     onChange={(e) => setSelectedPartner(e.target.value)}
-                    className="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white"
+                    disabled={loading}
+                    className="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white disabled:opacity-50"
                   >
-                    <option value="">Pilih Mitra Pembiayaan</option>
-                    {partners.map(partner => (
+                    <option value="">
+                      {loading ? 'Memuat...' : 'Pilih Mitra Pembiayaan'}
+                    </option>
+                    {!loading && partners.map(partner => (
                       <option key={partner.id} value={partner.id}>
                         {partner.name}
                       </option>
                     ))}
                   </select>
                 </div>
+
+                {/* Credit Parameter */}
+                {selectedPartner && filteredParameters.length > 0 && (
+                  <div>
+                    <label className="flex items-center gap-2 text-lg font-semibold text-gray-800 mb-3">
+                      Paket Kredit
+                      <div className="relative group">
+                        <Info className="w-4 h-4 text-blue-600 cursor-help" />
+                        <div className="hidden group-hover:block absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 text-white text-xs rounded-lg">
+                          Pilih paket kredit yang tersedia
+                        </div>
+                      </div>
+                    </label>
+                    <select
+                      value={selectedParameter}
+                      onChange={(e) => setSelectedParameter(e.target.value)}
+                      className="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white"
+                    >
+                      <option value="">Pilih Paket Kredit</option>
+                      {filteredParameters.map(parameter => (
+                        <option key={parameter.id} value={parameter.id}>
+                          {parameter.name} - {parameter.tenor_months} bulan ({parameter.interest_rate_yearly}%/tahun)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Selected Parameter Info */}
+                {selectedParameter && (
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                    <h4 className="font-semibold text-blue-900 mb-2">Detail Paket Kredit:</h4>
+                    {(() => {
+                      const param = parameters.find(p => p.id === selectedParameter);
+                      if (!param) return null;
+                      return (
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div className="text-blue-700">
+                            <span className="font-medium">Suku Bunga:</span> {param.interest_rate_yearly}%/tahun ({param.interest_type})
+                          </div>
+                          <div className="text-blue-700">
+                            <span className="font-medium">Tenor:</span> {param.tenor_months} bulan
+                          </div>
+                          <div className="text-blue-700">
+                            <span className="font-medium">DP Minimal:</span> {param.min_dp_percentage}%
+                          </div>
+                          <div className="text-blue-700">
+                            <span className="font-medium">DP Maksimal:</span> {param.max_dp_percentage}%
+                          </div>
+                          {(param.min_otr || param.max_otr) && (
+                            <div className="text-blue-700 col-span-2">
+                              <span className="font-medium">Range OTR:</span> {param.min_otr ? formatCurrency(param.min_otr) : 'Rp 0'} - {param.max_otr ? formatCurrency(param.max_otr) : 'Tidak ada batas'}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
                 {/* Insurance Type */}
                 <div>
@@ -540,14 +764,48 @@ const HalamanSimulasiKredit: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Validation Messages */}
+                {selectedParameter && (() => {
+                  const param = parameters.find(p => p.id === selectedParameter);
+                  const dpPercent = parseFloat(downPaymentPercentage) || 0;
+                  const carPriceNum = parseFloat(carPrice) || 0;
+
+                  if (!param) return null;
+
+                  const issues = [];
+                  if (dpPercent < param.min_dp_percentage || dpPercent > param.max_dp_percentage) {
+                    issues.push(`DP harus antara ${param.min_dp_percentage}% - ${param.max_dp_percentage}%`);
+                  }
+                  if (param.min_otr && carPriceNum < param.min_otr) {
+                    issues.push(`Harga mobil minimal ${formatCurrency(param.min_otr)}`);
+                  }
+                  if (param.max_otr && carPriceNum > param.max_otr) {
+                    issues.push(`Harga mobil maksimal ${formatCurrency(param.max_otr)}`);
+                  }
+
+                  if (issues.length > 0) {
+                    return (
+                      <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+                        <div className="flex items-center gap-2 text-yellow-800">
+                          <Info className="w-4 h-4" />
+                          <p className="text-sm font-medium">
+                            {issues.join(', ')}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 {/* Calculate Button */}
                 <button
                   onClick={calculateSimulation}
-                  disabled={!carPrice || !selectedPartner || !selectedParameter}
+                  disabled={!carPrice || !selectedPartner || !selectedParameter || loading}
                   className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Calculator className="w-6 h-6" />
-                  Hitung Simulasi
+                  {loading ? 'Memuat...' : 'Hitung Simulasi'}
                 </button>
               </div>
             </div>
@@ -560,7 +818,14 @@ const HalamanSimulasiKredit: React.FC = () => {
                 Estimasi Pembayaran Bulanan Anda:
               </h2>
 
-              {simulationResult ? (
+              {loading ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-300 border-t-blue-600 mx-auto mb-4"></div>
+                  <p className="text-blue-200 text-lg">
+                    Memuat data simulasi...
+                  </p>
+                </div>
+              ) : simulationResult ? (
                 <div className="space-y-6">
                   {/* Monthly Payment */}
                   <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
@@ -650,6 +915,18 @@ const HalamanSimulasiKredit: React.FC = () => {
                       Untuk lebih detail silahkan hubungi kami atau kunjungi Experience Center kami.
                     </p>
                   </div>
+
+                  {/* Auto-save Status */}
+                  {simulationSaved && (
+                    <div className="bg-green-500/20 border border-green-500/30 rounded-lg p-3 text-xs">
+                      <div className="flex items-center gap-2 text-green-200">
+                        <CheckCircle className="w-4 h-4" />
+                        <p>
+                          Simulasi telah disimpan otomatis. Anda dapat melihatnya di riwayat simulasi.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Save Button */}
                   <button

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  Edit2, 
-  Trash2, 
-  Search, 
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Search,
   Building2,
   Mail,
   Phone,
@@ -11,24 +11,11 @@ import {
   CheckCircle,
   XCircle
 } from 'lucide-react';
+import { supabase, Database } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 // Types
-interface FinancialPartner {
-  id: string;
-  name: string;
-  code: string;
-  type: string;
-  logo_url?: string;
-  contact_person?: string;
-  contact_email?: string;
-  contact_phone?: string;
-  address?: string;
-  is_active: boolean;
-  commission_rate?: number;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
+type FinancialPartner = Database['public']['Tables']['financial_partners']['Row'];
 
 interface FormData {
   name: string;
@@ -45,6 +32,7 @@ interface FormData {
 }
 
 const HalamanKemitraan: React.FC = () => {
+  const { user } = useAuth();
   const [partners, setPartners] = useState<FinancialPartner[]>([]);
   const [filteredPartners, setFilteredPartners] = useState<FinancialPartner[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,33 +74,22 @@ const HalamanKemitraan: React.FC = () => {
   const fetchPartners = async () => {
     try {
       setLoading(true);
-      // TODO: Replace with actual API call
-      // const response = await fetch('/api/financial-partners');
-      // const data = await response.json();
-      // setPartners(data);
-      
-      // Dummy data for demo
-      const dummyData: FinancialPartner[] = [
-        {
-          id: '1',
-          name: 'Bank Mandiri',
-          code: 'BM001',
-          type: 'Bank',
-          logo_url: '',
-          contact_person: 'John Doe',
-          contact_email: 'john@mandiri.com',
-          contact_phone: '081234567890',
-          address: 'Jakarta',
-          is_active: true,
-          commission_rate: 2.5,
-          notes: 'Partner utama',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
-      ];
-      setPartners(dummyData);
+
+      const { data, error } = await supabase
+        .from('financial_partners')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching partners:', error);
+        throw error;
+      }
+
+      setPartners(data || []);
     } catch (error) {
       console.error('Error fetching partners:', error);
+      // Show error message to user
+      alert('Gagal memuat data partner. Silakan coba lagi.');
     } finally {
       setLoading(false);
     }
@@ -124,51 +101,62 @@ const HalamanKemitraan: React.FC = () => {
 
     try {
       const payload = {
-        ...formData,
-        commission_rate: formData.commission_rate ? parseFloat(formData.commission_rate) : null
+        name: formData.name,
+        code: formData.code,
+        type: formData.type,
+        logo_url: formData.logo_url || null,
+        contact_person: formData.contact_person || null,
+        contact_email: formData.contact_email || null,
+        contact_phone: formData.contact_phone || null,
+        address: formData.address || null,
+        is_active: formData.is_active,
+        commission_rate: formData.commission_rate ? parseFloat(formData.commission_rate) : null,
+        notes: formData.notes || null,
+        created_by: user?.id || null
       };
 
       if (editingPartner) {
-        // TODO: Replace with actual API call
-        // await fetch(`/api/financial-partners/${editingPartner.id}`, {
-        //   method: 'PUT',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify(payload)
-        // });
-        
+        // Update existing partner
+        const { data, error } = await supabase
+          .from('financial_partners')
+          .update({
+            ...payload,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingPartner.id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Error updating partner:', error);
+          throw error;
+        }
+
         setPartners(partners.map(p =>
-          p.id === editingPartner.id
-            ? {
-                ...p,
-                ...payload,
-                commission_rate: payload.commission_rate || undefined,
-                updated_at: new Date().toISOString()
-              }
-            : p
+          p.id === editingPartner.id ? data : p
         ));
+        alert('Partner berhasil diupdate!');
       } else {
-        // TODO: Replace with actual API call
-        // const response = await fetch('/api/financial-partners', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify(payload)
-        // });
-        
-        const newPartner: FinancialPartner = {
-          id: Date.now().toString(),
-          ...payload,
-          commission_rate: payload.commission_rate || undefined,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        setPartners([...partners, newPartner]);
+        // Create new partner
+        const { data, error } = await supabase
+          .from('financial_partners')
+          .insert([payload])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Error creating partner:', error);
+          throw error;
+        }
+
+        setPartners([data, ...partners]);
+        alert('Partner berhasil ditambahkan!');
       }
 
       handleCloseModal();
-      alert(editingPartner ? 'Partner berhasil diupdate!' : 'Partner berhasil ditambahkan!');
     } catch (error) {
       console.error('Error saving partner:', error);
-      alert('Terjadi kesalahan saat menyimpan data');
+      alert('Terjadi kesalahan saat menyimpan data: ' + (error as Error).message);
     } finally {
       setLoading(false);
     }
@@ -179,18 +167,23 @@ const HalamanKemitraan: React.FC = () => {
 
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // await fetch(`/api/financial-partners/${deletingPartner.id}`, {
-      //   method: 'DELETE'
-      // });
-      
+      const { error } = await supabase
+        .from('financial_partners')
+        .delete()
+        .eq('id', deletingPartner.id);
+
+      if (error) {
+        console.error('Error deleting partner:', error);
+        throw error;
+      }
+
       setPartners(partners.filter(p => p.id !== deletingPartner.id));
       setIsDeleteModalOpen(false);
       setDeletingPartner(null);
       alert('Partner berhasil dihapus!');
     } catch (error) {
       console.error('Error deleting partner:', error);
-      alert('Terjadi kesalahan saat menghapus data');
+      alert('Terjadi kesalahan saat menghapus data: ' + (error as Error).message);
     } finally {
       setLoading(false);
     }
@@ -207,7 +200,7 @@ const HalamanKemitraan: React.FC = () => {
       contact_email: partner.contact_email || '',
       contact_phone: partner.contact_phone || '',
       address: partner.address || '',
-      is_active: partner.is_active,
+      is_active: partner.is_active !== false,
       commission_rate: partner.commission_rate?.toString() || '',
       notes: partner.notes || ''
     });
@@ -297,7 +290,7 @@ const HalamanKemitraan: React.FC = () => {
                         <p className="text-sm text-gray-500">{partner.code}</p>
                       </div>
                     </div>
-                    {partner.is_active ? (
+                    {partner.is_active !== false ? (
                       <CheckCircle className="w-5 h-5 text-green-500" />
                     ) : (
                       <XCircle className="w-5 h-5 text-red-500" />
