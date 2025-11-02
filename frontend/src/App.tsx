@@ -31,7 +31,7 @@ import HalamanPembelian from './pages/HalamanPembelian';
 import HalamanPerbandingan from './pages/HalamanPerbandingan';
 import HalamanRiwayat from './pages/HalamanRiwayat';
 import HalamanRiwayatTestDrive from './pages/HalamanRiwayatTestDrive';
-import HalamanSimulasi from './pages/HalamanSimulasi';
+import HalamanSimulasiKredit from './pages/HalamanSimulasiKredit';
 import HalamanTestDrive from './pages/HalamanTestDrive';
 import HalamanTradeIn from './pages/HalamanTradeIn';
 import HalamanTransaksi from './pages/HalamanTransaksi';
@@ -49,6 +49,7 @@ import HalamanModerasiUlasan from './pages/HalamanModerasiUlasan';
 import HalamanExecutive from './pages/HalamanExecutive';
 import HalamanChatAdmin from './pages/HalamanChatAdmin';
 import AdminKnowledgeChatbot from './pages/AdminKnowledgeChatbot';
+import HalamanParameterKredit from './pages/HalamanParameterKredit';
 
 // OTHER COMPONENTS
 import LoginForm from './components/LoginForm';
@@ -112,7 +113,7 @@ const AppContent: React.FC = () => {
           <Route path="/artikel/:slug" element={<HalamanArtikel />} />
           
           <Route path="/kemitraan" element={<HalamanKemitraan />} />
-          <Route path="/simulasi" element={<HalamanSimulasi />} />
+          <Route path="/simulasi" element={<HalamanSimulasiKredit />} />
           <Route path="/perbandingan" element={<HalamanPerbandingan />} />
           <Route path="/test-drive" element={<HalamanTestDrive />} />
           <Route path="/trade-in" element={<HalamanTradeIn />} />
@@ -373,6 +374,14 @@ const AppContent: React.FC = () => {
             }
           />
           <Route
+            path="/admin/parameter-kredit"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanParameterKredit />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/laporan"
             element={
               <ProtectedRoute requiredPermission="view_reports">
@@ -404,6 +413,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="owner">
                 <HalamanPersetujuan />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/executive/kemitraan"
+            element={
+              <ProtectedRoute requiredRole="owner">
+                <HalamanKemitraan />
               </ProtectedRoute>
             }
           />
