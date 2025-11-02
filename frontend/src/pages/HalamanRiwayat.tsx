@@ -1339,13 +1339,35 @@ const HalamanRiwayat: React.FC = () => {
     if (isReservedByOtherBuyer(t)) {
       return false;
     }
-    
-    // Tampilkan tombol bayar HANYA jika status mobil adalah "available"
-    return t.mobil?.status === 'available';
+
+    // TIDAK tampilkan tombol bayar jika booking ditolak
+    if (isBookingRejected(t)) {
+      return false;
+    }
+
+    // Tampilkan tombol bayar HANYA untuk status "Belum Bayar" (belum ada pembayaran)
+    // dan car status adalah "available"
+    const isBelumBayarStatus = (
+      (t.booking_status === 'booking_pending' && (!t.payments || t.payments.length === 0)) ||
+      (t.payment_status === 'pending' || t.payment_status === undefined) && !isBookingPaidOrPending(t)
+    );
+
+    return isBelumBayarStatus && t.mobil?.status === 'available';
   };
 
   const isWaitingAdminConfirm = (t: DataTransaksi): boolean => {
     return t.status === 'pending' && hasPaymentProof(t);
+  };
+
+  // Helper function to check if car is sold
+  const isCarSold = (t: DataTransaksi): boolean => {
+    const carStatus = t.mobil?.status;
+    console.log('Car status:', carStatus, 'for transaction:', t.id, 'transaction status:', t.status);
+
+    // Cek multiple conditions untuk status sold
+    return carStatus === 'sold' ||
+           carStatus === 'Sold' ||
+           t.status === 'completed';
   };
 
   const goToPayment = (t: DataTransaksi) => {
@@ -1929,18 +1951,20 @@ const HalamanRiwayat: React.FC = () => {
                         </button>
                       )}
 
-                      <button
-                        onClick={() => !transaksi.hasReview && pilihMobilUntukDiulas(transaksi.car_id)}
-                        disabled={!!transaksi.hasReview}
-                        className={
-                          `px-3 py-2 text-sm rounded ` +
-                          (transaksi.hasReview
-                            ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                            : 'bg-green-600 text-white hover:bg-green-700')
-                        }
-                      >
-                        {transaksi.hasReview ? '✓ Sudah Diulas' : 'Ulas'}
-                      </button>
+                      {isCarSold(transaksi) && (
+                        <button
+                          onClick={() => !transaksi.hasReview && pilihMobilUntukDiulas(transaksi.car_id)}
+                          disabled={!!transaksi.hasReview}
+                          className={
+                            `px-3 py-2 text-sm rounded ` +
+                            (transaksi.hasReview
+                              ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                              : 'bg-green-600 text-white hover:bg-green-700')
+                          }
+                        >
+                          {transaksi.hasReview ? 'Mobil Sudah Diulas' : 'Ulas'}
+                        </button>
+                      )}
 
                       {/* Tambah tombol: Lihat Bukti Refund */}
                       {hasRefund(transaksi) && transaksi.proof_of_refund && (
