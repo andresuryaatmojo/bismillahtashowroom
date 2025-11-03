@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(npm run build:*)",
-      "Bash(npm start)"
+      "Bash(npm start)",
+      "Bash(cat:*)",
+      "Bash(npx tsc:*)",
+      "Bash(timeout 10 npm start:*)",
+      "Bash(npm install:*)",
+      "Bash(timeout:*)",
+      "Bash(PORT=3001 npm start:*)",
+      "Bash(copy:*)",
+      "Bash(node:*)",
+      "Bash(PORT=3002 npm start:*)"
     ],
     "deny": [],
     "ask": []

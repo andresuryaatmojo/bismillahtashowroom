@@ -50,6 +50,7 @@ import HalamanExecutive from './pages/HalamanExecutive';
 import HalamanChatAdmin from './pages/HalamanChatAdmin';
 import AdminKnowledgeChatbot from './pages/AdminKnowledgeChatbot';
 import HalamanParameterKredit from './pages/HalamanParameterKredit';
+import HalamanKelolaTradeIn from './pages/HalamanKelolaTradeIn';
 
 // OTHER COMPONENTS
 import LoginForm from './components/LoginForm';
@@ -330,6 +331,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="admin">
                 <HalamanJadwalTestDrive />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/trade-in"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanKelolaTradeIn />
               </ProtectedRoute>
             }
           />

@@ -17,6 +17,7 @@ import {
   User,
   Briefcase,
   ChevronDown,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -69,6 +70,7 @@ function AdminNavigation() {
     items: [
       { path: '/admin/pembelian', label: 'Kelola Transaksi', icon: Briefcase },
       { path: '/admin/test-drive', label: 'Jadwal Test Drive', icon: Car },
+      { path: '/admin/trade-in', label: 'Kelola Trade-In', icon: ArrowLeftRight },
       { path: '/admin/chat', label: 'Pesan / Chat User', icon: MessageCircle },
     ],
   };

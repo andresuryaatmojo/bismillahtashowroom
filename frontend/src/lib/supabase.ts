@@ -41,6 +41,24 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
+// Create admin client with service role key for admin operations
+const supabaseServiceUrl = process.env.REACT_APP_SUPABASE_URL;
+const supabaseServiceKey = process.env.REACT_APP_SUPABASE_SERVICE_ROLE_KEY;
+
+export const supabaseAdmin = supabaseServiceKey && supabaseServiceUrl
+  ? createClient(supabaseServiceUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      },
+      global: {
+        headers: {
+          'Prefer': 'return=representation'
+        }
+      }
+    })
+  : supabase; // fallback to regular client if service key not available
+
 console.log('✅ Supabase client created successfully');
 
 // Database types
@@ -278,8 +296,9 @@ export interface Database {
       cars: {
         Row: {
           id: string;
-          brand: string;
-          model: string;
+          brand_id: number;
+          model_id: number;
+          title: string;
           year: number;
           price: number;
           mileage?: number;
@@ -293,8 +312,9 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
-          brand: string;
-          model: string;
+          brand_id: number;
+          model_id: number;
+          title: string;
           year: number;
           price: number;
           mileage?: number;
@@ -306,8 +326,9 @@ export interface Database {
           status?: string;
         };
         Update: {
-          brand?: string;
-          model?: string;
+          brand_id?: number;
+          model_id?: number;
+          title?: string;
           year?: number;
           price?: number;
           mileage?: number;
@@ -318,6 +339,137 @@ export interface Database {
           images?: string[];
           status?: string;
           updated_at?: string;
+        };
+      };
+      car_brands: {
+        Row: {
+          id: number;
+          name: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          name: string;
+        };
+        Update: {
+          name?: string;
+          updated_at?: string;
+        };
+      };
+      car_models: {
+        Row: {
+          id: number;
+          brand_id: number;
+          name: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          brand_id: number;
+          name: string;
+        };
+        Update: {
+          brand_id?: number;
+          name?: string;
+          updated_at?: string;
+        };
+      };
+      trade_in_requests: {
+        Row: {
+          id: string;
+          user_id: string;
+          new_car_id: string;
+          old_car_brand: string;
+          old_car_model: string;
+          old_car_year: number;
+          old_car_mileage?: number;
+          old_car_color?: string;
+          old_car_transmission?: string;
+          old_car_fuel_type?: string;
+          old_car_condition?: string;
+          old_car_plate_number?: string;
+          old_car_description?: string;
+          estimated_value?: number;
+          appraised_value?: number;
+          final_trade_in_value?: number;
+          price_difference?: number;
+          inspection_date?: string;
+          inspection_time?: string;
+          inspection_location?: string;
+          inspection_notes?: string;
+          inspector_id?: string;
+          status: 'pending' | 'inspecting' | 'appraised' | 'approved' | 'rejected' | 'completed' | 'cancelled';
+          contract_url?: string;
+          user_notes?: string;
+          rejection_reason?: string;
+          submission_date?: string;
+          inspected_at?: string;
+          approved_at?: string;
+          completed_at?: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          new_car_id: string;
+          old_car_brand: string;
+          old_car_model: string;
+          old_car_year: number;
+          old_car_mileage?: number;
+          old_car_color?: string;
+          old_car_transmission?: string;
+          old_car_fuel_type?: string;
+          old_car_condition?: string;
+          old_car_plate_number?: string;
+          old_car_description?: string;
+          estimated_value?: number;
+          inspection_date?: string;
+          inspection_time?: string;
+          inspection_location?: string;
+          user_notes?: string;
+          status?: 'pending' | 'inspecting' | 'appraised' | 'approved' | 'rejected' | 'completed' | 'cancelled';
+        };
+        Update: {
+          appraised_value?: number;
+          final_trade_in_value?: number;
+          price_difference?: number;
+          inspection_date?: string;
+          inspection_time?: string;
+          inspection_location?: string;
+          inspection_notes?: string;
+          inspector_id?: string;
+          status?: 'pending' | 'inspecting' | 'appraised' | 'approved' | 'rejected' | 'completed' | 'cancelled';
+          contract_url?: string;
+          user_notes?: string;
+          rejection_reason?: string;
+          inspected_at?: string;
+          approved_at?: string;
+          completed_at?: string;
+          updated_at?: string;
+        };
+      };
+      trade_in_images: {
+        Row: {
+          id: string;
+          trade_in_id: string;
+          image_url: string;
+          image_type?: string;
+          display_order?: number;
+          caption?: string;
+          created_at: string;
+        };
+        Insert: {
+          trade_in_id: string;
+          image_url: string;
+          image_type?: string;
+          display_order?: number;
+          caption?: string;
+        };
+        Update: {
+          image_url?: string;
+          image_type?: string;
+          display_order?: number;
+          caption?: string;
         };
       };
       test_drive_requests: {
