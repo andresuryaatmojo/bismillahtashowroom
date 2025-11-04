@@ -12,7 +12,8 @@
       "Bash(copy:*)",
       "Bash(node:*)",
       "Bash(PORT=3002 npm start:*)",
-      "Bash(GENERATE_SOURCEMAP=false npm run build)"
+      "Bash(GENERATE_SOURCEMAP=false npm run build)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []

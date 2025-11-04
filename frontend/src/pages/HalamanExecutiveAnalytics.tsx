@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 
-const HalamanExecutive = () => {
-  const navigate = useNavigate();
-  const { user, logout, isLoading: authLoading } = useAuth();
+const HalamanExecutiveAnalytics = () => {
+  const { user, hasPermission, isLoading: authLoading } = useAuth();
 
   const [state, setState] = useState({
     isLoading: false,
@@ -16,81 +13,37 @@ const HalamanExecutive = () => {
       activeUsers: 0,
       conversionRate: 0,
       monthlyGrowth: 0
-    },
-    systemHealth: {
-      serverStatus: 'online',
-      databaseStatus: 'online',
-      apiResponseTime: 0,
-      uptime: '99.9%'
-    },
-    recentActivities: [] as any[],
-    reports: [] as any[]
+    }
   });
 
   useEffect(() => {
     if (user && user.role === 'owner') {
-      loadExecutiveData();
+      loadAnalyticsData();
     }
   }, [user]);
 
-  const loadExecutiveData = async () => {
+  const loadAnalyticsData = async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      // Simulasi data executive dashboard
+      // Simulasi data analytics
       const mockData = {
-        analytics: {
-          totalRevenue: 4500000000,
-          totalSales: 156,
-          activeUsers: 1240,
-          conversionRate: 3.2,
-          monthlyGrowth: 12.5
-        },
-        systemHealth: {
-          serverStatus: 'online',
-          databaseStatus: 'online',
-          apiResponseTime: 120,
-          uptime: '99.9%'
-        },
-        recentActivities: [
-          {
-            id: 1,
-            message: 'Penjualan mobil baru - Toyota Avanza',
-            time: '2 jam yang lalu',
-            status: 'completed'
-          },
-          {
-            id: 2,
-            message: 'User baru terdaftar',
-            time: '5 jam yang lalu',
-            status: 'completed'
-          },
-          {
-            id: 3,
-            message: 'Backup database otomatis',
-            time: '1 hari yang lalu',
-            status: 'completed'
-          }
-        ],
-        reports: [
-          {
-            id: 1,
-            name: 'Laporan Bulanan - Oktober 2024',
-            date: '2024-11-01',
-            status: 'ready'
-          }
-        ]
+        totalRevenue: 4500000000,
+        totalSales: 156,
+        activeUsers: 1240,
+        conversionRate: 3.2,
+        monthlyGrowth: 12.5
       };
 
       setState(prev => ({
         ...prev,
-        ...mockData,
+        analytics: mockData,
         isLoading: false
       }));
     } catch (error) {
       setState(prev => ({
         ...prev,
-        error: 'Gagal memuat data executive',
+        error: 'Gagal memuat data analytics',
         isLoading: false
       }));
     }
@@ -105,13 +58,22 @@ const HalamanExecutive = () => {
     }).format(amount);
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      navigate('/login');
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
+  const exportData = (type: string) => {
+    const data = {
+      analytics: state.analytics,
+      exportDate: new Date().toISOString(),
+      exportedBy: user?.full_name || user?.email || 'Executive User'
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `analytics-export-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   if (authLoading) {
@@ -136,20 +98,9 @@ const HalamanExecutive = () => {
 
   return (
     <div className="p-6">
-      <div className="mb-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Executive Dashboard</h1>
-          <p className="text-gray-600">Ringkasan performa bisnis dan aktivitas terkini</p>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center space-x-2"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-          </svg>
-          <span>Logout</span>
-        </button>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Analisis Bisnis</h1>
+        <p className="text-gray-600">Analisis mendalam tentang performa bisnis</p>
       </div>
 
       {state.error && (
@@ -161,11 +112,10 @@ const HalamanExecutive = () => {
       {state.isLoading ? (
         <div className="flex items-center justify-center py-12">
           <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mr-3" />
-          <p className="text-gray-600">Memuat data dashboard...</p>
+          <p className="text-gray-600">Memuat data analytics...</p>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-white overflow-hidden shadow rounded-lg">
               <div className="p-5">
@@ -242,37 +192,31 @@ const HalamanExecutive = () => {
             </div>
           </div>
 
-          {/* Recent Activities */}
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
-                Aktivitas Terbaru
-              </h3>
-              {state.recentActivities.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">Tidak ada aktivitas terbaru</p>
-              ) : (
-                <div className="space-y-3">
-                  {state.recentActivities.map((activity) => (
-                    <div key={activity.id} className="flex items-center space-x-3">
-                      <div className="flex-shrink-0">
-                        <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900">{activity.message}</p>
-                        <p className="text-xs text-gray-500">{activity.time}</p>
-                      </div>
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        activity.status === 'completed' ? 'bg-green-100 text-green-800' :
-                        activity.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {activity.status}
-                      </span>
-                    </div>
-                  ))}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Advanced Analytics</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="border rounded-lg p-4">
+                <h4 className="font-medium text-gray-900 mb-2">Conversion Rate</h4>
+                <div className="text-2xl font-bold text-green-600">{state.analytics.conversionRate}%</div>
+                <p className="text-sm text-gray-500">Dari total users aktif</p>
+              </div>
+
+              <div className="border rounded-lg p-4">
+                <h4 className="font-medium text-gray-900 mb-2">Average Transaction</h4>
+                <div className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(state.analytics.totalSales > 0 ? state.analytics.totalRevenue / state.analytics.totalSales : 0)}
                 </div>
-              )}
+                <p className="text-sm text-gray-500">Per transaksi</p>
+              </div>
             </div>
+
+            <button
+              onClick={() => exportData('analytics')}
+              className="mt-4 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+            >
+              Export Analytics Data
+            </button>
           </div>
         </div>
       )}
@@ -280,4 +224,4 @@ const HalamanExecutive = () => {
   );
 };
 
-export default HalamanExecutive;
+export default HalamanExecutiveAnalytics;

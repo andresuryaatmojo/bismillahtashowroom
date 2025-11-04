@@ -9,7 +9,6 @@ import Navigation from './components/Navigation';
 import GuestNavigation from './components/GuestNavigation';
 import AdminNavigation from './components/AdminNavigation';
 import ExecutiveNavigation from './components/ExecutiveNavigation';
-import HalamanPersetujuan from './components/HalamanPersetujuan';
 
 // AUTH PAGES
 import Login from './pages/Login';
@@ -26,7 +25,6 @@ import HalamanDetailMobil from './pages/HalamanDetailMobil';
 import HalamanKelolaIklan from './pages/HalamanKelolaIklan';
 import HalamanKemitraan from './pages/HalamanKemitraan';
 import HalamanKonten from './pages/HalamanKonten';
-import HalamanLaporan from './pages/HalamanLaporan';
 import HalamanPembelian from './pages/HalamanPembelian';
 import HalamanPerbandinganMobil from './pages/HalamanPerbandinganMobil';
 import HalamanRiwayat from './pages/HalamanRiwayat';
@@ -47,6 +45,8 @@ import HalamanJadwalTestDrive from './pages/HalamanJadwalTestDrive';
 import HalamanModerasiIklan from './pages/HalamanModerasiIklan';
 import HalamanModerasiUlasan from './pages/HalamanModerasiUlasan';
 import HalamanExecutive from './pages/HalamanExecutive';
+import HalamanExecutiveAnalytics from './pages/HalamanExecutiveAnalytics';
+import HalamanExecutiveSystem from './pages/HalamanExecutiveSystem';
 import HalamanChatAdmin from './pages/HalamanChatAdmin';
 import AdminKnowledgeChatbot from './pages/AdminKnowledgeChatbot';
 import HalamanParameterKredit from './pages/HalamanParameterKredit';
@@ -408,24 +408,7 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/laporan"
-            element={
-              <ProtectedRoute requiredPermission="view_reports">
-                <HalamanLaporan />
-              </ProtectedRoute>
-            }
-          />
-          {/* Alias admin untuk konsistensi sidebar */}
-          <Route
-            path="/admin/laporan"
-            element={
-              <ProtectedRoute requiredPermission="view_reports">
-                <HalamanLaporan />
-              </ProtectedRoute>
-            }
-          />
-
+  
           {/* PROTECTED OWNER ROUTES */}
           <Route
             path="/executive"
@@ -436,14 +419,22 @@ const AppContent: React.FC = () => {
             }
           />
           <Route
-            path="/executive/persetujuan"
+            path="/executive/analytics"
             element={
               <ProtectedRoute requiredRole="owner">
-                <HalamanPersetujuan />
+                <HalamanExecutiveAnalytics />
               </ProtectedRoute>
             }
           />
-          <Route
+              <Route
+            path="/executive/system"
+            element={
+              <ProtectedRoute requiredRole="owner">
+                <HalamanExecutiveSystem />
+              </ProtectedRoute>
+            }
+          />
+            <Route
             path="/executive/kemitraan"
             element={
               <ProtectedRoute requiredRole="owner">
