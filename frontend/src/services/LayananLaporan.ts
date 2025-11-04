@@ -568,22 +568,46 @@ class LayananLaporan {
         mockFileContent = JSON.stringify(reportData, null, 2);
       } else if (report.file_format === 'csv') {
         mockFileContent = this.generateCSVReport(reportData, report.report_type);
+      } else if (report.file_format === 'excel') {
+        // For Excel format, generate CSV content that Excel can open properly
+        mockFileContent = this.generateCSVReport(reportData, report.report_type);
       } else {
-        // For PDF and Excel, create a simple text content
+        // For PDF and other formats
         mockFileContent = this.generateTextReport(reportData, report.report_type);
       }
 
       // Store the file content in the database for download
-      const fileUrl = `data:${report.file_format === 'json' ? 'application/json' : 'text/plain'};charset=utf-8,${encodeURIComponent(mockFileContent)}`;
+      let mimeType = 'text/plain';
+      if (report.file_format === 'json') {
+        mimeType = 'application/json';
+      } else if (report.file_format === 'csv') {
+        mimeType = 'text/csv';
+      } else if (report.file_format === 'excel') {
+        // Use CSV MIME type for Excel files since we're generating CSV content
+        mimeType = 'text/csv';
+      }
+      const fileUrl = `data:${mimeType};charset=utf-8,${encodeURIComponent(mockFileContent)}`;
       const fileSize = this.calculateFileSize(reportData);
 
-      // Update report as completed
+      // Create minimal summary for database storage (strict varchar limit)
+      const minimalSummary = {
+        totalRevenue: reportData.summary?.totalRevenue || 0,
+        totalTransactions: reportData.summary?.totalTransactions || 0,
+        periodStart: reportData.period?.start || '',
+        periodEnd: reportData.period?.end || '',
+        reportType: report.report_type
+      };
+
+      // Update report as completed - only store minimal data
       const { error: updateError } = await supabase
         .from('reports')
         .update({
           status: 'completed',
-          report_data: reportData,
-          summary_data: summaryData,
+          report_data: minimalSummary,
+          summary_data: {
+            executiveSummary: summaryData.executiveSummary?.substring(0, 200) || '',
+            dataPoints: summaryData.dataPoints || 0
+          },
           file_url: fileUrl,
           file_size: fileSize,
           generated_at: new Date().toISOString(),
@@ -696,7 +720,7 @@ class LayananLaporan {
 
       const { data: report, error } = await supabase
         .from('reports')
-        .select('file_url, file_path, title, file_format')
+        .select('file_url, file_path, title, file_format, report_data, summary_data, report_type')
         .eq('id', reportId)
         .single();
 
@@ -709,14 +733,44 @@ class LayananLaporan {
         return { success: false, error: 'Laporan tidak ditemukan' };
       }
 
-      if (!report.file_url) {
-        return { success: false, error: 'File laporan tidak tersedia' };
+      // If file_url exists, use it
+      if (report.file_url) {
+        return {
+          success: true,
+          downloadUrl: report.file_url
+        };
       }
 
-      return {
-        success: true,
-        downloadUrl: report.file_url
-      };
+      // If no file_url but we have data, generate a new download
+      if (report.report_data || report.summary_data) {
+        console.log('[LayananLaporan] Generating download content on-demand');
+
+        let downloadContent = '';
+        let mimeType = 'text/plain';
+
+        if (report.file_format === 'json') {
+          downloadContent = JSON.stringify(report.report_data, null, 2);
+          mimeType = 'application/json';
+        } else if (report.file_format === 'csv') {
+          downloadContent = this.generateCSVReport(report.report_data, report.report_type);
+          mimeType = 'text/csv';
+        } else if (report.file_format === 'excel') {
+          // For Excel format, generate CSV content that Excel can open properly
+          downloadContent = this.generateCSVReport(report.report_data, report.report_type);
+          mimeType = 'text/csv';
+        } else {
+          downloadContent = this.generateTextReport(report.report_data, report.report_type);
+        }
+
+        const downloadUrl = `data:${mimeType};charset=utf-8,${encodeURIComponent(downloadContent)}`;
+
+        return {
+          success: true,
+          downloadUrl
+        };
+      }
+
+      return { success: false, error: 'File laporan tidak tersedia' };
     } catch (error) {
       console.error('[LayananLaporan] Error downloading report:', error);
       return { success: false, error: 'Terjadi kesalahan saat mengunduh laporan' };
@@ -730,7 +784,7 @@ class LayananLaporan {
   // Report Generation Methods
   private async generateSalesReport(periodStart: string, periodEnd: string): Promise<any> {
     try {
-      // Fetch transactions data
+      // Fetch transactions data with car relationships
       const { data: transactions, error } = await supabase
         .from('transactions')
         .select(`
@@ -738,16 +792,19 @@ class LayananLaporan {
           listings:cars (
             id,
             title,
-            brand,
-            model,
             year,
             price,
-            category
-          ),
-          users:profiles (
-            id,
-            full_name,
-            email
+            brand_id,
+            model_id,
+            category_id,
+            car_categories!inner (
+              id,
+              name
+            ),
+            car_brands!inner (
+              id,
+              name
+            )
           )
         `)
         .gte('created_at', periodStart)
@@ -769,7 +826,7 @@ class LayananLaporan {
       // Group by car category
       const salesByCategory: { [key: string]: number } = {};
       completedTransactions.forEach(t => {
-        const category = t.listings?.category || 'Unknown';
+        const category = (t.listings as any)?.car_categories?.name || 'Unknown';
         salesByCategory[category] = (salesByCategory[category] || 0) + 1;
       });
 
@@ -847,11 +904,32 @@ class LayananLaporan {
 
   private async generateInventoryReport(): Promise<any> {
     try {
-      // Get cars/vehicles data
+      // Get cars/vehicles data with proper relationships
       const { data: cars, error } = await supabase
         .from('cars')
-        .select('*')
-        .eq('status', 'active');
+        .select(`
+          id,
+          title,
+          year,
+          price,
+          status,
+          brand_id,
+          model_id,
+          category_id,
+          car_brands!inner (
+            id,
+            name
+          ),
+          car_models!inner (
+            id,
+            name
+          ),
+          car_categories!inner (
+            id,
+            name
+          )
+        `)
+        .eq('status', 'available');
 
       if (error) throw error;
 
@@ -860,14 +938,14 @@ class LayananLaporan {
       // Group by category
       const inventoryByCategory: { [key: string]: number } = {};
       activeCars.forEach(car => {
-        const category = car.category || 'Unknown';
+        const category = (car as any).car_categories?.name || 'Unknown';
         inventoryByCategory[category] = (inventoryByCategory[category] || 0) + 1;
       });
 
       // Group by brand
       const inventoryByBrand: { [key: string]: number } = {};
       activeCars.forEach(car => {
-        const brand = car.brand || 'Unknown';
+        const brand = (car as any).car_brands?.name || 'Unknown';
         inventoryByBrand[brand] = (inventoryByBrand[brand] || 0) + 1;
       });
 
@@ -969,12 +1047,49 @@ class LayananLaporan {
       // Comprehensive analytics combining multiple data sources
       const { data: listings } = await supabase
         .from('cars')
-        .select('category, brand, price, views, created_at')
-        .eq('status', 'active');
+        .select(`
+          id,
+          title,
+          year,
+          price,
+          view_count,
+          created_at,
+          brand_id,
+          model_id,
+          category_id,
+          car_brands!inner (
+            id,
+            name
+          ),
+          car_models!inner (
+            id,
+            name
+          ),
+          car_categories!inner (
+            id,
+            name
+          )
+        `)
+        .eq('status', 'available');
 
       const { data: transactions } = await supabase
         .from('transactions')
-        .select('total_amount, created_at, listings:cars(category, brand)')
+        .select(`
+          total_amount,
+          created_at,
+          listings:cars (
+            category_id,
+            brand_id,
+            car_categories!inner (
+              id,
+              name
+            ),
+            car_brands!inner (
+              id,
+              name
+            )
+          )
+        `)
         .gte('created_at', periodStart)
         .lte('created_at', periodEnd)
         .eq('status', 'completed');
@@ -1065,7 +1180,7 @@ class LayananLaporan {
   private getTopCategories(listings: any[]): Array<{category: string, count: number}> {
     const categoryCount: { [key: string]: number } = {};
     listings.forEach(car => {
-      const category = car.category || 'Unknown';
+      const category = (car as any).car_categories?.name || 'Unknown';
       categoryCount[category] = (categoryCount[category] || 0) + 1;
     });
     return Object.entries(categoryCount)
@@ -1077,7 +1192,7 @@ class LayananLaporan {
   private getTopBrands(listings: any[]): Array<{brand: string, count: number}> {
     const brandCount: { [key: string]: number } = {};
     listings.forEach(car => {
-      const brand = car.brand || 'Unknown';
+      const brand = (car as any).car_brands?.name || 'Unknown';
       brandCount[brand] = (brandCount[brand] || 0) + 1;
     });
     return Object.entries(brandCount)
@@ -1089,7 +1204,7 @@ class LayananLaporan {
   private getAveragePriceByCategory(listings: any[]): { [key: string]: number } {
     const categoryPrices: { [key: string]: { total: number, count: number } } = {};
     listings.forEach(car => {
-      const category = car.category || 'Unknown';
+      const category = (car as any).car_categories?.name || 'Unknown';
       if (!categoryPrices[category]) {
         categoryPrices[category] = { total: 0, count: 0 };
       }
@@ -1115,7 +1230,7 @@ class LayananLaporan {
   private calculateDemandByCategory(transactions: any[]): { [key: string]: number } {
     const categoryDemand: { [key: string]: number } = {};
     transactions.forEach(t => {
-      const category = t.listings?.category || 'Unknown';
+      const category = (t.listings as any)?.car_categories?.name || 'Unknown';
       categoryDemand[category] = (categoryDemand[category] || 0) + 1;
     });
     return categoryDemand;
@@ -1135,10 +1250,10 @@ class LayananLaporan {
 
     switch (reportType) {
       case 'sales':
-        csv = 'Date,Transaction ID,Amount,Customer,Category\n';
+        csv = 'Date,Transaction ID,Amount,Category\n';
         if (reportData.transactions) {
           reportData.transactions.forEach((t: any) => {
-            csv += `${t.created_at},${t.id},${t.total_amount},${t.users?.full_name || 'Unknown'},${t.listings?.category || 'Unknown'}\n`;
+            csv += `${t.created_at},${t.id},${t.total_amount},${(t.listings as any)?.car_categories?.name || 'Unknown'}\n`;
           });
         }
         csv += `\n\nSummary\nTotal Revenue,${reportData.summary?.totalRevenue || 0}\n`;
@@ -1240,6 +1355,71 @@ class LayananLaporan {
     text += `End of Report\n`;
 
     return text;
+  }
+
+  private generateExcelReport(reportData: any, reportType: string): string {
+    // Generate Excel-style tabular report
+    let excelContent = '';
+
+    switch (reportType) {
+      case 'sales':
+        excelContent = 'LAPORAN PENJUALAN - EXCEL FORMAT\n\n';
+        excelContent += 'Tanggal\tID Transaksi\tKategori\tJumlah\n';
+        if (reportData.transactions) {
+          reportData.transactions.forEach((t: any) => {
+            const date = new Date(t.created_at).toLocaleDateString('id-ID');
+            const category = (t.listings as any)?.car_categories?.name || 'Unknown';
+            const amount = (t.total_amount || 0).toLocaleString('id-ID');
+            excelContent += `${date}\t${t.id}\t${category}\tRp ${amount}\n`;
+          });
+        }
+        excelContent += '\n\nRINGKASAN\n';
+        excelContent += `Total Pendapatan\tRp ${(reportData.summary?.totalRevenue || 0).toLocaleString('id-ID')}\n`;
+        excelContent += `Total Transaksi\t${reportData.summary?.totalTransactions || 0}\n`;
+        excelContent += `Rata-rata Transaksi\tRp ${(reportData.summary?.averageTransactionValue || 0).toLocaleString('id-ID')}\n`;
+        break;
+
+      case 'financial':
+        excelContent = 'LAPORAN KEUANGAN - EXCEL FORMAT\n\n';
+        excelContent += 'Metode Pembayaran\tJumlah\tPersentase\n';
+        if (reportData.revenueByPaymentMethod) {
+          const total = reportData.summary?.totalRevenue || 1;
+          Object.entries(reportData.revenueByPaymentMethod).forEach(([method, amount]: [string, any]) => {
+            const percentage = ((amount / total) * 100).toFixed(2);
+            const formattedAmount = (amount || 0).toLocaleString('id-ID');
+            excelContent += `${method}\tRp ${formattedAmount}\t${percentage}%\n`;
+          });
+        }
+        excelContent += `\nTotal Pendapatan\tRp ${(reportData.summary?.totalRevenue || 0).toLocaleString('id-ID')}\t100%\n`;
+        break;
+
+      case 'inventory':
+        excelContent = 'LAPORAN INVENTORY - EXCEL FORMAT\n\n';
+        excelContent = 'Kategori\tJumlah Kendaraan\tNilai Total\n';
+        if (reportData.inventoryByCategory) {
+          Object.entries(reportData.inventoryByCategory).forEach(([category, count]: [string, any]) => {
+            excelContent += `${category}\t${count}\tRp ${(count * 200000000).toLocaleString('id-ID')}\n`; // Estimasi harga rata-rata
+          });
+        }
+        excelContent += `\nTotal Kendaraan\t${reportData.summary?.totalVehicles || 0}\n`;
+        excelContent += `Total Nilai Inventory\tRp ${(reportData.summary?.totalInventoryValue || 0).toLocaleString('id-ID')}\n`;
+        break;
+
+      default:
+        // Generic format for other report types
+        excelContent = `LAPORAN ${reportType.toUpperCase()} - EXCEL FORMAT\n\n`;
+        excelContent += 'Metrik\tNilai\n';
+        if (reportData.summary) {
+          Object.entries(reportData.summary).forEach(([key, value]: [string, any]) => {
+            if (typeof value === 'number') {
+              excelContent += `${key}\t${value.toLocaleString('id-ID')}\n`;
+            }
+          });
+        }
+    }
+
+    excelContent += '\n\nGenerated: ' + new Date().toLocaleString('id-ID');
+    return excelContent;
   }
 }
 

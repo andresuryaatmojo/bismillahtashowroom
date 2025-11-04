@@ -9,7 +9,7 @@ import {
   CardTitle
 } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
+import { Badge } from '../components/ui/badge';     
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
@@ -385,11 +385,18 @@ const HalamanLaporanAdmin = () => {
       const result = await laporanService.downloadReport(reportId);
 
       if (result.success && result.downloadUrl) {
+        // Get report details to determine file format
+        const report = state.reports.find(r => r.id === reportId);
+        let fileFormat = report?.file_format || 'pdf';
+        // For Excel format, use csv extension since we're generating CSV content
+        if (fileFormat === 'excel') fileFormat = 'csv';
+        const fileName = `${reportTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${fileFormat}`;
+
         // Create a temporary link to download the file
         const link = document.createElement('a');
         link.href = result.downloadUrl;
         link.target = '_blank';
-        link.download = `${reportTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
+        link.download = fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
