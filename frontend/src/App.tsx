@@ -58,6 +58,8 @@ import NotFound from './pages/NotFound';
 import './App.css';
 import HalamanKelolaTransaksi from './pages/HalamanKelolaTransaksi';
 import HalamanKelolaTransaksiUser from './pages/HalamanKelolaTransaksiUser';
+import HalamanLaporanAdmin from './pages/HalamanLaporanAdmin';
+import HalamanLaporanEksekutif from './pages/HalamanLaporanEksekutif';
 
 // Komponen: AppContent
 const AppContent: React.FC = () => {
@@ -406,6 +408,14 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/admin/laporan"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanLaporanAdmin />
+              </ProtectedRoute>
+            }
+          />
   
           {/* PROTECTED OWNER ROUTES */}
           <Route
@@ -416,11 +426,19 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
-                <Route
+          <Route
             path="/executive/kemitraan"
             element={
               <ProtectedRoute requiredRole="owner">
                 <HalamanKemitraan />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/executive/reports"
+            element={
+              <ProtectedRoute requiredRole="owner">
+                <HalamanLaporanEksekutif />
               </ProtectedRoute>
             }
           />
