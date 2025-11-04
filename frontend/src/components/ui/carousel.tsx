@@ -63,7 +63,7 @@ const Carousel = React.forwardRef<
     const [canScrollNext, setCanScrollNext] = React.useState(false)
     const [currentIndex, setCurrentIndex] = React.useState(0)
     const [itemCount, setItemCount] = React.useState(0)
-    const carouselRef = React.useRef<HTMLDivElement>(null)
+    const carouselRef = React.useRef<HTMLDivElement>(null!)
     const eventListeners = React.useRef<{ [key: string]: (() => void)[] }>({})
 
     const api = React.useMemo<CarouselApi>(() => ({

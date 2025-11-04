@@ -131,7 +131,7 @@ function HalamanChat() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const peerProfileCacheRef = useRef<Map<string, any>>(new Map());
   

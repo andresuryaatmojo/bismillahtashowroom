@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -55,6 +55,8 @@ const HalamanTradeIn: React.FC = () => {
   const [cars, setCars] = useState<CarOption[]>([]);
   const [userTradeIns, setUserTradeIns] = useState<TradeInRequestWithRelations[]>([]);
   const [selectedCar, setSelectedCar] = useState<CarOption | null>(null);
+  const [carSearch, setCarSearch] = useState('');
+  const [filteredCars, setFilteredCars] = useState<CarOption[]>([]);
   const [formData, setFormData] = useState<Partial<TradeInFormData>>({
     old_car_brand: '',
     old_car_model: '',
@@ -73,9 +75,14 @@ const HalamanTradeIn: React.FC = () => {
     user_notes: '',
     images: []
   });
+
+  // Refs to prevent race conditions
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isSubmittingRef = useRef(false);
   const [uploadedImages, setUploadedImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingCars, setLoadingCars] = useState(false);
+  const [loadingTradeIns, setLoadingTradeIns] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [submittedTradeIn, setSubmittedTradeIn] = useState<TradeInRequestWithRelations | null>(null);
@@ -84,37 +91,82 @@ const HalamanTradeIn: React.FC = () => {
 
   // Load data
   useEffect(() => {
-    loadCars();
-    if (user) {
-      loadUserTradeIns();
-    }
+    let isMounted = true;
+
+    const loadData = async () => {
+      if (isMounted) {
+        loadCars();
+        if (user) {
+          loadUserTradeIns();
+        }
+      }
+    };
+
+    loadData();
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
   }, [user]);
+
+  // Debounced search for cars
+  useEffect(() => {
+    // Clear existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Set new timeout
+    searchTimeoutRef.current = setTimeout(() => {
+      if (carSearch) {
+        const filtered = cars.filter(car =>
+          car.title.toLowerCase().includes(carSearch.toLowerCase()) ||
+          car.display_name?.toLowerCase().includes(carSearch.toLowerCase()) ||
+          car.location_city?.toLowerCase().includes(carSearch.toLowerCase())
+        );
+        setFilteredCars(filtered);
+      } else {
+        setFilteredCars(cars);
+      }
+    }, 300); // 300ms debounce
+
+    // Cleanup
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [carSearch, cars]);
 
   const loadCars = async () => {
     try {
-      setLoading(true);
-      console.log('Fetching cars from Supabase...');
+      setLoadingCars(true);
+      console.log('Fetching showroom cars for trade-in from Supabase...');
 
       const data = await fetchAvailableCars(50);
-      console.log('Fetched cars from database:', data);
+      console.log('Fetched showroom cars from database:', data);
 
       data.forEach((car, index) => {
-        console.log(`Car ${index + 1}:`, car.title, 'ID:', car.id, 'Price:', car.price);
+        console.log(`Showroom Car ${index + 1}:`, car.title, 'ID:', car.id, 'Price:', car.price);
       });
 
       setCars(data);
     } catch (error) {
-      console.error('Error loading cars:', error);
+      console.error('Error loading showroom cars:', error);
       setCars([]); // Set empty array to prevent UI issues
     } finally {
-      setLoading(false);
+      setLoadingCars(false);
     }
   };
 
   const loadUserTradeIns = async () => {
     if (!user) return;
 
-    setLoading(true);
+    setLoadingTradeIns(true);
     try {
       const { data, error } = await TradeInService.getUserTradeInRequests(user.id);
       if (error) {
@@ -125,7 +177,7 @@ const HalamanTradeIn: React.FC = () => {
     } catch (error) {
       console.error('Error loading user trade-ins:', error);
     } finally {
-      setLoading(false);
+      setLoadingTradeIns(false);
     }
   };
 
@@ -180,6 +232,12 @@ const HalamanTradeIn: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Prevent double submission
+    if (isSubmittingRef.current || submitting) {
+      console.log('Submission already in progress, preventing duplicate');
+      return;
+    }
+
     if (!user) {
       setFormErrors(['Anda harus login terlebih dahulu']);
       return;
@@ -219,7 +277,10 @@ const HalamanTradeIn: React.FC = () => {
       return;
     }
 
+    // Set submission flag
+    isSubmittingRef.current = true;
     setSubmitting(true);
+
     try {
       const { data, error } = await TradeInService.createTradeInRequest(completeFormData, user.id);
 
@@ -253,13 +314,16 @@ const HalamanTradeIn: React.FC = () => {
         setUploadedImages([]);
         setImagePreviews([]);
         setSelectedCar(null);
+        setCarSearch('');
 
         // Reload trade-in history
         await loadUserTradeIns();
       }
     } catch (error) {
+      console.error('Unexpected error during submission:', error);
       setFormErrors(['Terjadi kesalahan saat mengirim permintaan']);
     } finally {
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -361,7 +425,8 @@ const HalamanTradeIn: React.FC = () => {
                   <form onSubmit={handleSubmit} className="space-y-6">
                     {/* Mobil Baru Pilihan */}
                     <div>
-                      <Label className="text-base font-medium mb-4 block">Mobil Baru Pilihan</Label>
+                      <Label className="text-base font-medium mb-2 block">Mobil Baru Pilihan (Showroom Only)</Label>
+                      <p className="text-sm text-gray-600 mb-4">Hanya mobil dari showroom yang tersedia untuk program trade-in</p>
                       {selectedCar ? (
                         <div className="border rounded-lg p-4 bg-blue-50">
                           <div className="flex items-center justify-between">
@@ -380,34 +445,78 @@ const HalamanTradeIn: React.FC = () => {
                             </Button>
                           </div>
                         </div>
-                      ) : loading ? (
+                      ) : loadingCars ? (
                         <div className="flex justify-center py-8">
                           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                          <p className="ml-3 text-gray-600">Memuat mobil yang tersedia...</p>
+                          <p className="ml-3 text-gray-600">Memuat mobil showroom...</p>
                         </div>
                       ) : cars.length === 0 ? (
                         <div className="text-center py-8">
                           <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                          <h3 className="text-lg font-medium text-gray-900 mb-2">Tidak Ada Mobil Tersedia</h3>
-                          <p className="text-gray-600">Belum ada mobil yang tersedia untuk trade-in saat ini.</p>
+                          <h3 className="text-lg font-medium text-gray-900 mb-2">Tidak Ada Mobil Showroom Tersedia</h3>
+                          <p className="text-gray-600">Belum ada mobil dari showroom yang tersedia untuk trade-in saat ini. Mobil eksternal tidak dapat digunakan untuk program trade-in.</p>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {cars.map((car) => (
-                            <div
-                              key={car.id}
-                              onClick={() => {
-                                console.log('Car selected:', car);
-                                console.log('Car ID:', car.id);
-                                setSelectedCar(car);
-                              }}
-                              className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                            >
-                              <h4 className="font-medium">{car.display_name || car.title}</h4>
-                              <p className="text-gray-600">Rp {car.price.toLocaleString('id-ID')}</p>
-                              <p className="text-gray-500 text-sm">{car.location_city}</p>
-                            </div>
-                          ))}
+                        <div className="space-y-3">
+                          {/* Search Input */}
+                          <div className="relative">
+                            <Input
+                              type="text"
+                              placeholder="Cari mobil showroom berdasarkan nama atau lokasi..."
+                              value={carSearch}
+                              onChange={(e) => setCarSearch(e.target.value)}
+                              className="w-full"
+                            />
+                            {carSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setCarSearch('')}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Dropdown */}
+                          <Select onValueChange={(carId) => {
+                            const car = filteredCars.find(c => c.id === carId);
+                            if (car) {
+                              console.log('Car selected:', car);
+                              console.log('Car ID:', car.id);
+                              setSelectedCar(car);
+                              setCarSearch(''); // Clear search after selection
+                            }
+                          }}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Pilih mobil showroom..." />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-60 overflow-y-auto">
+                              {filteredCars.length === 0 ? (
+                                <div className="p-2 text-center text-gray-500">
+                                  Tidak ada mobil yang cocok dengan pencarian
+                                </div>
+                              ) : (
+                                filteredCars.map((car) => (
+                                  <SelectItem key={car.id} value={car.id}>
+                                    <div className="flex flex-col">
+                                      <span className="font-medium">{car.display_name || car.title}</span>
+                                      <span className="text-sm text-gray-500">
+                                        Rp {car.price.toLocaleString('id-ID')} - {car.location_city}
+                                      </span>
+                                    </div>
+                                  </SelectItem>
+                                ))
+                              )}
+                            </SelectContent>
+                          </Select>
+
+                          {/* Results count */}
+                          {carSearch && (
+                            <p className="text-sm text-gray-500">
+                              Menampilkan {filteredCars.length} mobil showroom dari {cars.length} total
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -557,34 +666,54 @@ const HalamanTradeIn: React.FC = () => {
 
                     {/* Jadwal Inspeksi */}
                     <div>
-                      <Label className="text-base font-medium mb-4 block">Jadwal Inspeksi (Opsional)</Label>
+                      <Label className="text-base font-medium mb-4 block">Jadwal Inspeksi</Label>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <div className="flex items-start gap-3">
+                          <svg className="h-5 w-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <div>
+                            <h4 className="font-medium text-blue-900">Inspeksi di Showroom</h4>
+                            <p className="text-sm text-blue-700">
+                              Proses inspeksi mobil lama akan dilakukan di lokasi showroom kami untuk memastikan penilaian yang akurat dan profesional.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <Label htmlFor="inspectionDate">Tanggal</Label>
+                          <Label htmlFor="inspectionDate">Tanggal Inspeksi*</Label>
                           <Input
                             id="inspectionDate"
                             type="date"
                             value={formData.inspection_date || ''}
                             onChange={(e) => handleInputChange('inspection_date', e.target.value)}
+                            required
+                            min={new Date().toISOString().split('T')[0]}
+                            max={new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
                           />
                         </div>
                         <div>
-                          <Label htmlFor="inspectionTime">Waktu</Label>
+                          <Label htmlFor="inspectionTime">Waktu Inspeksi*</Label>
                           <Input
                             id="inspectionTime"
                             type="time"
                             value={formData.inspection_time || ''}
                             onChange={(e) => handleInputChange('inspection_time', e.target.value)}
+                            required
                           />
                         </div>
-                        <div className="md:col-span-2">
-                          <Label htmlFor="inspectionLocation">Lokasi Inspeksi</Label>
-                          <Input
-                            id="inspectionLocation"
-                            value={formData.inspection_location || ''}
-                            onChange={(e) => handleInputChange('inspection_location', e.target.value)}
-                            placeholder="Contoh: Showroom Jakarta Pusat"
-                          />
+                      </div>
+                      <div className="mt-3">
+                        <Label className="text-sm text-gray-600 mb-2 block">Lokasi Showroom:</Label>
+                        <div className="border rounded-lg p-3 bg-gray-50">
+                          <p className="font-medium text-gray-900">
+                            Showroom Mobilindo
+                          </p>
+                          <p className="text-sm text-gray-600">
+                           Jl. Leuwi Panjang 113-123, Situsaeur, Kec. Bojongloa Kidul, Kota Bandung<br />
+                            (Senin - Sabtu, 09:00 - 18:00)
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -697,14 +826,14 @@ const HalamanTradeIn: React.FC = () => {
                     <CheckCircle className="h-5 w-5 text-green-500 mt-0.5" />
                     <div>
                       <h4 className="font-medium">Syarat Mudah</h4>
-                      <p className="text-sm text-gray-600">Mobil lama Anda akan dinilai oleh tim profesional kami</p>
+                      <p className="text-sm text-gray-600">Mobil lama Anda akan dinilai oleh tim profesional kami di showroom</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <CheckCircle className="h-5 w-5 text-green-500 mt-0.5" />
                     <div>
                       <h4 className="font-medium">Proses Cepat</h4>
-                      <p className="text-sm text-gray-600">Estimasi nilai dalam 1-2 hari kerja</p>
+                      <p className="text-sm text-gray-600">Estimasi nilai dalam 1-2 hari kerja setelah inspeksi</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
@@ -734,8 +863,8 @@ const HalamanTradeIn: React.FC = () => {
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-sm font-medium">2</div>
                       <div>
-                        <h4 className="font-medium">Inspeksi & Penilaian</h4>
-                        <p className="text-sm text-gray-600">Tim kami akan memeriksa mobil Anda</p>
+                        <h4 className="font-medium">Inspeksi di Showroom</h4>
+                        <p className="text-sm text-gray-600">Bawa mobil lama ke showroom untuk inspeksi profesional</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -769,7 +898,7 @@ const HalamanTradeIn: React.FC = () => {
                 <CardTitle>Riwayat Trade-In Anda</CardTitle>
               </CardHeader>
               <CardContent>
-                {loading ? (
+                {loadingTradeIns ? (
                   <div className="flex justify-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                   </div>
@@ -861,7 +990,7 @@ const HalamanTradeIn: React.FC = () => {
             </DialogHeader>
             <div className="space-y-4">
               <p className="text-gray-600">
-                Permintaan trade-in Anda telah berhasil dikirim. Tim kami akan segera menghubungi Anda untuk proses selanjutnya.
+                Permintaan trade-in Anda telah berhasil dikirim. Silakan datang ke showroom sesuai jadwal yang Anda pilih untuk proses inspeksi mobil lama Anda.
               </p>
               {submittedTradeIn && (
                 <div className="bg-blue-50 p-4 rounded-lg">

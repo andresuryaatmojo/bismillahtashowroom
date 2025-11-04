@@ -89,7 +89,7 @@ function AdminNavigation() {
     label: 'Pengaturan Sistem',
     items: [
       { path: '/admin/parameter-kredit', label: 'Parameter Kredit', icon: Settings },
-      { path: '/admin/pembayaran-iklan', label: 'Pembayaran Iklan', icon: Briefcase },
+      { path: '/admin/pembayaran-iklan', label: 'Kelola Paket Iklan', icon: Briefcase },
       { path: '/admin/knowledge-chatbot', label: 'Knowledge Chatbot', icon: MessageCircle },
     ],
   };

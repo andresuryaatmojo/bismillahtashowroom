@@ -390,253 +390,243 @@ const HalamanKelolaTradeIn: React.FC = () => {
                   <p className="text-gray-600">Belum ada permintaan trade-in saat ini</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {tradeIns.map((tradeIn) => (
-                    <div key={tradeIn.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-start gap-4 mb-3">
-                          {/* Car Images Section */}
-                        <div className="flex-shrink-0">
-                          {tradeIn.images && tradeIn.images.length > 0 ? (
-                            <div className="relative">
-                              <img
-                                src={tradeIn.images[0].image_url}
-                                alt={`${tradeIn.old_car_brand} ${tradeIn.old_car_model}`}
-                                className="w-24 h-24 object-cover rounded-lg cursor-pointer hover:scale-105 transition-transform"
-                                onClick={() => {
-                                  setSelectedTradeIn(tradeIn);
-                                  setShowDetailDialog(true);
-                                }}
-                                onLoad={() => {}}
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement;
-                                  target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"%3E%3Crect width="96" height="96" fill="%23f3f4f6"/%3E%3Ctext x="48" y="48" text-anchor="middle" dy=".3em" fill="%239ca3af" font-family="Arial" font-size="12"%3ENo Image%3C/text%3E%3C/svg%3E';
-                                }}
-                              />
-                              {tradeIn.images.length > 1 && (
-                                <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center">
-                                  +{tradeIn.images.length - 1}
-                                </div>
+                <div className="overflow-x-auto border rounded-lg">
+                  <table className="w-full border-collapse min-w-[800px]">
+                    <thead>
+                      <tr className="border-b bg-gray-50 sticky top-0 z-10">
+                        <th className="text-left p-4 font-semibold text-gray-900 bg-gray-50 border-r">Mobil & Gambar</th>
+                        <th className="text-left p-4 font-semibold text-gray-900 bg-gray-50 border-r">Informasi</th>
+                        <th className="text-left p-4 font-semibold text-gray-900 bg-gray-50 border-r">Penilaian</th>
+                        <th className="text-left p-4 font-semibold text-gray-900 bg-gray-50 border-r">Status</th>
+                        <th className="text-center p-4 font-semibold text-gray-900 bg-gray-50">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tradeIns.map((tradeIn, index) => (
+                        <tr key={tradeIn.id} className={`border-b hover:bg-blue-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                          <td className="p-4 border-r border-gray-200">
+                            <div className="flex items-center gap-3">
+                              {/* Car Image */}
+                              <div className="flex-shrink-0">
+                                {tradeIn.images && tradeIn.images.length > 0 ? (
+                                  <div className="relative">
+                                    <img
+                                      src={tradeIn.images[0].image_url}
+                                      alt={`${tradeIn.old_car_brand} ${tradeIn.old_car_model}`}
+                                      className="w-16 h-16 object-cover rounded-lg cursor-pointer hover:scale-105 transition-transform border border-gray-200"
+                                      onClick={() => {
+                                        setSelectedTradeIn(tradeIn);
+                                        setShowDetailDialog(true);
+                                      }}
+                                      onError={(e) => {
+                                        const target = e.target as HTMLImageElement;
+                                        target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" fill="%23f3f4f6"/%3E%3Ctext x="32" y="32" text-anchor="middle" dy=".3em" fill="%239ca3af" font-family="Arial" font-size="10"%3ENo Image%3C/text%3E%3C/svg%3E';
+                                      }}
+                                    />
+                                    {tradeIn.images.length > 1 && (
+                                      <div className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center text-[10px]">
+                                        +{tradeIn.images.length - 1}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center border border-gray-200">
+                                    <Car className="h-6 w-6 text-gray-400" />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Car Info */}
+                              <div>
+                                <h4 className="font-medium text-gray-900">
+                                  {tradeIn.old_car_brand} {tradeIn.old_car_model}
+                                </h4>
+                                <p className="text-sm text-gray-600">{tradeIn.old_car_year}</p>
+                                {tradeIn.old_car_plate_number && (
+                                  <p className="text-xs text-gray-500">Plat: {tradeIn.old_car_plate_number}</p>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="p-4 border-r border-gray-200">
+                            <div className="space-y-1">
+                              <p className="text-sm">
+                                <span className="text-gray-600">ID:</span> #{tradeIn.id.substring(0, 8)}
+                              </p>
+                              <p className="text-sm">
+                                <span className="text-gray-600">Tanggal:</span> {new Date(tradeIn.created_at).toLocaleDateString('id-ID')}
+                              </p>
+                              <p className="text-sm">
+                                <span className="text-gray-600">Tukar dengan:</span> {tradeIn.new_car?.title || 'Mobil Baru'}
+                              </p>
+                              <p className="text-sm">
+                                <span className="text-gray-600">Pemohon:</span> User {tradeIn.user_id?.substring(0, 8)}
+                              </p>
+                              {tradeIn.images && tradeIn.images.length > 0 && (
+                                <p className="text-sm flex items-center gap-1">
+                                  <svg className="h-3 w-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                  {tradeIn.images.length} foto
+                                </p>
                               )}
                             </div>
-                          ) : (
-                            <div className="w-24 h-24 bg-gray-100 rounded-lg flex items-center justify-center">
-                              <Car className="h-8 w-8 text-gray-400" />
+                          </td>
+
+                          <td className="p-4 border-r border-gray-200">
+                            <div className="space-y-1 text-sm">
+                              <div>
+                                <span className="text-gray-600">Estimasi:</span>
+                                <p className="font-medium">
+                                  {tradeIn.estimated_value
+                                    ? `Rp ${tradeIn.estimated_value.toLocaleString('id-ID')}`
+                                    : '-'
+                                  }
+                                </p>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Penilaian:</span>
+                                <p className="font-medium">
+                                  {tradeIn.appraised_value
+                                    ? `Rp ${tradeIn.appraised_value.toLocaleString('id-ID')}`
+                                    : '-'
+                                  }
+                                </p>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Final:</span>
+                                <p className="font-medium">
+                                  {tradeIn.final_trade_in_value
+                                    ? `Rp ${tradeIn.final_trade_in_value.toLocaleString('id-ID')}`
+                                    : '-'
+                                  }
+                                </p>
+                              </div>
                             </div>
-                          )}
-                        </div>
+                          </td>
 
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h4 className="font-medium text-lg">
-                              {tradeIn.old_car_brand} {tradeIn.old_car_model} ({tradeIn.old_car_year})
-                            </h4>
-                            {getStatusBadge(tradeIn.status)}
-                          </div>
-                          <p className="text-gray-600 mb-2">
-                            Tukar dengan: {tradeIn.new_car?.title || 'Mobil Baru'}
-                          </p>
-                          <div className="flex items-center gap-4 text-sm text-gray-600">
-                            <span>ID: #{tradeIn.id.substring(0, 8)}</span>
-                            <span>{new Date(tradeIn.created_at).toLocaleDateString('id-ID')}</span>
-                            {tradeIn.old_car_plate_number && (
-                              <span>Plat: {tradeIn.old_car_plate_number}</span>
-                            )}
-                            {tradeIn.images && tradeIn.images.length > 0 && (
-                              <span className="flex items-center gap-1">
-                                <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                {tradeIn.images.length} foto
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                          <td className="p-4 border-r border-gray-200">
+                            <div className="flex items-center gap-2">
+                              {getStatusBadge(tradeIn.status)}
+                            </div>
+                          </td>
 
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedTradeIn(tradeIn);
-                              setShowDetailDialog(true);
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-
-                          {tradeIn.status === 'pending' && (
-                            <>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => handleInspect(tradeIn)}
-                              >
-                                <CheckSquare className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-
-                          {tradeIn.status === 'inspecting' && (
-                            <>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => handleAppraise(tradeIn)}
-                              >
-                                <DollarSign className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-
-                          {tradeIn.status === 'appraised' && (
-                            <>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => handleApprove(tradeIn)}
-                              >
-                                <CheckCircle className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => handleReject(tradeIn)}
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-
-                          {tradeIn.status === 'approved' && (
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => handleComplete(tradeIn)}
-                            >
-                              <CheckSquare className="h-4 w-4" />
-                            </Button>
-                          )}
-
-                          {tradeIn.status !== 'completed' && tradeIn.status !== 'cancelled' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleCancel(tradeIn)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          )}
-
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handleDelete(tradeIn)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Quick Info */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <span className="text-gray-600">Estimasi Nilai:</span>
-                          <p className="font-medium">
-                            {tradeIn.estimated_value
-                              ? `Rp ${tradeIn.estimated_value.toLocaleString('id-ID')}`
-                              : 'Belum dinilai'
-                            }
-                          </p>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Nilai Penilaian:</span>
-                          <p className="font-medium">
-                            {tradeIn.appraised_value
-                              ? `Rp ${tradeIn.appraised_value.toLocaleString('id-ID')}`
-                              : 'Belum dinilai'
-                            }
-                          </p>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Final Trade-In:</span>
-                          <p className="font-medium">
-                            {tradeIn.final_trade_in_value
-                              ? `Rp ${tradeIn.final_trade_in_value.toLocaleString('id-ID')}`
-                              : 'Belum disetujui'
-                            }
-                          </p>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Pemohon:</span>
-                          <p className="font-medium">
-                            User {tradeIn.user_id?.substring(0, 8)}
-                          </p>
-                        </div>
-                      </div>
-
-                    {/* Images Preview Gallery */}
-                      {tradeIn.images && tradeIn.images.length > 0 && (
-                        <div className="mt-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <svg className="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span className="text-sm font-medium text-gray-700">
-                              Foto Mobil ({tradeIn.images.length})
-                            </span>
-                          </div>
-                          <div className="flex gap-2 flex-wrap">
-                            {tradeIn.images.slice(0, 4).map((image, index) => (
-                              <div key={image.id} className="relative group">
-                                <img
-                                  src={image.image_url}
-                                  alt={`${tradeIn.old_car_brand} ${tradeIn.old_car_model} - ${image.caption || `Gambar ${index + 1}`}`}
-                                  className="w-20 h-20 object-cover rounded-lg cursor-pointer hover:scale-105 transition-all duration-200 border border-gray-200"
-                                  onClick={() => window.open(image.image_url, '_blank')}
-                                  onLoad={() => {}}
-                                  onError={(e) => {
-                                    const target = e.target as HTMLImageElement;
-                                    target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"%3E%3Crect width="80" height="80" fill="%23f3f4f6"/%3E%3Ctext x="40" y="40" text-anchor="middle" dy=".3em" fill="%239ca3af" font-family="Arial" font-size="10"%3ENo Image%3C/text%3E%3C/svg%3E';
+                          <td className="p-4">
+                            <div className="flex items-center justify-center">
+                              <div className="flex items-center gap-1 p-1 bg-gray-50 rounded-lg border">
+                                {/* Detail Button - Always visible */}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedTradeIn(tradeIn);
+                                    setShowDetailDialog(true);
                                   }}
-                                />
-                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 rounded-lg transition-all duration-200 flex items-center justify-center">
-                                  <svg className="h-6 w-6 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                                  </svg>
-                                </div>
-                              </div>
-                            ))}
-                            {tradeIn.images.length > 4 && (
-                              <div
-                                className="w-20 h-20 bg-gray-100 rounded-lg flex items-center justify-center text-sm text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors border border-gray-200"
-                                onClick={() => {
-                                  setSelectedTradeIn(tradeIn);
-                                  setShowDetailDialog(true);
-                                }}
-                              >
-                                <div className="text-center">
-                                  <div className="text-lg font-semibold">+{tradeIn.images.length - 4}</div>
-                                  <div className="text-xs">lainnya</div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                                  className="h-7 w-7 p-0 hover:bg-blue-100"
+                                  title="Lihat Detail"
+                                >
+                                  <Eye className="h-3 w-3 text-blue-600" />
+                                </Button>
 
-                      {/* No Images Placeholder */}
-                      {(!tradeIn.images || tradeIn.images.length === 0) && (
-                        <div className="mt-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span className="text-sm text-gray-500">Belum ada foto mobil</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                                <div className="w-px h-6 bg-gray-300" />
+
+                                {/* Status-specific actions */}
+                                {tradeIn.status === 'pending' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleInspect(tradeIn)}
+                                    className="h-7 w-7 p-0 hover:bg-yellow-100"
+                                    title="Inspeksi"
+                                  >
+                                    <CheckSquare className="h-3 w-3 text-yellow-600" />
+                                  </Button>
+                                )}
+
+                                {tradeIn.status === 'inspecting' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleAppraise(tradeIn)}
+                                    className="h-7 w-7 p-0 hover:bg-orange-100"
+                                    title="Nilai"
+                                  >
+                                    <DollarSign className="h-3 w-3 text-orange-600" />
+                                  </Button>
+                                )}
+
+                                {tradeIn.status === 'appraised' && (
+                                  <>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleApprove(tradeIn)}
+                                      className="h-7 w-7 p-0 hover:bg-green-100"
+                                      title="Setujui"
+                                    >
+                                      <CheckCircle className="h-3 w-3 text-green-600" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleReject(tradeIn)}
+                                      className="h-7 w-7 p-0 hover:bg-red-100"
+                                      title="Tolak"
+                                    >
+                                      <XCircle className="h-3 w-3 text-red-600" />
+                                    </Button>
+                                  </>
+                                )}
+
+                                {tradeIn.status === 'approved' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleComplete(tradeIn)}
+                                    className="h-7 w-7 p-0 hover:bg-green-100"
+                                    title="Selesaikan"
+                                  >
+                                    <CheckSquare className="h-3 w-3 text-green-600" />
+                                  </Button>
+                                )}
+
+                                {/* Divider */}
+                                {(tradeIn.status !== 'completed' && tradeIn.status !== 'cancelled') && (
+                                  <div className="w-px h-6 bg-gray-300" />
+                                )}
+
+                                {/* Cancel and Delete */}
+                                {tradeIn.status !== 'completed' && tradeIn.status !== 'cancelled' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleCancel(tradeIn)}
+                                    className="h-7 w-7 p-0 hover:bg-gray-200"
+                                    title="Batalkan"
+                                  >
+                                    <X className="h-3 w-3 text-gray-600" />
+                                  </Button>
+                                )}
+
+                                <div className="w-px h-6 bg-gray-300" />
+
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDelete(tradeIn)}
+                                  className="h-7 w-7 p-0 hover:bg-red-100"
+                                  title="Hapus"
+                                >
+                                  <Trash2 className="h-3 w-3 text-red-600" />
+                                </Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
 

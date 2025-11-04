@@ -7,24 +7,12 @@ import {
   CarStats
 } from '../types/cars';
 
-// Fetch available cars for credit simulation
+// Fetch available cars for credit simulation and trade-in
 export const fetchAvailableCars = async (
   limit: number = 100
 ): Promise<CarOption[]> => {
   try {
-    // First, let's check if there's any data at all
-    const { data: allData, error: allError } = await supabase
-      .from('cars')
-      .select('count')
-      .limit(1);
-
-    if (allError) {
-      console.error('Error checking total cars:', allError);
-    } else {
-      console.log('Total cars in database:', allData);
-    }
-
-    // Try with minimal filters first
+    // Fetch showroom cars for trade-in with multiple filter options
     const { data, error } = await supabase
       .from('cars')
       .select(`
@@ -34,41 +22,21 @@ export const fetchAvailableCars = async (
         price,
         location_city,
         status,
-        moderation_status
+        moderation_status,
+        seller_type
       `)
+      .or('seller_type.eq.showroom,seller_type.eq.internal,seller_type.eq.dealer') // Multiple possible showroom values
+      .or('status.eq.available,status.eq.active,status.eq.published') // Multiple possible status values
+      .neq('status', 'reserved') // Exclude reserved cars
       .order('posted_at', { ascending: false })
       .limit(limit);
 
     if (error) {
-      console.error('Supabase error:', error);
+      console.error('Error fetching showroom cars:', error);
       throw error;
     }
 
-    console.log('Raw cars data with status:', data); // Debug log
-
-    // If no data with minimal filters, try to debug what statuses exist
-    if (!data || data.length === 0) {
-      console.log('No data found with minimal query, trying to fetch all cars...');
-
-      const { data: allCarsData, error: allCarsError } = await supabase
-        .from('cars')
-        .select('id, title, year, price, location_city, status, moderation_status')
-        .limit(5);
-
-      if (!allCarsError && allCarsData) {
-        console.log('Sample cars from database:', allCarsData);
-        console.log('Available statuses:', [...new Set(allCarsData.map(c => c.status))]);
-        console.log('Available moderation statuses:', [...new Set(allCarsData.map(c => c.moderation_status))]);
-      }
-    }
-
-    // Filter client-side to see what we have
-    const availableCars = (data || []).filter(car => {
-      // For debugging, let's be more flexible
-      return true; // Return all cars for now to see what we have
-    });
-
-    console.log('Filtered cars:', availableCars); // Debug log
+    const availableCars = data || [];
 
     return availableCars.map((car: any) => ({
       id: car.id,
@@ -227,7 +195,7 @@ export const fetchCarById = async (
   }
 };
 
-// Search cars for simulation dropdown
+// Search cars for simulation dropdown (showroom only)
 export const searchCarsForSimulation = async (
   search: string,
   limit: number = 20
@@ -242,8 +210,9 @@ export const searchCarsForSimulation = async (
         price,
         location_city
       `)
-      .eq('status', 'available')
-      .eq('moderation_status', 'approved')
+      .eq('seller_type', 'showroom') // Only showroom cars
+      .eq('status', 'available') // Only available cars
+      .eq('moderation_status', 'approved') // Only approved cars
       .or(`
         title.ilike.%${search}%
       `)
@@ -251,11 +220,9 @@ export const searchCarsForSimulation = async (
       .limit(limit);
 
     if (error) {
-      console.error('Supabase search error:', error);
+      console.error('Error searching showroom cars:', error);
       throw error;
     }
-
-    console.log('Search results:', data); // Debug log
 
     return (data || []).map((car: any) => ({
       id: car.id,

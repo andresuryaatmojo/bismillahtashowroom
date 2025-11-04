@@ -51,6 +51,8 @@ import HalamanChatAdmin from './pages/HalamanChatAdmin';
 import AdminKnowledgeChatbot from './pages/AdminKnowledgeChatbot';
 import HalamanParameterKredit from './pages/HalamanParameterKredit';
 import HalamanKelolaTradeIn from './pages/HalamanKelolaTradeIn';
+import HalamanPembayaranIklan from './pages/HalamanPembayaranIklan';
+import HalamanPaketIklan from './pages/HalamanPaketIklan';
 
 // OTHER COMPONENTS
 import LoginForm from './components/LoginForm';
@@ -387,6 +389,22 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="admin">
                 <HalamanParameterKredit />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/pembayaran-iklan"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanPembayaranIklan />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/paket-iklan"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <HalamanPaketIklan />
               </ProtectedRoute>
             }
           />

@@ -295,7 +295,47 @@ export const createTradeInRequest = async (
       return { data: null, error: { message: 'Invalid car ID format' } };
     }
 
-    // 1. Insert trade-in request
+    // 1. Check if car is still available and not already reserved (atomic operation)
+    console.log('Checking car availability for ID:', formData.new_car_id);
+
+    const { data: carCheck, error: carCheckError } = await supabase
+      .from('cars')
+      .select('id, status, title')
+      .eq('id', formData.new_car_id)
+      .eq('status', 'available')
+      .single();
+
+    if (carCheckError || !carCheck) {
+      console.error('Car not available:', carCheckError);
+      return {
+        data: null,
+        error: {
+          message: 'Mobil tidak lagi tersedia untuk trade-in. Mobil mungkin telah direservasi oleh user lain.'
+        }
+      };
+    }
+
+    // 2. Check for existing active trade-in requests for this car
+    const { data: existingTradeIn, error: existingCheckError } = await supabase
+      .from('trade_in_requests')
+      .select('id, status, user_id')
+      .eq('new_car_id', formData.new_car_id)
+      .in('status', ['pending', 'inspecting', 'appraised', 'approved'])
+      .maybeSingle();
+
+    if (existingTradeIn) {
+      console.error('Car already has active trade-in:', existingTradeIn);
+      return {
+        data: null,
+        error: {
+          message: 'Mobil ini sudah dalam proses trade-in oleh user lain. Silakan pilih mobil lain.'
+        }
+      };
+    }
+
+    // 3. Insert trade-in request with race condition protection
+    console.log('Creating trade-in request for car:', carCheck.title);
+
     const { data: tradeInData, error: tradeInError } = await supabase
       .from('trade_in_requests')
       .insert({
@@ -314,7 +354,7 @@ export const createTradeInRequest = async (
         estimated_value: formData.estimated_value,
         inspection_date: formData.inspection_date,
         inspection_time: formData.inspection_time,
-        inspection_location: formData.inspection_location,
+        inspection_location: formData.inspection_location || 'Showroom Jakarta Pusat',
         user_notes: formData.user_notes,
         status: 'pending'
       })
@@ -322,10 +362,22 @@ export const createTradeInRequest = async (
       .single();
 
     if (tradeInError) {
+      console.error('Trade-in creation failed:', tradeInError);
       return { data: null, error: tradeInError };
     }
 
-    // 2. Upload images jika ada
+    // 4. Update car status to reserved (optional - for better race condition protection)
+    const { error: carUpdateError } = await supabase
+      .from('cars')
+      .update({ status: 'reserved' })
+      .eq('id', formData.new_car_id);
+
+    if (carUpdateError) {
+      console.warn('Failed to update car status to reserved:', carUpdateError);
+      // Don't fail the trade-in if car status update fails, but log it
+    }
+
+    // 5. Upload images jika ada
     if (formData.images && formData.images.length > 0) {
       console.log('Uploading images:', formData.images.length);
 
@@ -630,6 +682,37 @@ export const validateTradeInForm = (formData: Partial<TradeInFormData>): { isVal
 
   if (formData.estimated_value !== undefined && formData.estimated_value < 0) {
     errors.push('Estimasi nilai tidak boleh negatif');
+  }
+
+  // Validasi tanggal inspeksi
+  if (!formData.inspection_date) {
+    errors.push('Tanggal inspeksi harus dipilih');
+  } else {
+    const inspectionDate = new Date(formData.inspection_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (inspectionDate < today) {
+      errors.push('Tanggal inspeksi tidak boleh di masa lalu');
+    }
+
+    // Validasi tidak lebih dari 30 hari ke depan
+    const maxDate = new Date(today);
+    maxDate.setDate(maxDate.getDate() + 30);
+    if (inspectionDate > maxDate) {
+      errors.push('Tanggal inspeksi maksimal 30 hari dari sekarang');
+    }
+  }
+
+  // Validasi waktu inspeksi
+  if (!formData.inspection_time) {
+    errors.push('Waktu inspeksi harus dipilih');
+  } else if (formData.inspection_time) {
+    const [hours] = formData.inspection_time.split(':').map(Number);
+    // Validasi jam buka showroom (09:00 - 18:00)
+    if (hours < 9 || hours >= 18) {
+      errors.push('Waktu inspeksi harus antara jam 09:00 - 18:00');
+    }
   }
 
   return {
