@@ -45,8 +45,6 @@ import HalamanJadwalTestDrive from './pages/HalamanJadwalTestDrive';
 import HalamanModerasiIklan from './pages/HalamanModerasiIklan';
 import HalamanModerasiUlasan from './pages/HalamanModerasiUlasan';
 import HalamanExecutive from './pages/HalamanExecutive';
-import HalamanExecutiveAnalytics from './pages/HalamanExecutiveAnalytics';
-import HalamanExecutiveSystem from './pages/HalamanExecutiveSystem';
 import HalamanChatAdmin from './pages/HalamanChatAdmin';
 import AdminKnowledgeChatbot from './pages/AdminKnowledgeChatbot';
 import HalamanParameterKredit from './pages/HalamanParameterKredit';
@@ -418,23 +416,7 @@ const AppContent: React.FC = () => {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/executive/analytics"
-            element={
-              <ProtectedRoute requiredRole="owner">
-                <HalamanExecutiveAnalytics />
-              </ProtectedRoute>
-            }
-          />
-              <Route
-            path="/executive/system"
-            element={
-              <ProtectedRoute requiredRole="owner">
-                <HalamanExecutiveSystem />
-              </ProtectedRoute>
-            }
-          />
-            <Route
+                <Route
             path="/executive/kemitraan"
             element={
               <ProtectedRoute requiredRole="owner">
