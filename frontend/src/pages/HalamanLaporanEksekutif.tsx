@@ -501,6 +501,7 @@ const HalamanLaporanEksekutif = () => {
     }));
   };
 
+  
   const updateRecipient = (index: number, field: string, value: string) => {
     setDistributionData(prev => ({
       ...prev,
@@ -510,6 +511,7 @@ const HalamanLaporanEksekutif = () => {
     }));
   };
 
+  
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':

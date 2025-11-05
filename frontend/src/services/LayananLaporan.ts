@@ -15,6 +15,7 @@ export interface Report {
   summary_data?: any;
   file_path?: string;
   file_url?: string;
+  google_drive_url?: string;
   file_format: string;
   file_size?: number;
   status: string;
@@ -30,7 +31,7 @@ export interface Report {
   generated_at?: string | Date;
   created_at: string | Date;
   updated_at: string | Date;
-}
+    }
 
 export interface ReportDistribution {
   id: string;
@@ -44,6 +45,7 @@ export interface ReportDistribution {
   delivered_at?: string | Date;
   created_at: string | Date;
 }
+
 
 export interface ReportGenerationRequest {
   report_type: string;
@@ -124,7 +126,8 @@ export const DISTRIBUTION_METHODS = [
   { value: 'email', label: 'Email', icon: '📧' },
   { value: 'download', label: 'Download', icon: '⬇️' },
   { value: 'notification', label: 'Notifikasi', icon: '🔔' },
-  { value: 'auto', label: 'Otomatis', icon: '🤖' }
+  { value: 'auto', label: 'Otomatis', icon: '🤖' },
+  { value: 'google_drive', label: 'Google Drive', icon: '☁️' }
 ] as const;
 
 class LayananLaporan {
@@ -641,7 +644,80 @@ class LayananLaporan {
 
     setTimeout(async () => {
       try {
-        // In a real app, this would actually send emails/notifications
+        // Get report details for Google Drive upload
+        const { data: report } = await supabase
+          .from('reports')
+          .select('*')
+          .eq('id', reportId)
+          .single();
+
+        // Handle Google Drive upload
+        if (method === 'google_drive' && report?.file_url) {
+          try {
+            const GoogleDriveService = (await import('./GoogleDriveService')).default;
+            const driveService = new GoogleDriveService();
+
+            // Get file extension from file format
+            const fileExtensions: { [key: string]: string } = {
+              'pdf': 'pdf',
+              'excel': 'xlsx',
+              'csv': 'csv',
+              'json': 'json'
+            };
+
+            const fileExt = fileExtensions[report.file_format] || 'pdf';
+            const fileName = `${report.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${fileExt}`;
+
+            // Get mime types
+            const mimeTypes: { [key: string]: string } = {
+              'pdf': 'application/pdf',
+              'excel': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              'csv': 'text/csv',
+              'json': 'application/json'
+            };
+
+            const mimeType = mimeTypes[report.file_format] || 'application/pdf';
+
+            // Upload to Google Drive
+            const driveUrl = await driveService.uploadFromUrl(
+              report.file_url,
+              fileName,
+              mimeType
+            );
+
+            // Update report with Google Drive URL
+            await supabase
+              .from('reports')
+              .update({
+                google_drive_url: driveUrl
+              })
+              .eq('id', reportId);
+
+            console.log('[LayananLaporan] Report uploaded to Google Drive:', driveUrl);
+          } catch (driveError: any) {
+            console.error('[LayananLaporan] Error uploading to Google Drive:', driveError);
+
+            // Update report status to failed with error message
+            await supabase
+              .from('reports')
+              .update({
+                error_message: `Google Drive upload failed: ${driveError.message || 'Unknown error'}`
+              })
+              .eq('id', reportId);
+
+            // Update distribution status to failed
+            await supabase
+              .from('report_distributions')
+              .update({
+                status: 'failed',
+                sent_at: new Date().toISOString()
+              })
+              .eq('report_id', reportId)
+              .eq('status', 'pending');
+          }
+        }
+
+        // Update distribution records
         const { data: distributions } = await supabase
           .from('report_distributions')
           .select('id')
@@ -1355,71 +1431,6 @@ class LayananLaporan {
     text += `End of Report\n`;
 
     return text;
-  }
-
-  private generateExcelReport(reportData: any, reportType: string): string {
-    // Generate Excel-style tabular report
-    let excelContent = '';
-
-    switch (reportType) {
-      case 'sales':
-        excelContent = 'LAPORAN PENJUALAN - EXCEL FORMAT\n\n';
-        excelContent += 'Tanggal\tID Transaksi\tKategori\tJumlah\n';
-        if (reportData.transactions) {
-          reportData.transactions.forEach((t: any) => {
-            const date = new Date(t.created_at).toLocaleDateString('id-ID');
-            const category = (t.listings as any)?.car_categories?.name || 'Unknown';
-            const amount = (t.total_amount || 0).toLocaleString('id-ID');
-            excelContent += `${date}\t${t.id}\t${category}\tRp ${amount}\n`;
-          });
-        }
-        excelContent += '\n\nRINGKASAN\n';
-        excelContent += `Total Pendapatan\tRp ${(reportData.summary?.totalRevenue || 0).toLocaleString('id-ID')}\n`;
-        excelContent += `Total Transaksi\t${reportData.summary?.totalTransactions || 0}\n`;
-        excelContent += `Rata-rata Transaksi\tRp ${(reportData.summary?.averageTransactionValue || 0).toLocaleString('id-ID')}\n`;
-        break;
-
-      case 'financial':
-        excelContent = 'LAPORAN KEUANGAN - EXCEL FORMAT\n\n';
-        excelContent += 'Metode Pembayaran\tJumlah\tPersentase\n';
-        if (reportData.revenueByPaymentMethod) {
-          const total = reportData.summary?.totalRevenue || 1;
-          Object.entries(reportData.revenueByPaymentMethod).forEach(([method, amount]: [string, any]) => {
-            const percentage = ((amount / total) * 100).toFixed(2);
-            const formattedAmount = (amount || 0).toLocaleString('id-ID');
-            excelContent += `${method}\tRp ${formattedAmount}\t${percentage}%\n`;
-          });
-        }
-        excelContent += `\nTotal Pendapatan\tRp ${(reportData.summary?.totalRevenue || 0).toLocaleString('id-ID')}\t100%\n`;
-        break;
-
-      case 'inventory':
-        excelContent = 'LAPORAN INVENTORY - EXCEL FORMAT\n\n';
-        excelContent = 'Kategori\tJumlah Kendaraan\tNilai Total\n';
-        if (reportData.inventoryByCategory) {
-          Object.entries(reportData.inventoryByCategory).forEach(([category, count]: [string, any]) => {
-            excelContent += `${category}\t${count}\tRp ${(count * 200000000).toLocaleString('id-ID')}\n`; // Estimasi harga rata-rata
-          });
-        }
-        excelContent += `\nTotal Kendaraan\t${reportData.summary?.totalVehicles || 0}\n`;
-        excelContent += `Total Nilai Inventory\tRp ${(reportData.summary?.totalInventoryValue || 0).toLocaleString('id-ID')}\n`;
-        break;
-
-      default:
-        // Generic format for other report types
-        excelContent = `LAPORAN ${reportType.toUpperCase()} - EXCEL FORMAT\n\n`;
-        excelContent += 'Metrik\tNilai\n';
-        if (reportData.summary) {
-          Object.entries(reportData.summary).forEach(([key, value]: [string, any]) => {
-            if (typeof value === 'number') {
-              excelContent += `${key}\t${value.toLocaleString('id-ID')}\n`;
-            }
-          });
-        }
-    }
-
-    excelContent += '\n\nGenerated: ' + new Date().toLocaleString('id-ID');
-    return excelContent;
   }
 }
 

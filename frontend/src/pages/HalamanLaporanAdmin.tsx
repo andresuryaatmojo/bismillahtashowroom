@@ -47,7 +47,8 @@ import {
   ShoppingCart,
   Package,
   Activity,
-  Info
+  Info,
+  Cloud
 } from 'lucide-react';
 
 import LayananLaporan, {
@@ -245,7 +246,7 @@ const HalamanLaporanAdmin = () => {
           name: r.name
         }));
 
-      if (recipients.length === 0) {
+      if (recipients.length === 0 && distributionData.method !== 'google_drive') {
         setState(prev => ({
           ...prev,
           error: 'Minimal satu penerima harus diisi',
@@ -290,6 +291,65 @@ const HalamanLaporanAdmin = () => {
       setState(prev => ({
         ...prev,
         error: 'Terjadi kesalahan saat mendistribusikan laporan',
+        isLoading: false
+      }));
+    }
+  };
+
+  const handleUploadToGoogleDrive = async (report: Report) => {
+    if (!report) return;
+
+    try {
+      setState(prev => ({ ...prev, isLoading: true, error: null }));
+
+      const result = await laporanService.distributeReport(
+        report.id,
+        [], // No recipients needed for Google Drive
+        'google_drive'
+      );
+
+      if (result.success) {
+        setState(prev => ({
+          ...prev,
+          success: '✅ Laporan berhasil diupload ke Google Drive! Memperbarui data...',
+          isLoading: false
+        }));
+
+        // Reload reports to get updated Google Drive URL
+        await loadReports();
+
+        setState(prev => ({
+          ...prev,
+          success: '✅ Upload selesai! Laporan tersedia di Google Drive.'
+        }));
+
+        // Clear success message after 5 seconds
+        setTimeout(() => {
+          setState(prev => ({ ...prev, success: null }));
+        }, 5000);
+      } else {
+        setState(prev => ({
+          ...prev,
+          error: `❌ ${result.error || 'Gagal upload ke Google Drive'}`,
+          isLoading: false
+        }));
+      }
+    } catch (error: any) {
+      console.error('Error uploading to Google Drive:', error);
+      let errorMessage = 'Terjadi kesalahan saat upload ke Google Drive';
+
+      // Check for specific Google API errors
+      if (error.message?.includes('credentials not configured')) {
+        errorMessage = '❌ Google API credentials belum diatur. Silakan cek file .env.local';
+      } else if (error.message?.includes('failed to load')) {
+        errorMessage = '❌ Google API gagal dimuat. Silakan refresh halaman dan coba lagi';
+      } else if (error.message?.includes('not properly initialized')) {
+        errorMessage = '❌ Google API belum siap. Silakan tunggu beberapa saat dan coba lagi';
+      }
+
+      setState(prev => ({
+        ...prev,
+        error: errorMessage,
         isLoading: false
       }));
     }
@@ -448,6 +508,7 @@ const HalamanLaporanAdmin = () => {
     }));
   };
 
+  
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
@@ -531,6 +592,39 @@ const HalamanLaporanAdmin = () => {
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${state.isLoading ? 'animate-spin' : ''}`} />
               Refresh
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  setState(prev => ({ ...prev, isLoading: true, error: null }));
+
+                  // Test Google Drive API initialization
+                  const GoogleDriveService = (await import('../services/GoogleDriveService')).default;
+                  const driveService = new GoogleDriveService();
+                  await driveService.initialize();
+
+                  setState(prev => ({
+                    ...prev,
+                    success: '✅ Google Drive API siap digunakan!',
+                    isLoading: false
+                  }));
+
+                  setTimeout(() => {
+                    setState(prev => ({ ...prev, success: null }));
+                  }, 3000);
+                } catch (error: any) {
+                  setState(prev => ({
+                    ...prev,
+                    error: `❌ ${error.message || 'Google Drive API tidak siap'}`,
+                    isLoading: false
+                  }));
+                }
+              }}
+              disabled={state.isLoading}
+            >
+              <Cloud className="h-4 w-4 mr-2" />
+              Test Google Drive
             </Button>
             <Dialog open={state.showCreateDialog} onOpenChange={(open) => setState(prev => ({ ...prev, showCreateDialog: open }))}>
               <DialogTrigger asChild>
@@ -930,6 +1024,11 @@ const HalamanLaporanAdmin = () => {
                                     setState(prev => ({ ...prev, selectedReport: report, showDistributionDialog: true }));
                                   }}
                                 />
+                                <ActionButton
+                                  icon={<Cloud className="h-4 w-4" />}
+                                  title="Upload ke Google Drive"
+                                  onClick={() => handleUploadToGoogleDrive(report)}
+                                />
                               </>
                             )}
 
@@ -968,6 +1067,23 @@ const HalamanLaporanAdmin = () => {
                                         <pre className="text-xs bg-gray-100 p-2 rounded mt-1">
                                           {JSON.stringify(state.selectedReport.summary_data, null, 2)}
                                         </pre>
+                                      </div>
+                                    )}
+
+                                    {state.selectedReport.google_drive_url && (
+                                      <div>
+                                        <Label>Google Drive URL</Label>
+                                        <div className="flex items-center gap-2 mt-1">
+                                          <a
+                                            href={state.selectedReport.google_drive_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:text-blue-800 text-sm underline flex items-center gap-1"
+                                          >
+                                            <Cloud className="h-4 w-4" />
+                                            Buka di Google Drive
+                                          </a>
+                                        </div>
                                       </div>
                                     )}
                                   </div>

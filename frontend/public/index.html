@@ -16,7 +16,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
+
+    <!-- Google APIs -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+
+    <!-- Debug Google API Loading -->
+    <script>
+      window.addEventListener('load', function() {
+        console.log('📋 Google API Loading Status:');
+        console.log('  - gapi defined:', typeof gapi !== 'undefined');
+        console.log('  - google defined:', typeof google !== 'undefined');
+        console.log('  - google.accounts defined:', typeof google?.accounts !== 'undefined');
+      });
+    </script>
+
     <title>Mobilindo - Jual Beli Mobil Bekas Terpercaya</title>
   </head>
   <body>
