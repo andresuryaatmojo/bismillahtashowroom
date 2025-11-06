@@ -59,8 +59,7 @@ function AdminNavigation() {
     label: 'Manajemen Mobil',
     items: [
       { path: '/admin/mobil-showroom', label: 'Mobil Showroom', icon: Car },
-      { path: '/admin/kelola-iklan', label: 'Moderasi Iklan', icon: Settings },
-      { path: '/admin/perbandingan', label: 'Data Perbandingan', icon: FileText },
+      { path: '/admin/kelola-iklan', label: 'Moderasi Iklan', icon: Settings }
     ],
   };
 
