@@ -35,9 +35,7 @@ function ExecutiveNavigation() {
     const manajemenGroup = {
         label: 'Manajemen',
         items: [
-            { path: '/executive/manajemen/strategis', label: 'Manajemen Strategis', icon: Briefcase },
             { path: '/executive/kemitraan', label: 'Kelola Kemitraan', icon: Briefcase },
-            { path: '/executive/admin-sistem', label: 'Administrasi Sistem', icon: Settings },
         ],
     };
 
