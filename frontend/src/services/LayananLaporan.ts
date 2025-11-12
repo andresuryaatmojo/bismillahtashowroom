@@ -589,7 +589,11 @@ class LayananLaporan {
         // Use CSV MIME type for Excel files since we're generating CSV content
         mimeType = 'text/csv';
       }
-      const fileUrl = `data:${mimeType};charset=utf-8,${encodeURIComponent(mockFileContent)}`;
+
+      // Create data URL but check length to avoid database constraint error
+      const dataUrl = `data:${mimeType};charset=utf-8,${encodeURIComponent(mockFileContent)}`;
+      // If data URL is too long (>500 chars), use empty string (Google Drive URL will be set later)
+      const fileUrl = dataUrl.length > 500 ? '' : dataUrl;
       const fileSize = this.calculateFileSize(reportData);
 
       // Create minimal summary for database storage (strict varchar limit)
@@ -626,12 +630,13 @@ class LayananLaporan {
     } catch (error) {
       console.error('[LayananLaporan] Error in report generation process:', error);
 
-      // Mark as failed
+      // Mark as failed (truncate error message to 500 chars)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       await supabase
         .from('reports')
         .update({
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Unknown error',
+          error_message: errorMessage.substring(0, 500),
           updated_at: new Date().toISOString()
         })
         .eq('id', reportId);
@@ -651,38 +656,69 @@ class LayananLaporan {
           .eq('id', reportId)
           .single();
 
-        // Handle Google Drive upload
-        if (method === 'google_drive' && report?.file_url) {
+        // Handle Google Drive upload with single sheet for all reports
+        if (method === 'google_drive' && report) {
           try {
             const GoogleDriveService = (await import('./GoogleDriveService')).default;
             const driveService = new GoogleDriveService();
 
-            // Get file extension from file format
-            const fileExtensions: { [key: string]: string } = {
-              'pdf': 'pdf',
-              'excel': 'xlsx',
-              'csv': 'csv',
-              'json': 'json'
-            };
+            // Initialize Google Drive Service
+            await driveService.initialize();
 
-            const fileExt = fileExtensions[report.file_format] || 'pdf';
-            const fileName = `${report.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${fileExt}`;
+            // Generate fresh data untuk SEMUA jenis laporan
+            console.log('[LayananLaporan] Generating ALL report types for single sheet...');
 
-            // Get mime types
-            const mimeTypes: { [key: string]: string } = {
-              'pdf': 'application/pdf',
-              'excel': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-              'csv': 'text/csv',
-              'json': 'application/json'
-            };
+            const allReportsData: any = {};
 
-            const mimeType = mimeTypes[report.file_format] || 'application/pdf';
+            try {
+              console.log('[LayananLaporan] Generating sales report...');
+              allReportsData.sales = await this.generateSalesReport(report.period_start, report.period_end);
+            } catch (error) {
+              console.error('[LayananLaporan] Error generating sales report:', error);
+            }
 
-            // Upload to Google Drive
-            const driveUrl = await driveService.uploadFromUrl(
-              report.file_url,
-              fileName,
-              mimeType
+            try {
+              console.log('[LayananLaporan] Generating financial report...');
+              allReportsData.financial = await this.generateFinancialReport(report.period_start, report.period_end);
+            } catch (error) {
+              console.error('[LayananLaporan] Error generating financial report:', error);
+            }
+
+            try {
+              console.log('[LayananLaporan] Generating inventory report...');
+              allReportsData.inventory = await this.generateInventoryReport();
+            } catch (error) {
+              console.error('[LayananLaporan] Error generating inventory report:', error);
+            }
+
+            try {
+              console.log('[LayananLaporan] Generating analytics report...');
+              allReportsData.analytics = await this.generateAnalyticsReport(report.period_start, report.period_end);
+            } catch (error) {
+              console.error('[LayananLaporan] Error generating analytics report:', error);
+            }
+
+            console.log('[LayananLaporan] All reports generated successfully');
+            console.log('[LayananLaporan] Generated reports:', Object.keys(allReportsData));
+
+            // Nama spreadsheet dan sheet
+            const spreadsheetName = 'Laporan_Lengkap_Showroom_Mobilindo';
+            const sheetName = 'Laporan Lengkap';
+
+            // Combine all reports into single sheet data
+            const combinedSheetData = driveService.combineAllReportsToSingleSheet(allReportsData);
+
+            console.log('[LayananLaporan] Combined sheet data created:', {
+              sheetName,
+              rowCount: combinedSheetData.length,
+              firstRows: combinedSheetData.slice(0, 10)
+            });
+
+            // Create or update spreadsheet with single sheet
+            console.log('[LayananLaporan] Updating single sheet:', sheetName, 'in spreadsheet:', spreadsheetName);
+            const driveUrl = await driveService.createOrUpdateSpreadsheet(
+              spreadsheetName,
+              [{ sheetName, data: combinedSheetData }]
             );
 
             // Update report with Google Drive URL
@@ -693,15 +729,17 @@ class LayananLaporan {
               })
               .eq('id', reportId);
 
-            console.log('[LayananLaporan] Report uploaded to Google Drive:', driveUrl);
+            console.log('[LayananLaporan] All reports uploaded to Google Drive in single sheet:', driveUrl);
+            console.log('[LayananLaporan] Total rows:', combinedSheetData.length);
           } catch (driveError: any) {
             console.error('[LayananLaporan] Error uploading to Google Drive:', driveError);
 
-            // Update report status to failed with error message
+            // Update report status to failed with error message (truncate to 500 chars)
+            const errorMsg = `Google Drive upload failed: ${driveError.message || 'Unknown error'}`;
             await supabase
               .from('reports')
               .update({
-                error_message: `Google Drive upload failed: ${driveError.message || 'Unknown error'}`
+                error_message: errorMsg.substring(0, 500)
               })
               .eq('id', reportId);
 

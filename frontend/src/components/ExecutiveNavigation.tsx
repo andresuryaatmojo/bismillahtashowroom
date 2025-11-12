@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/button';
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
 import { Home, FileText, Briefcase, Settings } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -29,15 +28,9 @@ function ExecutiveNavigation() {
         { path: '/executive', label: 'Dashboard', icon: Home },
         { path: '/executive/analytics', label: 'Analisis Bisnis', icon: FileText },
         { path: '/executive/reports', label: 'Laporan', icon: FileText },
+        { path: '/executive/kemitraan', label: 'Kelola Kemitraan', icon: Briefcase },
         { path: '/executive/system', label: 'Sistem', icon: Settings },
     ];
-
-    const manajemenGroup = {
-        label: 'Manajemen',
-        items: [
-            { path: '/executive/kemitraan', label: 'Kelola Kemitraan', icon: Briefcase },
-        ],
-    };
 
     return (
         <aside className="fixed left-0 top-0 h-screen w-64 bg-white border-r shadow-lg z-50">
@@ -69,32 +62,6 @@ function ExecutiveNavigation() {
                         );
                     })}
                 </div>
-
-                <Accordion type="single" collapsible className="space-y-1">
-                    <AccordionItem value={manajemenGroup.label}>
-                        <AccordionTrigger className="px-3 py-2 text-sm">
-                            {manajemenGroup.label}
-                        </AccordionTrigger>
-                        <AccordionContent className="space-y-1">
-                            {manajemenGroup.items.map((item) => {
-                                const IconComponent = item.icon;
-                                const isActive = location.pathname.startsWith(item.path);
-                                return (
-                                    <Link
-                                        key={item.path}
-                                        to={item.path}
-                                        className={`flex items-center gap-2 px-3 py-2 rounded hover:bg-gray-100 ${
-                                            isActive ? 'text-primary font-medium' : 'text-gray-700'
-                                        }`}
-                                    >
-                                        <IconComponent className="w-4 h-4" />
-                                        {item.label}
-                                    </Link>
-                                );
-                            })}
-                        </AccordionContent>
-                    </AccordionItem>
-                </Accordion>
             </nav>
         </aside>
     );

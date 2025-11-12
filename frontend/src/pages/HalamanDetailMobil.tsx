@@ -459,7 +459,7 @@ const HalamanDetailMobil: React.FC = () => {
               <div className="mt-4">
                 <a 
                   className="text-blue-600 hover:underline flex items-center gap-2 cursor-pointer"
-                  onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
+                  onClick={() => navigate('/simulasi')}
                 >
                   <CreditCard className="w-4 h-4" />
                   Simulasi Kredit
@@ -575,8 +575,8 @@ const HalamanDetailMobil: React.FC = () => {
                     Deskripsi
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-gray-600 leading-relaxed">
+                <CardContent className="text-left">
+                  <p className="text-gray-600 leading-relaxed text-left">
                     {car.description || 'Tidak ada deskripsi tersedia.'}
                   </p>
                 </CardContent>
@@ -845,7 +845,7 @@ const HalamanDetailMobil: React.FC = () => {
                   variant="outline"
                   size="lg"
                   className="w-full"
-                  onClick={() => navigate(`/simulasi-kredit/${car.id}`)}
+                  onClick={() => navigate('/simulasi')}
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Simulasi Kredit

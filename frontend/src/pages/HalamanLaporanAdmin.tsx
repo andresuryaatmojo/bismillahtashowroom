@@ -55,7 +55,6 @@ import LayananLaporan, {
   Report,
   ReportFilter,
   ReportGenerationRequest,
-  ADMIN_REPORT_TYPES,
   REPORT_STATUS,
   REPORT_FORMATS,
   PERIOD_TYPES,
@@ -73,7 +72,6 @@ const HalamanLaporanAdmin = () => {
     statistics: null as any,
     searchQuery: '',
     filterStatus: '',
-    filterType: '',
     filterPeriod: '',
     selectedReport: null as Report | null,
     showCreateDialog: false,
@@ -88,8 +86,8 @@ const HalamanLaporanAdmin = () => {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    report_type: '',
-    period_type: '',
+    report_type: 'custom', // Fixed: semua laporan akan ter-generate
+    period_type: 'custom', // Default: custom period (user pilih sendiri tanggal)
     period_start: '',
     period_end: '',
     file_format: 'pdf',
@@ -123,7 +121,6 @@ const HalamanLaporanAdmin = () => {
       const filter: ReportFilter = {
         search: state.searchQuery || undefined,
         status: state.filterStatus && state.filterStatus !== 'all' ? state.filterStatus : undefined,
-        report_type: state.filterType && state.filterType !== 'all' ? state.filterType : undefined,
         period_type: state.filterPeriod && state.filterPeriod !== 'all' ? state.filterPeriod : undefined
       };
 
@@ -169,6 +166,7 @@ const HalamanLaporanAdmin = () => {
 
   const handleCreateReport = async () => {
     try {
+      console.log('[HalamanLaporanAdmin] Starting report generation...');
       setState(prev => ({ ...prev, isLoading: true, error: null }));
 
       const request: ReportGenerationRequest = {
@@ -184,7 +182,11 @@ const HalamanLaporanAdmin = () => {
         schedule_cron: formData.schedule_cron || undefined
       };
 
+      console.log('[HalamanLaporanAdmin] Report request:', request);
+
       const result = await laporanService.generateReport(request, user?.id || '');
+
+      console.log('[HalamanLaporanAdmin] Report generation result:', result);
 
       if (result.success) {
         setState(prev => ({
@@ -198,8 +200,8 @@ const HalamanLaporanAdmin = () => {
         setFormData({
           title: '',
           description: '',
-          report_type: '',
-          period_type: '',
+          report_type: 'custom',
+          period_type: 'custom',
           period_start: '',
           period_end: '',
           file_format: 'pdf',
@@ -217,17 +219,23 @@ const HalamanLaporanAdmin = () => {
           setState(prev => ({ ...prev, success: null }));
         }, 3000);
       } else {
+        console.error('[HalamanLaporanAdmin] Report generation failed:', result.error);
         setState(prev => ({
           ...prev,
           error: result.error || 'Gagal membuat laporan',
           isLoading: false
         }));
       }
-    } catch (error) {
-      console.error('Error creating report:', error);
+    } catch (error: any) {
+      console.error('[HalamanLaporanAdmin] Error creating report:', error);
+      console.error('[HalamanLaporanAdmin] Error details:', {
+        message: error?.message,
+        stack: error?.stack,
+        error
+      });
       setState(prev => ({
         ...prev,
-        error: 'Terjadi kesalahan saat membuat laporan',
+        error: error?.message || 'Terjadi kesalahan saat membuat laporan',
         isLoading: false
       }));
     }
@@ -652,26 +660,16 @@ const HalamanLaporanAdmin = () => {
                     />
                   </div>
 
-                  <div>
-                    <Label htmlFor="report_type">Jenis Laporan</Label>
-                    <Select value={formData.report_type} onValueChange={(value) => setFormData(prev => ({ ...prev, report_type: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Pilih jenis laporan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ADMIN_REPORT_TYPES.map((type) => (
-                          <SelectItem key={type.value} value={type.value}>
-                            <div className="flex items-center gap-2">
-                              {getReportIcon(type.value)}
-                              <div>
-                                <div className="font-medium">{type.label}</div>
-                                <div className="text-sm text-gray-500">{type.description}</div>
-                              </div>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <Info className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-blue-900">Laporan Lengkap</p>
+                        <p className="text-xs text-blue-700 mt-1">
+                          Sistem akan menggenerate semua jenis laporan sekaligus (Penjualan, Keuangan, Inventory, dan Analytics) dalam satu file spreadsheet.
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
                   <div>
@@ -764,7 +762,7 @@ const HalamanLaporanAdmin = () => {
                     </Button>
                     <Button
                       onClick={handleCreateReport}
-                      disabled={state.isLoading || !formData.title || !formData.report_type || !formData.period_start || !formData.period_end}
+                      disabled={state.isLoading || !formData.title || !formData.period_start || !formData.period_end}
                     >
                       {state.isLoading ? (
                         <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
@@ -849,7 +847,7 @@ const HalamanLaporanAdmin = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <Label htmlFor="search">Pencarian</Label>
                 <div className="relative">
@@ -862,23 +860,6 @@ const HalamanLaporanAdmin = () => {
                     className="pl-10"
                   />
                 </div>
-              </div>
-
-              <div>
-                <Label htmlFor="filterType">Jenis Laporan</Label>
-                <Select value={state.filterType} onValueChange={(value) => setState(prev => ({ ...prev, filterType: value }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Semua jenis" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Semua jenis</SelectItem>
-                    {ADMIN_REPORT_TYPES.filter(type => type.value).map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
 
               <div>
