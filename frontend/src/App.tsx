@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { NextUIProvider } from '@nextui-org/react';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import '@n8n/chat/style.css';
+import { createChat } from '@n8n/chat';
 
 // NAVIGATION COMPONENTS
 import Navigation from './components/Navigation';
@@ -452,7 +454,29 @@ const AppContent: React.FC = () => {
 
 function App() {
   console.log('🚀 Mobilindo App initialized');
-  
+
+  // Initialize n8n chat widget
+  useEffect(() => {
+    createChat({
+      webhookUrl: 'https://n8n-dnnilcm4zr3q.nasgor.sumopod.my.id/webhook/ce580c51-8235-4f4a-8281-45df75fbeef1/chat',
+      initialMessages: [
+        'Halo! 👋',
+        'Saya asisten virtual showroom Mobilindo.',
+        'Ada yang bisa saya bantu?'
+      ],
+      i18n: {
+        en: {
+          title: 'Asisten Showroom',
+          subtitle: 'Online • Siap membantu',
+          footer: '',
+          getStarted: 'Mulai Chat',
+          inputPlaceholder: 'Ketik pesan Anda...',
+          closeButtonTooltip: 'Tutup',
+        },
+      },
+    });
+  }, []);
+
   return (
     <NextUIProvider>
       <AuthProvider>

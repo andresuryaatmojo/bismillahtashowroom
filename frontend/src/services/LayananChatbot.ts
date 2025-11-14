@@ -1571,6 +1571,7 @@ class LayananChatbot {
         encryption_enabled: true
       },
       integration_settings: {
+        webhook_url: 'https://n8n-dnnilcm4zr3q.nasgor.sumopod.my.id/webhook/ce580c51-8235-4f4a-8281-45df75fbeef1/chat',
         api_endpoints: [],
         external_services: [],
         data_sources: []
@@ -1615,6 +1616,83 @@ class LayananChatbot {
 
   private logActivity(message: string, data?: any): void {
     console.log(`[LayananChatbot] ${message}`, data || '');
+  }
+
+  // Webhook Integration Methods
+  async sendToWebhook(userMessage: string, sessionId?: string, userId?: string): Promise<{
+    success: boolean;
+    response?: string;
+    error?: string;
+    metadata?: any;
+  }> {
+    try {
+      const webhookUrl = this.konfigurasi.integration_settings.webhook_url;
+
+      if (!webhookUrl) {
+        return {
+          success: false,
+          error: 'Webhook URL tidak dikonfigurasi'
+        };
+      }
+
+      const payload = {
+        message: userMessage,
+        sessionId: sessionId || `session_${Date.now()}`,
+        userId: userId || 'anonymous',
+        timestamp: new Date().toISOString(),
+        source: 'chatbot_widget'
+      };
+
+      this.logActivity('Mengirim pesan ke webhook', payload);
+
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Webhook error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      this.logActivity('Response dari webhook diterima', data);
+
+      // Extract response text from webhook data
+      // Adjust this based on your n8n webhook response structure
+      const botResponse = data.response || data.message || data.output || 'Maaf, tidak ada respons dari server.';
+
+      return {
+        success: true,
+        response: botResponse,
+        metadata: data
+      };
+
+    } catch (error: any) {
+      this.logActivity('Error saat mengirim ke webhook', error);
+      return {
+        success: false,
+        error: error.message || 'Terjadi kesalahan saat menghubungi webhook',
+        response: 'Maaf, saya mengalami gangguan. Silakan coba lagi nanti atau hubungi admin.'
+      };
+    }
+  }
+
+  // Get webhook configuration
+  getWebhookConfig() {
+    return {
+      url: this.konfigurasi.integration_settings.webhook_url,
+      enabled: !!this.konfigurasi.integration_settings.webhook_url
+    };
+  }
+
+  // Update webhook URL
+  updateWebhookUrl(newUrl: string) {
+    this.konfigurasi.integration_settings.webhook_url = newUrl;
+    this.logActivity('Webhook URL diupdate', { newUrl });
   }
 
   // Service Info

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import LayananChatbot from '../../services/LayananChatbot';
 
 type ChatRole = 'user' | 'bot';
 type ChatItem = { id: string; role: ChatRole; content: string; ts: number };
@@ -30,6 +31,7 @@ export default function ChatbotWidget() {
   });
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement>(null);
+  const chatbotService = useRef(new LayananChatbot()).current;
 
   useEffect(() => {
     localStorage.setItem('chatbot_widget_messages', JSON.stringify(messages));
@@ -45,8 +47,32 @@ export default function ChatbotWidget() {
 
   const { user } = useAuth();
 
+  // Reset chat history when user changes (login/logout/switch account)
+  useEffect(() => {
+    const currentUserId = user?.id || 'anonymous';
+    const storedUserId = localStorage.getItem('chatbot_widget_user_id');
+
+    // If user changed, reset chat history and session
+    if (storedUserId && storedUserId !== currentUserId) {
+      // Clear chat history
+      const initialMsg = { id: crypto.randomUUID(), role: 'bot' as ChatRole, content: 'Halo! Ada yang bisa saya bantu hari ini?', ts: Date.now() };
+      setMessages([initialMsg]);
+      localStorage.setItem('chatbot_widget_messages', JSON.stringify([initialMsg]));
+
+      // Generate new session ID
+      const newSessionId = crypto.randomUUID();
+      localStorage.setItem('chatbot_widget_session_id', newSessionId);
+      setSessionId(newSessionId);
+
+      console.log('Chat history reset - User changed from', storedUserId, 'to', currentUserId);
+    }
+
+    // Store current user ID
+    localStorage.setItem('chatbot_widget_user_id', currentUserId);
+  }, [user?.id]);
+
   // Session ID khusus untuk widget hero, disimpan di localStorage
-  const [sessionId] = useState<string>(() => {
+  const [sessionId, setSessionId] = useState<string>(() => {
     try {
       const existing = localStorage.getItem('chatbot_widget_session_id');
       if (existing) return existing;
@@ -267,52 +293,66 @@ export default function ChatbotWidget() {
   };
 
   // Pindahkan send ke dalam komponen agar akses state/variabel valid
-  const send = (text?: string) => {
+  const send = async (text?: string) => {
     const content = (text ?? input).trim();
     if (!content) return;
     const userMsg: ChatItem = { id: crypto.randomUUID(), role: 'user', content, ts: Date.now() };
     setMessages((prev: ChatItem[]) => [...prev, userMsg]);
     setInput('');
 
-    // Bot response (mock)
-    setTimeout(() => {
-      const reply = getBotReply(content);
-      const botMsg: ChatItem = { id: crypto.randomUUID(), role: 'bot', content: reply, ts: Date.now() };
-      setMessages((prev: ChatItem[]) => [...prev, botMsg]);
+    // Get user info for webhook
+    const { data: u } = await supabase.auth.getUser();
+    const authId = u?.user?.id ?? null;
 
-      // Catat percakapan ke chatbot_conversations
-      (async () => {
-        try {
-          const { data: u } = await supabase.auth.getUser();
-          const authId = u?.user?.id ?? null;
+    // Send to webhook and get response
+    const webhookResult = await chatbotService.sendToWebhook(content, sessionId, authId || undefined);
 
-          // Lengkapi intent dan knowledge match
-          const intent = detectIntent(content);
-          const matchedId = await findKnowledgeMatch(content);
+    let reply: string;
+    let useWebhook = webhookResult.success;
 
-          const { error } = await supabase.from('chatbot_conversations').insert([{
-            user_id: authId,
-            session_id: sessionId,
-            user_question: content,
-            bot_response: reply,
-            matched_knowledge_id: matchedId,     // diisi dari FTS
-            detected_intent: intent,             // diisi dari keyword detection
-            confidence_score: null,
-            extracted_entities: null,
-            is_helpful: null,
-            feedback_text: null,
-            is_escalated: false,
-            escalated_to_room_id: null
-          }]);
+    if (webhookResult.success && webhookResult.response) {
+      // Use webhook response
+      reply = webhookResult.response;
+    } else {
+      // Fallback to local getBotReply if webhook fails
+      console.warn('Webhook gagal, menggunakan fallback response:', webhookResult.error);
+      reply = getBotReply(content);
+      useWebhook = false;
+    }
 
-          if (error) {
-            console.error('Insert chatbot_conversations ditolak oleh RLS:', error);
-          }
-        } catch (err) {
-          console.error('Gagal mencatat percakapan (widget) ke chatbot_conversations:', err);
+    // Display bot response
+    const botMsg: ChatItem = { id: crypto.randomUUID(), role: 'bot', content: reply, ts: Date.now() };
+    setMessages((prev: ChatItem[]) => [...prev, botMsg]);
+
+    // Catat percakapan ke chatbot_conversations
+    (async () => {
+      try {
+        // Lengkapi intent dan knowledge match
+        const intent = detectIntent(content);
+        const matchedId = await findKnowledgeMatch(content);
+
+        const { error } = await supabase.from('chatbot_conversations').insert([{
+          user_id: authId,
+          session_id: sessionId,
+          user_question: content,
+          bot_response: reply,
+          matched_knowledge_id: matchedId,     // diisi dari FTS
+          detected_intent: intent,             // diisi dari keyword detection
+          confidence_score: useWebhook ? 1.0 : null,  // Mark webhook responses with higher confidence
+          extracted_entities: useWebhook ? webhookResult.metadata : null,
+          is_helpful: null,
+          feedback_text: null,
+          is_escalated: false,
+          escalated_to_room_id: null
+        }]);
+
+        if (error) {
+          console.error('Insert chatbot_conversations ditolak oleh RLS:', error);
         }
-      })();
-    }, 500);
+      } catch (err) {
+        console.error('Gagal mencatat percakapan (widget) ke chatbot_conversations:', err);
+      }
+    })();
   };
 
   return (

@@ -3,7 +3,7 @@ import React from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ArrowUpRight, CirclePlay } from 'lucide-react';
-import ChatbotWidget from '../chat/ChatbotWidget';
+// import ChatbotWidget from '../chat/ChatbotWidget'; // Disabled: Using n8n official chat widget in App.tsx
 
 const Hero: React.FC = () => {
   return (
@@ -44,7 +44,8 @@ const Hero: React.FC = () => {
         </div>
       </div>
       {/* Widget chatbot floating dengan tombol eskalasi ke admin */}
-      <ChatbotWidget />
+      {/* <ChatbotWidget /> */}
+      {/* Note: Now using n8n official chat widget initialized in App.tsx */}
     </div>
   );
 };
