@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { NextUIProvider } from '@nextui-org/react';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import '@n8n/chat/style.css';
 import { createChat } from '@n8n/chat';
@@ -67,17 +67,18 @@ import HalamanAnalisisBisnis from './pages/HalamanAnalisisBisnis';
 // Komponen: AppContent
 const AppContent: React.FC = () => {
   const location = useLocation();
-  
+  const { user } = useAuth();
+
   const authPages = ['/login', '/register'];
   const guestPages = [
-    '/', 
-    '/katalog', 
-    '/artikel', 
+    '/',
+    '/katalog',
+    '/artikel',
     '/tentang',
-    '/kemitraan', 
-    '/simulasi', 
-    '/perbandingan', 
-    '/test-drive', 
+    '/kemitraan',
+    '/simulasi',
+    '/perbandingan',
+    '/test-drive',
     '/trade-in',
     '/wishlist',
     '/chat',
@@ -89,18 +90,100 @@ const AppContent: React.FC = () => {
     '/pembelian',
     '/transaksi'
   ];
-  
+
   const isAuthPage = authPages.includes(location.pathname);
-  
+
   // Check if current path is guest page or artikel detail page
   const isGuestPage =
     guestPages.includes(location.pathname) ||
     location.pathname.startsWith('/artikel/') ||
     location.pathname.startsWith('/mobil/');
-  
+
   const isAuthenticatedPage = !isAuthPage && !isGuestPage;
   const isAdminPage = location.pathname.startsWith('/admin');
   const isExecutivePage = location.pathname.startsWith('/executive');
+
+  // Initialize n8n chat widget hanya untuk halaman pengguna (bukan admin atau executive)
+  useEffect(() => {
+    // Tambahkan class pada body untuk styling
+    if (isAdminPage) {
+      document.body.classList.add('admin-page');
+      document.body.classList.remove('executive-page', 'user-page');
+    } else if (isExecutivePage) {
+      document.body.classList.add('executive-page');
+      document.body.classList.remove('admin-page', 'user-page');
+    } else {
+      document.body.classList.add('user-page');
+      document.body.classList.remove('admin-page', 'executive-page');
+    }
+
+    // Fungsi untuk menghapus semua elemen chatbot
+    const removeChatbotWidget = () => {
+      // Hapus semua elemen yang terkait dengan n8n chat
+      const selectors = [
+        '[data-n8n-chat]',
+        '.n8n-chat',
+        '[class*="n8n"]',
+        'iframe[src*="n8n"]',
+        'div[id*="n8n"]'
+      ];
+
+      selectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => el.remove());
+      });
+    };
+
+    // Hanya tampilkan widget chatbot jika:
+    // 1. Bukan di halaman admin
+    // 2. Bukan di halaman executive
+    // 3. User bukan admin atau owner
+    const shouldShowChatbot = !isAdminPage && !isExecutivePage &&
+                               (!user || (user.role !== 'admin' && user.role !== 'owner'));
+
+    if (shouldShowChatbot) {
+      // Cek apakah widget sudah ada, kalau belum baru buat
+      const existingWidget = document.querySelector('[data-n8n-chat]');
+      if (!existingWidget) {
+        createChat({
+          webhookUrl: 'https://n8n-dnnilcm4zr3q.nasgor.sumopod.my.id/webhook/ce580c51-8235-4f4a-8281-45df75fbeef1/chat',
+          initialMessages: [
+            'Halo! 👋',
+            'Saya asisten virtual showroom Mobilindo.',
+            'Ada yang bisa saya bantu?'
+          ],
+          i18n: {
+            en: {
+              title: 'Asisten Showroom',
+              subtitle: 'Online • Siap membantu',
+              footer: '',
+              getStarted: 'Mulai Chat',
+              inputPlaceholder: 'Ketik pesan Anda...',
+              closeButtonTooltip: 'Tutup',
+            },
+          },
+        });
+      }
+    } else {
+      // Hapus widget chatbot jika berada di halaman admin atau executive
+      removeChatbotWidget();
+
+      // Monitor dan hapus jika widget muncul kembali
+      const observer = new MutationObserver(() => {
+        if (isAdminPage || isExecutivePage) {
+          removeChatbotWidget();
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      // Cleanup observer saat component unmount atau dependencies berubah
+      return () => observer.disconnect();
+    }
+  }, [isAdminPage, isExecutivePage, user?.role]);
 
   return (
     <div className="App">
@@ -463,28 +546,6 @@ const AppContent: React.FC = () => {
 
 function App() {
   console.log('🚀 Mobilindo App initialized');
-
-  // Initialize n8n chat widget
-  useEffect(() => {
-    createChat({
-      webhookUrl: 'https://n8n-dnnilcm4zr3q.nasgor.sumopod.my.id/webhook/ce580c51-8235-4f4a-8281-45df75fbeef1/chat',
-      initialMessages: [
-        'Halo! 👋',
-        'Saya asisten virtual showroom Mobilindo.',
-        'Ada yang bisa saya bantu?'
-      ],
-      i18n: {
-        en: {
-          title: 'Asisten Showroom',
-          subtitle: 'Online • Siap membantu',
-          footer: '',
-          getStarted: 'Mulai Chat',
-          inputPlaceholder: 'Ketik pesan Anda...',
-          closeButtonTooltip: 'Tutup',
-        },
-      },
-    });
-  }, []);
 
   return (
     <NextUIProvider>

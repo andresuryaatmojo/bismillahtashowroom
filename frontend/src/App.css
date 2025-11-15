@@ -125,8 +125,17 @@
   .container {
     padding: 0 10px;
   }
-  
+
   .main-content {
     padding: 10px 0;
   }
+}
+
+/* Hide chatbot widget on admin and executive pages */
+.admin-page [data-n8n-chat],
+.executive-page [data-n8n-chat] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }

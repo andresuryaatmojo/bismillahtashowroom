@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import {
   Card,
   CardContent,
@@ -27,28 +28,18 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
   ComposedChart
 } from 'recharts';
 import {
   TrendingUp,
   TrendingDown,
-  AlertTriangle,
-  CheckCircle,
-  Lightbulb,
   Users,
   ShoppingCart,
   DollarSign,
-  Target,
   Activity,
   BarChart3,
   PieChart as PieChartIcon,
   Calendar,
-  Award,
   AlertCircle,
   ArrowUpRight,
   ArrowDownRight,
@@ -57,11 +48,8 @@ import {
   Download,
   Filter,
   Brain,
-  Globe,
-  Zap,
   Heart,
   Star,
-  ThumbsUp,
   TrendingUpIcon
 } from 'lucide-react';
 
@@ -73,7 +61,12 @@ const HalamanAnalisisBisnis = () => {
     isLoading: false,
     error: null as string | null,
     activeTab: 'overview',
-    selectedPeriod: 'month'
+    selectedPeriod: 'month',
+    salesTrendData: [] as any[],
+    customerSegmentData: [] as any[],
+    healthIndicators: [] as any[],
+    revenueBreakdown: [] as any[],
+    customerBehaviorData: [] as any[]
   });
 
   // Mock data untuk analisis trend
@@ -88,107 +81,57 @@ const HalamanAnalisisBisnis = () => {
 
   // Customer segmentation data
   const customerSegmentData = [
-    { segment: 'Premium Buyers', value: 28, revenue: 12500000000, satisfaction: 4.8 },
-    { segment: 'Regular Customers', value: 42, revenue: 8200000000, satisfaction: 4.2 },
-    { segment: 'First-time Buyers', value: 22, revenue: 4800000000, satisfaction: 3.9 },
-    { segment: 'Trade-in Customers', value: 8, revenue: 2100000000, satisfaction: 4.5 }
-  ];
-
-  // Competitive analysis
-  const competitiveData = [
-    { metric: 'Harga', us: 85, competitor: 75 },
-    { metric: 'Kualitas', us: 90, competitor: 85 },
-    { metric: 'Layanan', us: 95, competitor: 80 },
-    { metric: 'Inovasi', us: 88, competitor: 92 },
-    { metric: 'Brand', us: 82, competitor: 88 },
-    { metric: 'Pengalaman', us: 93, competitor: 78 }
+    { segment: 'Pembeli Premium', value: 28, revenue: 12500000000, satisfaction: 4.8 },
+    { segment: 'Pelanggan Reguler', value: 42, revenue: 8200000000, satisfaction: 4.2 },
+    { segment: 'Pembeli Pertama', value: 22, revenue: 4800000000, satisfaction: 3.9 },
+    { segment: 'Pelanggan Trade-in', value: 8, revenue: 2100000000, satisfaction: 4.5 }
   ];
 
   // Business health indicators
   const healthIndicators = [
     {
-      category: 'Revenue Health',
+      category: 'Kesehatan Pendapatan',
       score: 85,
       status: 'healthy',
       trend: 'up',
       indicators: [
-        { name: 'Revenue Growth', value: '+15.2%', status: 'good' },
-        { name: 'Profit Margin', value: '15.8%', status: 'good' },
-        { name: 'Cash Flow', value: 'Positif', status: 'good' }
+        { name: 'Pertumbuhan Pendapatan', value: '+15.2%', status: 'good' },
+        { name: 'Margin Keuntungan', value: '15.8%', status: 'good' },
+        { name: 'Arus Kas', value: 'Positif', status: 'good' }
       ]
     },
     {
-      category: 'Customer Health',
+      category: 'Kesehatan Pelanggan',
       score: 78,
       status: 'moderate',
       trend: 'up',
       indicators: [
-        { name: 'Retention Rate', value: '82%', status: 'good' },
-        { name: 'Churn Rate', value: '18%', status: 'warning' },
-        { name: 'NPS Score', value: '65', status: 'good' }
+        { name: 'Tingkat Retensi', value: '82%', status: 'good' },
+        { name: 'Tingkat Churn', value: '18%', status: 'warning' },
+        { name: 'Skor NPS', value: '65', status: 'good' }
       ]
     },
     {
-      category: 'Operational Health',
+      category: 'Kesehatan Operasional',
       score: 92,
       status: 'healthy',
       trend: 'stable',
       indicators: [
-        { name: 'Efficiency', value: '94%', status: 'good' },
-        { name: 'Inventory Turnover', value: '8.2x', status: 'good' },
-        { name: 'Lead Time', value: '12 hari', status: 'good' }
+        { name: 'Efisiensi', value: '94%', status: 'good' },
+        { name: 'Perputaran Inventori', value: '8.2x', status: 'good' },
+        { name: 'Waktu Tunggu', value: '12 hari', status: 'good' }
       ]
     },
     {
-      category: 'Market Position',
+      category: 'Posisi Pasar',
       score: 72,
       status: 'moderate',
       trend: 'up',
       indicators: [
-        { name: 'Market Share', value: '15.2%', status: 'good' },
-        { name: 'Brand Awareness', value: '68%', status: 'warning' },
-        { name: 'Competitive Index', value: '7.8/10', status: 'good' }
+        { name: 'Pangsa Pasar', value: '15.2%', status: 'good' },
+        { name: 'Kesadaran Merek', value: '68%', status: 'warning' },
+        { name: 'Indeks Kompetitif', value: '7.8/10', status: 'good' }
       ]
-    }
-  ];
-
-  // Strategic insights
-  const insights = [
-    {
-      type: 'opportunity',
-      priority: 'high',
-      title: 'Potensi Pertumbuhan Segmen Premium',
-      description: 'Segmen premium menunjukkan pertumbuhan 32% dengan margin tertinggi. Rekomendasikan peningkatan inventori kendaraan premium.',
-      impact: '+Rp 2.1M revenue potensial',
-      icon: TrendingUp,
-      color: 'green'
-    },
-    {
-      type: 'warning',
-      priority: 'medium',
-      title: 'Penurunan Conversion Rate Regional Bandung',
-      description: 'Conversion rate di Bandung turun 8.2% bulan ini. Perlu evaluasi strategi marketing dan kualitas leads.',
-      impact: '-Rp 850jt revenue loss',
-      icon: AlertTriangle,
-      color: 'yellow'
-    },
-    {
-      type: 'insight',
-      priority: 'medium',
-      title: 'Pola Pembelian Berubah ke SUV',
-      description: 'Tren pembelian SUV naik 42% YoY. Pertimbangkan realokasi inventori dan campaign targeting.',
-      impact: 'Strategic shift recommended',
-      icon: Lightbulb,
-      color: 'blue'
-    },
-    {
-      type: 'success',
-      priority: 'low',
-      title: 'Customer Satisfaction Meningkat',
-      description: 'NPS score naik dari 58 ke 65 dalam 3 bulan terakhir. Inisiatif customer service berjalan efektif.',
-      impact: '+12% retention improvement',
-      icon: ThumbsUp,
-      color: 'green'
     }
   ];
 
@@ -224,17 +167,284 @@ const HalamanAnalisisBisnis = () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      // Simulasi loading data analisis
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // 1. Fetch Sales Trend Data (last 6 months)
+      const salesTrendData = await fetchSalesTrendData();
 
-      setState(prev => ({ ...prev, isLoading: false }));
+      // 2. Fetch Customer Segmentation Data
+      const customerSegmentData = await fetchCustomerSegmentation();
+
+      // 3. Calculate Business Health Indicators
+      const healthIndicators = await calculateHealthIndicators();
+
+      // 4. Fetch Revenue Breakdown
+      const revenueBreakdown = await fetchRevenueBreakdown();
+
+      // 5. Fetch Customer Behavior Data
+      const customerBehaviorData = await fetchCustomerBehaviorData();
+
+      setState(prev => ({
+        ...prev,
+        salesTrendData,
+        customerSegmentData,
+        healthIndicators,
+        revenueBreakdown,
+        customerBehaviorData,
+        isLoading: false
+      }));
     } catch (error) {
+      console.error('Error loading analytics data:', error);
       setState(prev => ({
         ...prev,
         error: 'Gagal memuat data analisis',
         isLoading: false
       }));
     }
+  };
+
+  const fetchSalesTrendData = async () => {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const salesByMonth = [];
+    const now = new Date();
+
+    for (let i = 5; i >= 0; i--) {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextMonthDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('id, total_amount, created_at')
+        .eq('status', 'completed')
+        .gte('created_at', monthDate.toISOString())
+        .lt('created_at', nextMonthDate.toISOString());
+
+      if (error) {
+        console.error('Error fetching sales trend:', error);
+        continue;
+      }
+
+      const sales = data?.length || 0;
+      const prevSales = i > 0 ? (salesByMonth[salesByMonth.length - 1]?.sales || 1) : 1;
+      const growth: number = i > 0 ? ((sales - (salesByMonth[salesByMonth.length - 1]?.sales || 0)) / prevSales) * 100 : 0;
+
+      salesByMonth.push({
+        month: monthNames[monthDate.getMonth()],
+        sales,
+        growth: parseFloat(growth.toFixed(1)),
+        prediction: Math.round(sales * 1.05),
+        optimal: Math.round(sales * 1.1)
+      });
+    }
+
+    return salesByMonth.length > 0 ? salesByMonth : [
+      { month: 'Jan', sales: 0, growth: 0, prediction: 0, optimal: 0 },
+      { month: 'Feb', sales: 0, growth: 0, prediction: 0, optimal: 0 },
+      { month: 'Mar', sales: 0, growth: 0, prediction: 0, optimal: 0 },
+      { month: 'Apr', sales: 0, growth: 0, prediction: 0, optimal: 0 },
+      { month: 'Mei', sales: 0, growth: 0, prediction: 0, optimal: 0 },
+      { month: 'Jun', sales: 0, growth: 0, prediction: 0, optimal: 0 }
+    ];
+  };
+
+  const fetchCustomerSegmentation = async () => {
+    // Fetch all completed transactions with buyer info
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('id, total_amount, buyer_id, transaction_type')
+      .eq('status', 'completed');
+
+    if (error) {
+      console.error('Error fetching customer segmentation:', error);
+      return [];
+    }
+
+    // Segment customers by transaction type and amount
+    const premium = transactions?.filter((t: any) => parseFloat(t.total_amount) > 300000000) || [];
+    const tradeIn = transactions?.filter((t: any) => t.transaction_type === 'trade_in') || [];
+    const regular = transactions?.filter((t: any) => parseFloat(t.total_amount) <= 300000000 && parseFloat(t.total_amount) > 150000000 && t.transaction_type !== 'trade_in') || [];
+    const firstTime = transactions?.filter((t: any) => parseFloat(t.total_amount) <= 150000000) || [];
+
+    const totalTransactions = transactions?.length || 1;
+
+    return [
+      {
+        segment: 'Pembeli Premium',
+        value: Math.round((premium.length / totalTransactions) * 100),
+        revenue: premium.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount), 0),
+        satisfaction: 4.5
+      },
+      {
+        segment: 'Pelanggan Reguler',
+        value: Math.round((regular.length / totalTransactions) * 100),
+        revenue: regular.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount), 0),
+        satisfaction: 4.2
+      },
+      {
+        segment: 'Pembeli Pertama',
+        value: Math.round((firstTime.length / totalTransactions) * 100),
+        revenue: firstTime.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount), 0),
+        satisfaction: 3.9
+      },
+      {
+        segment: 'Pelanggan Trade-in',
+        value: Math.round((tradeIn.length / totalTransactions) * 100),
+        revenue: tradeIn.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount), 0),
+        satisfaction: 4.3
+      }
+    ];
+  };
+
+  const calculateHealthIndicators = async () => {
+    // Fetch necessary data for health calculations
+    const { data: transactions } = await supabase
+      .from('transactions')
+      .select('total_amount, status, created_at')
+      .eq('status', 'completed');
+
+    const { data: reviews } = await supabase
+      .from('reviews')
+      .select('rating_stars')
+      .eq('moderation_status', 'approved')
+      .eq('status', 'active');
+
+    const { count: totalUsers } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+
+    const totalRevenue = transactions?.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount || 0), 0) || 0;
+    const avgRating = reviews && reviews.length > 0
+      ? reviews.reduce((sum: number, r: any) => sum + r.rating_stars, 0) / reviews.length
+      : 0;
+
+    return [
+      {
+        category: 'Kesehatan Pendapatan',
+        score: Math.min(Math.round((totalRevenue / 10000000000) * 100), 100),
+        status: 'healthy',
+        trend: 'up',
+        indicators: [
+          { name: 'Total Pendapatan', value: `Rp ${(totalRevenue / 1000000000).toFixed(1)}M`, status: 'good' },
+          { name: 'Transaksi', value: transactions?.length || 0, status: 'good' },
+          { name: 'Rata-rata Transaksi', value: `Rp ${((totalRevenue / (transactions?.length || 1)) / 1000000).toFixed(0)}jt`, status: 'good' }
+        ]
+      },
+      {
+        category: 'Kesehatan Pelanggan',
+        score: Math.min(Math.round(avgRating * 20), 100),
+        status: avgRating >= 4 ? 'healthy' : 'moderate',
+        trend: 'up',
+        indicators: [
+          { name: 'Rating Rata-rata', value: `${avgRating.toFixed(1)}/5`, status: avgRating >= 4 ? 'good' : 'warning' },
+          { name: 'Total Review', value: reviews?.length || 0, status: 'good' },
+          { name: 'Pengguna Aktif', value: totalUsers || 0, status: 'good' }
+        ]
+      },
+      {
+        category: 'Kesehatan Operasional',
+        score: 90,
+        status: 'healthy',
+        trend: 'stable',
+        indicators: [
+          { name: 'Waktu Aktif Sistem', value: '99.9%', status: 'good' },
+          { name: 'Waktu Respons', value: '< 200ms', status: 'good' },
+          { name: 'Tingkat Error', value: '< 0.1%', status: 'good' }
+        ]
+      },
+      {
+        category: 'Posisi Pasar',
+        score: 75,
+        status: 'moderate',
+        trend: 'up',
+        indicators: [
+          { name: 'Total Listing', value: transactions?.length || 0, status: 'good' },
+          { name: 'Tingkat Konversi', value: '3.2%', status: 'warning' },
+          { name: 'Pangsa Pasar', value: '15%', status: 'good' }
+        ]
+      }
+    ];
+  };
+
+  const fetchRevenueBreakdown = async () => {
+    const { data: transactions } = await supabase
+      .from('transactions')
+      .select('total_amount, transaction_type')
+      .eq('status', 'completed');
+
+    if (!transactions || transactions.length === 0) {
+      return [];
+    }
+
+    const totalRevenue = transactions.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount || 0), 0);
+
+    const purchase = transactions.filter((t: any) => t.transaction_type === 'purchase' || !t.transaction_type);
+    const tradeIn = transactions.filter((t: any) => t.transaction_type === 'trade_in');
+    const installment = transactions.filter((t: any) => t.transaction_type === 'installment');
+
+    const purchaseRevenue = purchase.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount || 0), 0);
+    const tradeInRevenue = tradeIn.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount || 0), 0);
+    const installmentRevenue = installment.reduce((sum: number, t: any) => sum + parseFloat(t.total_amount || 0), 0);
+
+    return [
+      {
+        source: 'Penjualan Baru',
+        amount: purchaseRevenue,
+        percentage: Math.round((purchaseRevenue / totalRevenue) * 100),
+        growth: 12.5
+      },
+      {
+        source: 'Trade-in',
+        amount: tradeInRevenue,
+        percentage: Math.round((tradeInRevenue / totalRevenue) * 100),
+        growth: 8.3
+      },
+      {
+        source: 'Installment',
+        amount: installmentRevenue,
+        percentage: Math.round((installmentRevenue / totalRevenue) * 100),
+        growth: 15.7
+      }
+    ];
+  };
+
+  const fetchCustomerBehaviorData = async () => {
+    // Fetch transactions with created_at timestamps to analyze hourly patterns
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('created_at, status')
+      .eq('status', 'completed');
+
+    if (error || !transactions || transactions.length === 0) {
+      console.error('Error fetching customer behavior:', error);
+      return [];
+    }
+
+    // Group transactions by hour
+    const hourlyData: { [key: string]: { visits: number; conversions: number } } = {};
+
+    // Initialize hours from 9 AM to 5 PM
+    for (let hour = 9; hour <= 17; hour++) {
+      const hourKey = `${hour.toString().padStart(2, '0')}:00`;
+      hourlyData[hourKey] = { visits: 0, conversions: 0 };
+    }
+
+    // Count transactions per hour
+    transactions.forEach((transaction: any) => {
+      const date = new Date(transaction.created_at);
+      const hour = date.getHours();
+      if (hour >= 9 && hour <= 17) {
+        const hourKey = `${hour.toString().padStart(2, '0')}:00`;
+        hourlyData[hourKey].conversions += 1;
+        // Estimate visits as conversions * 5 (assuming ~20% conversion rate)
+        hourlyData[hourKey].visits = Math.round(hourlyData[hourKey].conversions * 5);
+      }
+    });
+
+    // Convert to array format for charts
+    return Object.entries(hourlyData).map(([hour, data]) => ({
+      hour,
+      visits: data.visits,
+      conversions: data.conversions,
+      engagement: data.conversions > 0 ? Math.min(Math.round((data.conversions / data.visits) * 100), 100) : 0
+    }));
   };
 
   const formatCurrency = (amount: number) => {
@@ -329,14 +539,31 @@ const HalamanAnalisisBisnis = () => {
           </div>
         </div>
 
+        {/* Error Alert */}
+        {state.error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600" />
+            <div>
+              <h3 className="font-medium text-red-900">Terjadi Kesalahan</h3>
+              <p className="text-sm text-red-700">{state.error}</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setState(prev => ({ ...prev, error: null }))}
+              className="ml-auto"
+            >
+              Tutup
+            </Button>
+          </div>
+        )}
+
         {/* Main Content Tabs */}
         <Tabs value={state.activeTab} onValueChange={(value) => setState(prev => ({ ...prev, activeTab: value }))}>
-          <TabsList className="grid w-full grid-cols-5 mb-6">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="customer">Customer Analytics</TabsTrigger>
-            <TabsTrigger value="revenue">Revenue Analysis</TabsTrigger>
-            <TabsTrigger value="competitive">Competitive</TabsTrigger>
-            <TabsTrigger value="insights">Strategic Insights</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 mb-6">
+            <TabsTrigger value="overview">Ringkasan</TabsTrigger>
+            <TabsTrigger value="customer">Analisis Pelanggan</TabsTrigger>
+            <TabsTrigger value="revenue">Analisis Pendapatan</TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
@@ -346,7 +573,7 @@ const HalamanAnalisisBisnis = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Activity className="h-5 w-5" />
-                  Business Health Score
+                  Skor Kesehatan Bisnis
                 </CardTitle>
                 <CardDescription>
                   Indikator kesehatan bisnis secara keseluruhan
@@ -354,7 +581,7 @@ const HalamanAnalisisBisnis = () => {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {healthIndicators.map((indicator, index) => (
+                  {(state.healthIndicators.length > 0 ? state.healthIndicators : healthIndicators).map((indicator, index) => (
                     <div
                       key={index}
                       className={`p-4 rounded-lg border ${getHealthBgColor(indicator.score)}`}
@@ -378,7 +605,7 @@ const HalamanAnalisisBisnis = () => {
                         />
                       </div>
                       <div className="space-y-1">
-                        {indicator.indicators.map((ind, idx) => (
+                        {indicator.indicators.map((ind: any, idx: number) => (
                           <div key={idx} className="flex justify-between text-xs">
                             <span className="text-gray-600">{ind.name}</span>
                             <span className="font-medium">{ind.value}</span>
@@ -405,7 +632,7 @@ const HalamanAnalisisBisnis = () => {
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={300}>
-                    <ComposedChart data={salesTrendData}>
+                    <ComposedChart data={state.salesTrendData.length > 0 ? state.salesTrendData : salesTrendData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="month" />
                       <YAxis />
@@ -438,43 +665,6 @@ const HalamanAnalisisBisnis = () => {
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
-
-              {/* Competitive Position */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Globe className="h-5 w-5" />
-                    Posisi Kompetitif
-                  </CardTitle>
-                  <CardDescription>
-                    Perbandingan dengan kompetitor utama
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <RadarChart data={competitiveData}>
-                      <PolarGrid />
-                      <PolarAngleAxis dataKey="metric" />
-                      <PolarRadiusAxis angle={90} domain={[0, 100]} />
-                      <Radar
-                        name="Kami"
-                        dataKey="us"
-                        stroke="#3b82f6"
-                        fill="#3b82f6"
-                        fillOpacity={0.6}
-                      />
-                      <Radar
-                        name="Kompetitor"
-                        dataKey="competitor"
-                        stroke="#ef4444"
-                        fill="#ef4444"
-                        fillOpacity={0.3}
-                      />
-                      <Legend />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
             </div>
           </TabsContent>
 
@@ -486,30 +676,35 @@ const HalamanAnalisisBisnis = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Users className="h-5 w-5" />
-                    Segmentasi Customer
+                    Segmentasi Pelanggan
                   </CardTitle>
                   <CardDescription>
                     Distribusi dan performa per segmen
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={350}>
                     <PieChart>
                       <Pie
-                        data={customerSegmentData}
+                        data={state.customerSegmentData.length > 0 ? state.customerSegmentData : customerSegmentData}
                         cx="50%"
                         cy="50%"
-                        labelLine={false}
-                        label={({ segment, value }: any) => `${segment}: ${value}%`}
-                        outerRadius={100}
+                        labelLine={true}
+                        label={({ value }: any) => `${value}%`}
+                        outerRadius={80}
                         fill="#8884d8"
                         dataKey="value"
                       >
-                        {customerSegmentData.map((entry, index) => (
+                        {(state.customerSegmentData.length > 0 ? state.customerSegmentData : customerSegmentData).map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={['#3b82f6', '#10b981', '#f59e0b', '#ef4444'][index]} />
                         ))}
                       </Pie>
-                      <Tooltip />
+                      <Tooltip formatter={(value: number, name: string, props: any) => [`${value}%`, props.payload.segment]} />
+                      <Legend
+                        verticalAlign="bottom"
+                        height={36}
+                        formatter={(value: string, entry: any) => entry.payload.segment}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -520,7 +715,7 @@ const HalamanAnalisisBisnis = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Activity className="h-5 w-5" />
-                    Pola Aktivitas Customer
+                    Pola Aktivitas Pelanggan
                   </CardTitle>
                   <CardDescription>
                     Pola kunjungan dan konversi per jam
@@ -528,7 +723,7 @@ const HalamanAnalisisBisnis = () => {
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={300}>
-                    <ComposedChart data={customerBehaviorData}>
+                    <ComposedChart data={state.customerBehaviorData.length > 0 ? state.customerBehaviorData : customerBehaviorData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="hour" />
                       <YAxis />
@@ -551,19 +746,19 @@ const HalamanAnalisisBisnis = () => {
             {/* Customer Segment Details */}
             <Card>
               <CardHeader>
-                <CardTitle>Detail Segmen Customer</CardTitle>
+                <CardTitle>Detail Segmen Pelanggan</CardTitle>
                 <CardDescription>
-                  Analisis mendalam per segmen customer
+                  Analisis mendalam per segmen pelanggan
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {customerSegmentData.map((segment, index) => (
+                  {(state.customerSegmentData.length > 0 ? state.customerSegmentData : customerSegmentData).map((segment, index) => (
                     <div key={index} className="p-4 border rounded-lg">
                       <div className="flex justify-between items-start mb-3">
                         <div>
                           <h4 className="font-semibold text-lg">{segment.segment}</h4>
-                          <p className="text-sm text-gray-600">{segment.value}% dari total customer</p>
+                          <p className="text-sm text-gray-600">{segment.value}% dari total pelanggan</p>
                         </div>
                         <div className="flex items-center gap-1">
                           <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
@@ -572,15 +767,15 @@ const HalamanAnalisisBisnis = () => {
                       </div>
                       <div className="grid grid-cols-3 gap-4">
                         <div>
-                          <p className="text-xs text-gray-600">Revenue Contribution</p>
+                          <p className="text-xs text-gray-600">Kontribusi Pendapatan</p>
                           <p className="font-semibold">{formatCurrency(segment.revenue)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-600">Avg. Transaction Value</p>
+                          <p className="text-xs text-gray-600">Rata-rata Transaksi</p>
                           <p className="font-semibold">{formatCurrency(segment.revenue / (segment.value * 10))}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-600">Satisfaction Score</p>
+                          <p className="text-xs text-gray-600">Skor Kepuasan</p>
                           <p className="font-semibold">{segment.satisfaction}/5.0</p>
                         </div>
                       </div>
@@ -597,7 +792,7 @@ const HalamanAnalisisBisnis = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <DollarSign className="h-5 w-5" />
-                  Breakdown Revenue Stream
+                  Rincian Sumber Pendapatan
                 </CardTitle>
                 <CardDescription>
                   Analisis sumber revenue dan pertumbuhan
@@ -605,7 +800,7 @@ const HalamanAnalisisBisnis = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {revenueBreakdown.map((item, index) => (
+                  {(state.revenueBreakdown.length > 0 ? state.revenueBreakdown : revenueBreakdown).map((item, index) => (
                     <div key={index} className="p-4 border rounded-lg">
                       <div className="flex justify-between items-center mb-2">
                         <h4 className="font-medium">{item.source}</h4>
@@ -637,7 +832,7 @@ const HalamanAnalisisBisnis = () => {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={350}>
-                  <AreaChart data={salesTrendData}>
+                  <AreaChart data={state.salesTrendData.length > 0 ? state.salesTrendData : salesTrendData}>
                     <defs>
                       <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
@@ -657,173 +852,6 @@ const HalamanAnalisisBisnis = () => {
                     />
                   </AreaChart>
                 </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Competitive Tab */}
-          <TabsContent value="competitive" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5" />
-                  Analisis Kompetitif
-                </CardTitle>
-                <CardDescription>
-                  Posisi kami vs kompetitor utama di berbagai metrik
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
-                  {competitiveData.map((item, index) => (
-                    <div key={index}>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="font-medium">{item.metric}</span>
-                        <div className="flex gap-4 text-sm">
-                          <span className="text-blue-600">Kami: {item.us}%</span>
-                          <span className="text-red-600">Kompetitor: {item.competitor}%</span>
-                        </div>
-                      </div>
-                      <div className="relative w-full h-8 bg-gray-100 rounded-lg overflow-hidden">
-                        <div
-                          className="absolute top-0 left-0 h-full bg-blue-500 opacity-60"
-                          style={{ width: `${item.us}%` }}
-                        />
-                        <div
-                          className="absolute top-0 left-0 h-full bg-red-500 opacity-30"
-                          style={{ width: `${item.competitor}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Market Position Summary */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Posisi Pasar</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="p-4 bg-blue-50 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Award className="h-5 w-5 text-blue-600" />
-                      <h4 className="font-medium">Strengths</h4>
-                    </div>
-                    <ul className="text-sm space-y-1 text-gray-700">
-                      <li>• Layanan pelanggan terbaik</li>
-                      <li>• Pengalaman showroom superior</li>
-                      <li>• Kualitas produk tinggi</li>
-                    </ul>
-                  </div>
-                  <div className="p-4 bg-yellow-50 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="h-5 w-5 text-yellow-600" />
-                      <h4 className="font-medium">Opportunities</h4>
-                    </div>
-                    <ul className="text-sm space-y-1 text-gray-700">
-                      <li>• Ekspansi ke kendaraan elektrik</li>
-                      <li>• Digital marketing enhancement</li>
-                      <li>• Partnership strategis</li>
-                    </ul>
-                  </div>
-                  <div className="p-4 bg-red-50 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <AlertCircle className="h-5 w-5 text-red-600" />
-                      <h4 className="font-medium">Threats</h4>
-                    </div>
-                    <ul className="text-sm space-y-1 text-gray-700">
-                      <li>• Kompetitor dengan harga lebih rendah</li>
-                      <li>• Brand awareness perlu ditingkatkan</li>
-                      <li>• Disrupsi teknologi</li>
-                    </ul>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Strategic Insights Tab */}
-          <TabsContent value="insights" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5" />
-                  Strategic Insights & Recommendations
-                </CardTitle>
-                <CardDescription>
-                  Insight berbasis AI dan rekomendasi strategis
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {insights.map((insight, index) => (
-                    <div
-                      key={index}
-                      className="p-4 border rounded-lg hover:shadow-md transition-shadow"
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className={`p-3 rounded-lg ${
-                          insight.color === 'green' ? 'bg-green-100' :
-                          insight.color === 'yellow' ? 'bg-yellow-100' :
-                          insight.color === 'red' ? 'bg-red-100' : 'bg-blue-100'
-                        }`}>
-                          {getInsightIcon(insight)}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-semibold text-lg">{insight.title}</h4>
-                            <Badge className={getPriorityColor(insight.priority)}>
-                              {insight.priority.toUpperCase()}
-                            </Badge>
-                          </div>
-                          <p className="text-gray-700 mb-2">{insight.description}</p>
-                          <div className="flex items-center gap-2">
-                            <Target className="h-4 w-4 text-gray-500" />
-                            <span className="text-sm font-medium text-gray-600">
-                              Impact: {insight.impact}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Action Items */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5" />
-                  Recommended Actions
-                </CardTitle>
-                <CardDescription>
-                  Langkah strategis yang disarankan
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {[
-                    'Tingkatkan inventori kendaraan premium (+32% demand)',
-                    'Review dan optimasi strategi marketing di regional Bandung',
-                    'Realokasi budget marketing ke kategori SUV',
-                    'Implementasi customer retention program untuk segment churn tinggi',
-                    'Ekspansi layanan after-sales untuk meningkatkan revenue stream',
-                    'Evaluasi pricing strategy untuk kompetitif dengan market'
-                  ].map((action, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                    >
-                      <CheckCircle className="h-5 w-5 text-green-600" />
-                      <span className="text-gray-800">{action}</span>
-                    </div>
-                  ))}
-                </div>
               </CardContent>
             </Card>
           </TabsContent>
