@@ -270,35 +270,35 @@ const HalamanExecutive = () => {
 
     return [
       {
-        metric: 'Customer Satisfaction',
+        metric: 'Kepuasan Pelanggan',
         current: parseFloat(avgRating.toFixed(1)),
         previous: parseFloat((avgRating * 0.95).toFixed(1)),
         target: 4.5,
         unit: 'rating'
       },
       {
-        metric: 'Conversion Rate',
+        metric: 'Tingkat Konversi',
         current: parseFloat(conversionRate.toFixed(1)),
         previous: parseFloat((conversionRate * 0.88).toFixed(1)),
         target: 20.0,
         unit: '%'
       },
       {
-        metric: 'Average Order Value',
+        metric: 'Nilai Rata-rata Transaksi',
         current: Math.round(avgOrderValue),
         previous: Math.round(avgOrderValue * 0.93),
         target: 300000000,
         unit: 'IDR'
       },
       {
-        metric: 'Sales Cycle Time',
+        metric: 'Waktu Siklus Penjualan',
         current: 12,
         previous: 15,
         target: 10,
-        unit: 'days'
+        unit: 'hari'
       },
       {
-        metric: 'Market Share',
+        metric: 'Pangsa Pasar',
         current: 15.2,
         previous: 14.8,
         target: 18.0,
@@ -403,7 +403,7 @@ const HalamanExecutive = () => {
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">Total Revenue</p>
+                <p className="text-gray-500 text-sm">Total Pendapatan</p>
                 <p className="text-2xl font-bold text-gray-900">{formatCurrency(state.analytics.totalRevenue)}</p>
               </div>
               <div className="text-green-600 text-3xl">💰</div>
@@ -413,7 +413,7 @@ const HalamanExecutive = () => {
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">Total Sales</p>
+                <p className="text-gray-500 text-sm">Total Penjualan</p>
                 <p className="text-2xl font-bold text-gray-900">{state.analytics.totalSales}</p>
               </div>
               <div className="text-blue-600 text-3xl">🚗</div>
@@ -423,7 +423,7 @@ const HalamanExecutive = () => {
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">Active Users</p>
+                <p className="text-gray-500 text-sm">Pengguna Aktif</p>
                 <p className="text-2xl font-bold text-gray-900">{state.analytics.activeUsers}</p>
               </div>
               <div className="text-purple-600 text-3xl">👥</div>
@@ -433,7 +433,7 @@ const HalamanExecutive = () => {
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">Conversion Rate</p>
+                <p className="text-gray-500 text-sm">Tingkat Konversi</p>
                 <p className="text-2xl font-bold text-gray-900">{state.analytics.conversionRate}%</p>
               </div>
               <div className="text-yellow-600 text-3xl">📈</div>
@@ -446,7 +446,7 @@ const HalamanExecutive = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <BarChart3 className="h-5 w-5" />
-              Key Performance Indicators
+              Indikator Kinerja Utama
             </CardTitle>
             <CardDescription>
               Metrik performa bisnis dibandingkan dengan target
@@ -494,7 +494,7 @@ const HalamanExecutive = () => {
                     />
                   </div>
                   <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>Previous: {metric.previous}{metric.unit}</span>
+                    <span>Sebelumnya: {metric.previous}{metric.unit}</span>
                     <span>
                       {metric.current > metric.previous ? (
                         <span className="text-green-600">+{((metric.current - metric.previous) / metric.previous * 100).toFixed(1)}%</span>
@@ -514,8 +514,8 @@ const HalamanExecutive = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Profit Analysis</CardTitle>
-              <CardDescription>Tren profit margin overtime</CardDescription>
+              <CardTitle>Analisis Keuntungan</CardTitle>
+              <CardDescription>Tren margin keuntungan dari waktu ke waktu</CardDescription>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={250}>
@@ -523,7 +523,7 @@ const HalamanExecutive = () => {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
                   <YAxis tickFormatter={(value) => `Rp ${(value / 1000000000).toFixed(1)}M`} />
-                  <Tooltip formatter={(value: number) => [`Rp ${value.toLocaleString('id-ID')}`, 'Profit']} />
+                  <Tooltip formatter={(value: number) => [`Rp ${value.toLocaleString('id-ID')}`, 'Keuntungan']} />
                   <Area
                     type="monotone"
                     dataKey="profit"
@@ -538,8 +538,8 @@ const HalamanExecutive = () => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Growth Rate</CardTitle>
-              <CardDescription>Monthly growth percentage</CardDescription>
+              <CardTitle>Tingkat Pertumbuhan</CardTitle>
+              <CardDescription>Persentase pertumbuhan bulanan</CardDescription>
             </CardHeader>
             <CardContent>
               {state.salesData.length === 0 ? (
