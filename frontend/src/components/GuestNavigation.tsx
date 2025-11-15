@@ -1,5 +1,5 @@
 // GuestNavigation component
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import {
@@ -11,7 +11,9 @@ import {
 } from '../components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { useAuth } from '../contexts/AuthContext';
-import { 
+import NotificationDropdown from './NotificationDropdown';
+import LayananChat from '../services/LayananChat';
+import {
   ChevronDown,
   LogIn,
   Heart,
@@ -20,12 +22,12 @@ import {
   Edit,
   Receipt,
   FileText,
-  Bell,
   Mail
 } from 'lucide-react';
 const GuestNavigation: React.FC = () => {
   const location = useLocation();
   const { user, isAuthenticated, logout } = useAuth();
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   const navigationItems = [
     { path: '/', label: 'Beranda' },
@@ -40,6 +42,31 @@ const GuestNavigation: React.FC = () => {
     { path: '/trade-in', label: 'Trade In' }
   ];
 
+  // Load unread messages count
+  useEffect(() => {
+    // Hanya load jika user sudah login
+    if (isAuthenticated) {
+      loadUnreadMessages();
+      // Polling setiap 30 detik untuk update count pesan
+      const interval = setInterval(loadUnreadMessages, 30000);
+      return () => clearInterval(interval);
+    } else {
+      // Reset count jika user logout
+      setUnreadMessages(0);
+    }
+  }, [isAuthenticated]);
+
+  const loadUnreadMessages = async () => {
+    try {
+      // Gunakan getMockUnreadCount untuk sementara
+      // Ganti dengan getUnreadCount() jika API backend sudah siap
+      const count = await LayananChat.getMockUnreadCount();
+      setUnreadMessages(count);
+    } catch (error) {
+      console.error('Error loading unread messages:', error);
+    }
+  };
+
   const handleLogout = async () => {
     await logout();
   };
@@ -52,9 +79,6 @@ const GuestNavigation: React.FC = () => {
       .toUpperCase()
       .slice(0, 2);
   };
-
-  // Mock jumlah pesan belum dibaca (sesuaikan nanti dengan data nyata)
-  const unreadMessages = 0;
 
   return (
     <nav className="bg-white shadow-lg border-b">
@@ -102,12 +126,7 @@ const GuestNavigation: React.FC = () => {
 
             {/* Ikon Notifikasi & Pesan */}
             <div className="flex items-center gap-3 pl-3 border-l">
-              <button
-                className="relative p-2 rounded hover:bg-gray-100"
-                aria-label="Notifikasi"
-              >
-                <Bell className="w-5 h-5 text-gray-700" />
-              </button>
+              <NotificationDropdown />
               <Link
                 to="/chat"
                 className="relative p-2 rounded hover:bg-gray-100"
