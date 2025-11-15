@@ -48,7 +48,7 @@ import HalamanModerasiIklan from './pages/HalamanModerasiIklan';
 import HalamanModerasiUlasan from './pages/HalamanModerasiUlasan';
 import HalamanExecutive from './pages/HalamanExecutive';
 import HalamanChatAdmin from './pages/HalamanChatAdmin';
-import AdminKnowledgeChatbot from './pages/AdminKnowledgeChatbot';
+import HalamanKnowledgeChatbot from './pages/HalamanKnowledgeChatbot';
 import HalamanParameterKredit from './pages/HalamanParameterKredit';
 import HalamanKelolaTradeIn from './pages/HalamanKelolaTradeIn';
 import HalamanPembayaranIklan from './pages/HalamanPembayaranIklan';
@@ -383,7 +383,7 @@ const AppContent: React.FC = () => {
             path="/admin/knowledge-chatbot"
             element={
               <ProtectedRoute requiredRole="admin">
-                <AdminKnowledgeChatbot />
+                <HalamanKnowledgeChatbot />
               </ProtectedRoute>
             }
           />
