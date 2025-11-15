@@ -62,6 +62,7 @@ import HalamanKelolaTransaksi from './pages/HalamanKelolaTransaksi';
 import HalamanKelolaTransaksiUser from './pages/HalamanKelolaTransaksiUser';
 import HalamanLaporanAdmin from './pages/HalamanLaporanAdmin';
 import HalamanLaporanEksekutif from './pages/HalamanLaporanEksekutif';
+import HalamanAnalisisBisnis from './pages/HalamanAnalisisBisnis';
 
 // Komponen: AppContent
 const AppContent: React.FC = () => {
@@ -425,6 +426,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute requiredRole="owner">
                 <HalamanExecutive />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/executive/analytics"
+            element={
+              <ProtectedRoute requiredRole="owner">
+                <HalamanAnalisisBisnis />
               </ProtectedRoute>
             }
           />

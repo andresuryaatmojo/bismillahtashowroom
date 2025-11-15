@@ -14,7 +14,6 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import {
@@ -26,51 +25,25 @@ import {
   TableRow
 } from '../components/ui/table';
 import {
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer
-} from 'recharts';
-import {
   FileText,
   Download,
   Send,
-  Calendar,
   Filter,
   Search,
   Plus,
   RefreshCw,
   Trash2,
   Archive,
-  Mail,
   Eye,
   AlertCircle,
   CheckCircle,
   Clock,
   FileChartLine,
-  TrendingUp,
-  TrendingDown,
-  Users,
-  DollarSign,
-  Target,
-  BarChart3,
-  PieChart as PieChartIcon,
   Activity,
-  Briefcase,
-  Award,
+  DollarSign,
   MapPin,
-  Star,
+  Target,
+  Users,
   ArrowUpRight,
   ArrowDownRight,
   Minus
@@ -107,8 +80,7 @@ const HalamanLaporanEksekutif = () => {
     showDeleteDialog: false,
     reportToDelete: null as string | null,
     error: null as string | null,
-    success: null as string | null,
-    activeTab: 'dashboard'
+    success: null as string | null
   });
 
   const [formData, setFormData] = useState({
@@ -128,41 +100,6 @@ const HalamanLaporanEksekutif = () => {
     method: 'email',
     recipients: [{ email: '', name: '' }]
   });
-
-  // Mock data for charts
-  const mockSalesData = [
-    { month: 'Jan', penjualan: 4500000000, target: 4000000000, profit: 675000000 },
-    { month: 'Feb', penjualan: 5200000000, target: 4000000000, profit: 780000000 },
-    { month: 'Mar', penjualan: 4800000000, target: 4500000000, profit: 720000000 },
-    { month: 'Apr', penjualan: 6100000000, target: 5000000000, profit: 915000000 },
-    { month: 'Mei', penjualan: 5500000000, target: 5000000000, profit: 825000000 },
-    { month: 'Jun', penjualan: 7200000000, target: 6000000000, profit: 1080000000 }
-  ];
-
-  const mockCategoryData = [
-    { name: 'Sedan', value: 35, color: '#3b82f6' },
-    { name: 'SUV', value: 28, color: '#10b981' },
-    { name: 'MPV', value: 20, color: '#f59e0b' },
-    { name: 'Hatchback', value: 12, color: '#ef4444' },
-    { name: 'Pickup', value: 5, color: '#8b5cf6' }
-  ];
-
-  const mockRegionalData = [
-    { region: 'Jakarta', penjualan: 8500000000, growth: 12.5, target: 7500000000, market: 32 },
-    { region: 'Surabaya', penjualan: 6200000000, growth: 8.3, target: 6000000000, market: 24 },
-    { region: 'Bandung', penjualan: 4100000000, growth: -2.1, target: 4500000000, market: 16 },
-    { region: 'Medan', penjualan: 3800000000, growth: 15.7, target: 3500000000, market: 14 },
-    { region: 'Semarang', penjualan: 2900000000, growth: 6.2, target: 2800000000, market: 11 },
-    { region: 'Makassar', penjualan: 1800000000, growth: 3.8, target: 2000000000, market: 7 }
-  ];
-
-  const mockPerformanceMetrics = [
-    { metric: 'Customer Satisfaction', current: 4.2, previous: 4.0, target: 4.5, unit: 'rating' },
-    { metric: 'Conversion Rate', current: 18.5, previous: 16.2, target: 20.0, unit: '%' },
-    { metric: 'Average Order Value', current: 285000000, previous: 265000000, target: 300000000, unit: 'IDR' },
-    { metric: 'Sales Cycle Time', current: 12, previous: 15, target: 10, unit: 'days' },
-    { metric: 'Market Share', current: 15.2, previous: 14.8, target: 18.0, unit: '%' }
-  ];
 
   useEffect(() => {
     loadReports();
@@ -777,335 +714,8 @@ const HalamanLaporanEksekutif = () => {
         )}
 
         {/* Main Content */}
-        <Tabs value={state.activeTab} onValueChange={(value) => setState(prev => ({ ...prev, activeTab: value }))}>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
-            <TabsTrigger value="reports">Laporan</TabsTrigger>
-          </TabsList>
-
-          {/* Dashboard Tab */}
-          <TabsContent value="dashboard" className="space-y-6">
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                  <DollarSign className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">Rp 33.3M</div>
-                  <p className="text-xs text-muted-foreground">
-                    <span className="text-green-600">+15.2%</span> dari bulan lalu
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Profit Margin</CardTitle>
-                  <Target className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">15.8%</div>
-                  <p className="text-xs text-muted-foreground">
-                    <span className="text-green-600">+2.1%</span> dari target
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Market Share</CardTitle>
-                  <Award className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">15.2%</div>
-                  <p className="text-xs text-muted-foreground">
-                    <span className="text-green-600">+0.4%</span> dari quarter lalu
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Customer Satisfaction</CardTitle>
-                  <Star className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">4.2/5.0</div>
-                  <p className="text-xs text-muted-foreground">
-                    <span className="text-green-600">+0.2</span> dari bulan lalu
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Charts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Sales Trend Chart */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5" />
-                    Trend Penjualan vs Target
-                  </CardTitle>
-                  <CardDescription>
-                    Perbandingan penjualan aktual dengan target bulanan
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={mockSalesData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis tickFormatter={(value) => `Rp ${(value / 1000000000).toFixed(1)}M`} />
-                      <Tooltip
-                        formatter={(value: number) => [`Rp ${value.toLocaleString('id-ID')}`, '']}
-                        labelFormatter={(label) => `Bulan ${label}`}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="penjualan"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        name="Penjualan"
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="target"
-                        stroke="#ef4444"
-                        strokeWidth={2}
-                        strokeDasharray="5 5"
-                        name="Target"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              {/* Category Distribution */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <PieChartIcon className="h-5 w-5" />
-                    Distribusi Kategori
-                  </CardTitle>
-                  <CardDescription>
-                    Persentase penjualan berdasarkan kategori mobil
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={mockCategoryData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {mockCategoryData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Regional Performance */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5" />
-                  Performa Regional
-                </CardTitle>
-                <CardDescription>
-                  Perbandingan kinerja penjualan per regional
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Regional</TableHead>
-                        <TableHead>Penjualan</TableHead>
-                        <TableHead>Target</TableHead>
-                        <TableHead>Growth</TableHead>
-                        <TableHead>Market Share</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {mockRegionalData.map((region, index) => (
-                        <TableRow key={index}>
-                          <TableCell className="font-medium">{region.region}</TableCell>
-                          <TableCell>{formatCurrency(region.penjualan)}</TableCell>
-                          <TableCell>{formatCurrency(region.target)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              {region.growth > 0 ? (
-                                <TrendingUp className="h-4 w-4 text-green-600" />
-                              ) : (
-                                <TrendingDown className="h-4 w-4 text-red-600" />
-                              )}
-                              <span className={region.growth > 0 ? 'text-green-600' : 'text-red-600'}>
-                                {region.growth > 0 ? '+' : ''}{region.growth}%
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell>{region.market}%</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {getTrendIcon(region.penjualan, region.target)}
-                              <Badge variant={region.penjualan >= region.target ? 'default' : 'secondary'}>
-                                {region.penjualan >= region.target ? 'On Target' : 'Below Target'}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Analytics Tab */}
-          <TabsContent value="analytics" className="space-y-6">
-            {/* Performance Metrics */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5" />
-                  Key Performance Indicators
-                </CardTitle>
-                <CardDescription>
-                  Metrik performa bisnis dibandingkan dengan target
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {mockPerformanceMetrics.map((metric, index) => (
-                    <div key={index} className="border rounded-lg p-4">
-                      <div className="flex justify-between items-start mb-2">
-                        <h4 className="font-medium text-sm">{metric.metric}</h4>
-                        {getTrendIcon(metric.current, metric.target)}
-                      </div>
-                      <div className="text-2xl font-bold mb-1">
-                        {metric.unit === 'IDR'
-                          ? formatCurrency(metric.current)
-                          : metric.unit === 'rating'
-                          ? `${metric.current}/5`
-                          : `${metric.current}${metric.unit}`
-                        }
-                      </div>
-                      <div className="text-xs text-gray-500 mb-2">
-                        Target: {metric.unit === 'IDR'
-                          ? formatCurrency(metric.target)
-                          : `${metric.target}${metric.unit}`
-                        }
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div
-                          className={`h-2 rounded-full ${
-                            metric.current >= metric.target
-                              ? 'bg-green-600'
-                              : metric.current >= metric.target * 0.9
-                              ? 'bg-yellow-600'
-                              : 'bg-red-600'
-                          }`}
-                          style={{
-                            width: `${Math.min((metric.current / metric.target) * 100, 100)}%`
-                          }}
-                        />
-                      </div>
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>Previous: {metric.previous}{metric.unit}</span>
-                        <span>
-                          {metric.current > metric.previous ? (
-                            <span className="text-green-600">+{((metric.current - metric.previous) / metric.previous * 100).toFixed(1)}%</span>
-                          ) : (
-                            <span className="text-red-600">{((metric.current - metric.previous) / metric.previous * 100).toFixed(1)}%</span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Profit Analysis */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Profit Analysis</CardTitle>
-                  <CardDescription>Tren profit margin overtime</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <AreaChart data={mockSalesData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis tickFormatter={(value) => `Rp ${(value / 1000000000).toFixed(1)}M`} />
-                      <Tooltip formatter={(value: number) => [`Rp ${value.toLocaleString('id-ID')}`, 'Profit']} />
-                      <Area
-                        type="monotone"
-                        dataKey="profit"
-                        stroke="#10b981"
-                        fill="#10b981"
-                        fillOpacity={0.3}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Growth Rate</CardTitle>
-                  <CardDescription>Monthly growth percentage</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {mockSalesData.slice(1).map((item, index) => {
-                      const prevItem = mockSalesData[index];
-                      const growth = ((item.penjualan - prevItem.penjualan) / prevItem.penjualan * 100);
-                      return (
-                        <div key={index} className="flex justify-between items-center">
-                          <span className="text-sm font-medium">{item.month}</span>
-                          <div className="flex items-center gap-2">
-                            <span className={`text-sm font-bold ${growth > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {growth > 0 ? '+' : ''}{growth.toFixed(1)}%
-                            </span>
-                            {growth > 0 ? (
-                              <TrendingUp className="h-4 w-4 text-green-600" />
-                            ) : (
-                              <TrendingDown className="h-4 w-4 text-red-600" />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* Reports Tab */}
-          <TabsContent value="reports" className="space-y-6">
-            {/* Statistics Cards */}
+        <div className="space-y-6">
+          {/* Statistics Cards */}
             {state.statistics && (
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card>
@@ -1403,8 +1013,7 @@ const HalamanLaporanEksekutif = () => {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+        </div>
 
         {/* Distribution Dialog */}
         <Dialog open={state.showDistributionDialog} onOpenChange={(open) => setState(prev => ({ ...prev, showDistributionDialog: open }))}>
