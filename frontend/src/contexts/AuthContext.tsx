@@ -91,17 +91,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loadUserProfile = useCallback(async (authUser: SupabaseUser): Promise<User | null> => {
     try {
       console.log('📥 [1/3] Loading profile for user:', authUser.id);
-      
-      const { data: profile, error } = await supabase
+
+      // Use Promise.race to add timeout protection (5 seconds)
+      const queryPromise = supabase
         .from('users')
         .select('*')
-        .or(`id.eq.${authUser.id},auth_user_id.eq.${authUser.id}`)
+        .eq('auth_user_id', authUser.id)
         .maybeSingle();
 
-      console.log('📥 [2/3] Query result:', { 
-        hasData: !!profile, 
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Profile query timeout after 5s')), 5000)
+      );
+
+      const { data: profile, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
+
+      console.log('📥 [2/3] Query result:', {
+        hasData: !!profile,
         hasError: !!error,
-        errorCode: error?.code 
+        errorCode: error?.code
       });
 
       if (error) {
@@ -114,35 +121,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (profile) {
         console.log('✅ [3/3] Profile loaded:', profile.username);
-        
+
         const userWithPermissions: User = {
           ...profile,
           permissions: getPermissionsByRole(profile.role)
         };
-        
-        (async () => {
-          try {
-            const { error } = await supabase
-              .from('users')
-              .update({ last_login: new Date().toISOString() })
-              .or(`id.eq.${authUser.id},auth_user_id.eq.${authUser.id}`);
-            
+
+        // Update last_login asynchronously (non-blocking)
+        Promise.resolve(
+          supabase
+            .from('users')
+            .update({ last_login: new Date().toISOString() })
+            .eq('auth_user_id', authUser.id)
+        )
+          .then(({ error }) => {
             if (error) {
               console.warn('⚠️ Failed to update last_login:', error);
             } else {
               console.log('✅ Last login updated');
             }
-          } catch (err) {
-            console.warn('⚠️ Exception updating last_login:', err);
-          }
-        })();
-        
+          })
+          .catch((err: Error) => console.warn('⚠️ Exception updating last_login:', err));
+
         return userWithPermissions;
       }
 
       console.warn('⚠️ No profile data found');
       return null;
-      
+
     } catch (error) {
       console.error('❌ Error in loadUserProfile:', error);
       return null;
@@ -156,31 +162,42 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const initializeAuth = async () => {
       try {
         console.log('🔄 Initializing auth...');
-        
+
         initTimeout = setTimeout(() => {
           if (mounted) {
-            console.error('❌ Auth initialization timeout after 8s');
+            console.error('❌ Auth initialization timeout after 5s - continuing anyway');
             setIsLoading(false);
           }
-        }, 8000);
-        
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
+        }, 5000);
+
+        // Add timeout protection to getSession
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('getSession timeout')), 4000)
+        );
+
+        const result = await Promise.race([sessionPromise, timeoutPromise]).catch(() => ({
+          data: { session: null },
+          error: null
+        })) as any;
+
+        const { data: { session }, error: sessionError } = result;
+
         if (sessionError) {
           console.error('❌ Session error:', sessionError);
           clearTimeout(initTimeout);
           if (mounted) setIsLoading(false);
           return;
         }
-        
+
         if (!mounted) return;
-        
+
         console.log('📦 Session:', session ? 'Found' : 'Not found');
         setSession(session);
-        
+
         if (session?.user) {
           console.log('✅ Session found, loading profile...');
-          
+
           try {
             const profile = await loadUserProfile(session.user);
             if (mounted) {
@@ -194,9 +211,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } else {
           console.log('ℹ️ No active session');
         }
-        
+
         clearTimeout(initTimeout);
-        
+
       } catch (error) {
         console.error('❌ Error initializing auth:', error);
       } finally {

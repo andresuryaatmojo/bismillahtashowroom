@@ -14,12 +14,30 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from '../components/ui/badge';
 import { Separator } from '../components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { 
+import {
   Plus, Search, Filter, Edit, Trash2, Eye, Save, X, Upload, Car,
-  Calendar, MapPin, DollarSign, CheckCircle, Loader2, AlertCircle, 
-  ArrowLeft, Image as ImageIcon, XCircle, RefreshCw, Package, 
-  TrendingUp, BarChart3, Heart, Phone, Crown, Zap
+  Calendar, MapPin, DollarSign, CheckCircle, Loader2, AlertCircle,
+  ArrowLeft, Image as ImageIcon, XCircle, Package,
+  TrendingUp, BarChart3, Heart, Phone, Crown, Zap, GripVertical,
+  ChevronUp, ChevronDown
 } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // Form interfaces (sama seperti admin)
 interface CarFormData {
@@ -69,6 +87,107 @@ interface CarFormData {
   };
 }
 
+// Sortable Image Item Component
+interface SortableImageItemProps {
+  id: string;
+  imageUrl: string;
+  index: number;
+  isPrimary: boolean;
+  onRemove: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  isFirst: boolean;
+  isLast: boolean;
+  alt: string;
+}
+
+const SortableImageItem: React.FC<SortableImageItemProps> = ({
+  id,
+  imageUrl,
+  index,
+  isPrimary,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+  isFirst,
+  isLast,
+  alt,
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="relative group">
+      <img
+        src={imageUrl}
+        alt={alt}
+        className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
+      />
+
+      {/* Drag Handle */}
+      <div
+        {...attributes}
+        {...listeners}
+        className="absolute top-2 left-2 bg-white/90 p-1 rounded cursor-move opacity-0 group-hover:opacity-100 transition-opacity"
+        title="Drag untuk mengubah urutan"
+      >
+        <GripVertical className="w-4 h-4 text-gray-600" />
+      </div>
+
+      {/* Move Up/Down Buttons */}
+      <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {!isFirst && (
+          <button
+            type="button"
+            onClick={onMoveUp}
+            className="bg-white/90 p-1 rounded hover:bg-blue-100"
+            title="Pindah ke atas"
+          >
+            <ChevronUp className="w-4 h-4 text-gray-600" />
+          </button>
+        )}
+        {!isLast && (
+          <button
+            type="button"
+            onClick={onMoveDown}
+            className="bg-white/90 p-1 rounded hover:bg-blue-100"
+            title="Pindah ke bawah"
+          >
+            <ChevronDown className="w-4 h-4 text-gray-600" />
+          </button>
+        )}
+      </div>
+
+      {/* Remove Button */}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="absolute bottom-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+        title="Hapus gambar"
+      >
+        <XCircle className="w-5 h-5" />
+      </button>
+
+      {/* Primary Badge */}
+      {isPrimary && (
+        <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
+          Utama
+        </div>
+      )}
+    </div>
+  );
+};
+
 const HalamanKelolaIklan: React.FC = () => {
   const navigate = useNavigate();
   const { user, isLoading: authLoading } = useAuth();
@@ -81,8 +200,7 @@ const HalamanKelolaIklan: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [isSellerMode, setIsSellerMode] = useState(false);
-  
+
   // Package selection
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [packages, setPackages] = useState<ListingPackage[]>([]);
@@ -144,7 +262,15 @@ const HalamanKelolaIklan: React.FC = () => {
   // Existing images management
   const [existingImages, setExistingImages] = useState<Array<{id: string, image_url: string}>>([]);
   const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
-  
+
+  // Drag & drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   // Statistics
   const [statistics, setStatistics] = useState({
     total: 0,
@@ -222,17 +348,6 @@ const HalamanKelolaIklan: React.FC = () => {
     }
   }, [user, locationMode]);
 
-  // Check seller mode
-  useEffect(() => {
-    const checkMode = async () => {
-      if (user) {
-        const sellerMode = await listingService.checkSellerMode(user.id);
-        setIsSellerMode(sellerMode);
-      }
-    };
-    checkMode();
-  }, [user]);
-
   // Load master data
   useEffect(() => {
     const loadMasterData = async () => {
@@ -303,10 +418,10 @@ const HalamanKelolaIklan: React.FC = () => {
   };
 
   useEffect(() => {
-    if (user && isSellerMode) {
+    if (user) {
       loadCars();
     }
-  }, [user, isSellerMode]);
+  }, [user]);
 
   // Handle image selection
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -314,8 +429,22 @@ const HalamanKelolaIklan: React.FC = () => {
     if (e.target.files) {
       const files = Array.from(e.target.files);
       console.log('Selected files:', files); // Debug log
+
+      // Validate photo limit based on selected package
+      if (!isEditMode && selectedPackage) {
+        const totalPhotos = existingImages.length + selectedImages.length + files.length;
+        const maxPhotos = selectedPackage.max_photos;
+
+        if (totalPhotos > maxPhotos) {
+          const remainingSlots = maxPhotos - (existingImages.length + selectedImages.length);
+          alert(`Paket "${selectedPackage.name}" hanya dapat menampung maksimal ${maxPhotos} foto. Anda masih bisa menambahkan ${remainingSlots} foto lagi.`);
+          e.target.value = ''; // Reset input
+          return;
+        }
+      }
+
       const newPreviewUrls = files.map(file => URL.createObjectURL(file));
-      
+
       setSelectedImages(prev => {
         const updated = [...prev, ...files];
         console.log('Updated selectedImages:', updated); // Debug log
@@ -345,6 +474,59 @@ const HalamanKelolaIklan: React.FC = () => {
     });
   };
 
+  // Reorder existing images using drag & drop
+  const handleExistingImagesDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setExistingImages((items) => {
+        const oldIndex = items.findIndex((item) => item.id === active.id);
+        const newIndex = items.findIndex((item) => item.id === over.id);
+
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
+  // Reorder preview images using drag & drop
+  const handlePreviewImagesDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = Number(active.id);
+      const newIndex = Number(over.id);
+
+      setSelectedImages((items) => arrayMove(items, oldIndex, newIndex));
+      setImagePreviewUrls((items) => arrayMove(items, oldIndex, newIndex));
+    }
+  };
+
+  // Move existing image up
+  const moveExistingImageUp = (index: number) => {
+    if (index === 0) return;
+    setExistingImages((items) => arrayMove(items, index, index - 1));
+  };
+
+  // Move existing image down
+  const moveExistingImageDown = (index: number) => {
+    if (index === existingImages.length - 1) return;
+    setExistingImages((items) => arrayMove(items, index, index + 1));
+  };
+
+  // Move preview image up
+  const movePreviewImageUp = (index: number) => {
+    if (index === 0) return;
+    setSelectedImages((items) => arrayMove(items, index, index - 1));
+    setImagePreviewUrls((items) => arrayMove(items, index, index - 1));
+  };
+
+  // Move preview image down
+  const movePreviewImageDown = (index: number) => {
+    if (index === imagePreviewUrls.length - 1) return;
+    setSelectedImages((items) => arrayMove(items, index, index + 1));
+    setImagePreviewUrls((items) => arrayMove(items, index, index + 1));
+  };
+
   // Upload images
   const uploadImages = async (carId: string) => {
     setUploadingImages(true);
@@ -362,7 +544,23 @@ const HalamanKelolaIklan: React.FC = () => {
         }
       }
 
-      // 2) Upload gambar baru jika ada
+      // 2) Update display order untuk existing images yang masih ada
+      if (existingImages.length > 0) {
+        const imageOrders = existingImages.map((img, index) => ({
+          id: img.id,
+          displayOrder: index,
+          isPrimary: index === 0 && selectedImages.length === 0 // Pertama jadi primary jika tidak ada gambar baru
+        }));
+
+        const updateResult = await carService.updateAllImageDisplayOrders(carId, imageOrders);
+        if (!updateResult.success) {
+          console.error('Failed to update image display orders:', updateResult.error);
+        } else {
+          console.log('Updated display orders for existing images');
+        }
+      }
+
+      // 3) Upload gambar baru jika ada
       if (selectedImages.length > 0) {
         for (let i = 0; i < selectedImages.length; i++) {
           const file = selectedImages[i];
@@ -373,7 +571,7 @@ const HalamanKelolaIklan: React.FC = () => {
             continue;
           }
 
-          // Gambar pertama hanya jadi primary jika tidak ada existing images lagi
+          // Gambar pertama jadi primary jika tidak ada existing images lagi
           const isPrimary = i === 0 && existingImages.length === 0;
           const displayOrder = i + existingImages.length;
 
@@ -496,9 +694,35 @@ const HalamanKelolaIklan: React.FC = () => {
           await uploadImages(carId);
         }
 
-        // Then show package selection
+        // NEW FLOW: Create payment with pre-selected package
+        if (!selectedPackage) {
+          throw new Error('Paket belum dipilih');
+        }
+
+        const paymentResult = await listingService.createListingPayment(
+          carId,
+          selectedPackage.id,
+          user.id,
+          'bank_transfer'
+        );
+
+        if (!paymentResult.success) {
+          throw new Error(paymentResult.error || 'Gagal membuat payment');
+        }
+
         setShowModal(false);
-        setShowPackageModal(true);
+
+        // If free package, done!
+        if (selectedPackage.price === 0) {
+          await loadCars();
+          alert('Mobil berhasil ditambahkan dengan paket gratis! Menunggu approval admin.');
+          resetForm();
+          setSelectedPackage(null);
+        } else {
+          // Show payment upload modal
+          setPaymentId(paymentResult.data.id);
+          setShowPaymentModal(true);
+        }
       }
 
     } catch (err: any) {
@@ -661,27 +885,6 @@ const HalamanKelolaIklan: React.FC = () => {
       alert(err.message || 'Gagal upload bukti pembayaran');
     } finally {
       setUploadingPayment(false);
-    }
-  };
-
-  // Refresh listing
-  const handleRefreshListing = async (carId: string) => {
-    if (!window.confirm('Yakin ingin refresh iklan ini? Quota refresh akan berkurang.')) return;
-
-    try {
-      const result = await listingService.refreshListing(carId);
-      
-      if (!result.success) {
-        alert(result.message);
-        return;
-      }
-
-      alert(result.message);
-      await loadCars();
-
-    } catch (err: any) {
-      console.error('Error refreshing listing:', err);
-      alert('Gagal refresh iklan');
     }
   };
 
@@ -853,10 +1056,30 @@ const HalamanKelolaIklan: React.FC = () => {
     }
   };
 
-  // Handle add new
-  const handleAddNew = () => {
-    resetForm();
-    setIsEditMode(false);
+  // Handle add new - Show package selection first
+  const handleAddNew = async () => {
+    try {
+      // Reset form first
+      resetForm();
+      setIsEditMode(false);
+
+      // Load available packages
+      const packagesData = await listingService.getPackages();
+      setPackages(packagesData);
+
+      // Show package selection modal first (NEW FLOW)
+      setShowPackageModal(true);
+    } catch (err) {
+      console.error('Error loading packages:', err);
+      alert('Gagal memuat paket. Silakan coba lagi.');
+    }
+  };
+
+  // Handle package selected at the beginning (before filling car data)
+  const handlePackageSelectedFirst = (pkg: ListingPackage) => {
+    setSelectedPackage(pkg);
+    setShowPackageModal(false);
+    // Now open the car form modal
     setShowModal(true);
   };
 
@@ -908,39 +1131,6 @@ const HalamanKelolaIklan: React.FC = () => {
     );
   }
 
-  // Check seller mode
-  if (!isSellerMode) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardContent className="p-8 text-center">
-            <AlertCircle className="w-16 h-16 text-orange-500 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Mode Seller Belum Aktif</h2>
-            <p className="text-gray-600 mb-6">
-              Untuk dapat mengelola iklan mobil, Anda perlu mengaktifkan mode Seller terlebih dahulu di halaman profil.
-            </p>
-            <div className="space-y-3">
-              <Button 
-                onClick={() => navigate('/profil')} 
-                className="w-full bg-blue-600 hover:bg-blue-700"
-              >
-                Aktifkan Mode Seller
-              </Button>
-              <Button 
-                onClick={() => navigate('/')} 
-                variant="outline"
-                className="w-full"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Kembali ke Beranda
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -985,49 +1175,55 @@ const HalamanKelolaIklan: React.FC = () => {
                   Pilihan Paket Iklan
                 </h2>
                 <p className="text-gray-700 mb-4">
-                  Kami menyediakan berbagai paket iklan mulai dari <span className="font-semibold text-green-600">GRATIS</span> hingga paket premium untuk meningkatkan visibilitas iklan Anda.
+                  Kami menyediakan berbagai paket iklan mulai dari <span className="font-semibold text-green-600">GRATIS</span> hingga paket featured untuk meningkatkan visibilitas iklan Anda.
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-white rounded-lg p-4 border border-gray-200">
                     <div className="flex items-center mb-2">
                       <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
                       <span className="font-semibold text-green-600">Paket Gratis</span>
                     </div>
                     <ul className="text-sm text-gray-600 space-y-1">
-                      <li>• Iklan standar 30 hari</li>
+                      <li>• Durasi 30 hari</li>
                       <li>• Maksimal 5 foto</li>
-                      <li>• Tampil di pencarian biasa</li>
+                      <li>• Tetap tampil di katalog</li>
+                    </ul>
+                  </div>
+                  <div className="bg-white rounded-lg p-4 border border-gray-300">
+                    <div className="flex items-center mb-2">
+                      <Package className="w-5 h-5 text-gray-600 mr-2" />
+                      <span className="font-semibold text-gray-700">Paket Umum</span>
+                    </div>
+                    <ul className="text-sm text-gray-600 space-y-1">
+                      <li>• Durasi 45 hari</li>
+                      <li>• Maksimal 10 foto</li>
+                      <li>• Lebih mudah ditemukan pembeli</li>
                     </ul>
                   </div>
                   <div className="bg-white rounded-lg p-4 border border-blue-200">
                     <div className="flex items-center mb-2">
                       <Crown className="w-5 h-5 text-blue-600 mr-2" />
-                      <span className="font-semibold text-blue-600">Paket Premium</span>
+                      <span className="font-semibold text-blue-600">Premium Listing</span>
                     </div>
                     <ul className="text-sm text-gray-600 space-y-1">
-                      <li>• Iklan featured & highlighted</li>
+                      <li>• Durasi 60 hari</li>
                       <li>• Maksimal 15 foto</li>
-                      <li>• Prioritas di pencarian</li>
+                      <li>• Prioritas tinggi di pencarian</li>
                     </ul>
                   </div>
                   <div className="bg-white rounded-lg p-4 border border-purple-200">
                     <div className="flex items-center mb-2">
                       <Zap className="w-5 h-5 text-purple-600 mr-2" />
-                      <span className="font-semibold text-purple-600">Paket VIP</span>
+                      <span className="font-semibold text-purple-600">Featured Listing</span>
                     </div>
                     <ul className="text-sm text-gray-600 space-y-1">
-                      <li>• Semua fitur premium</li>
-                      <li>• Badge khusus</li>
-                      <li>• Fitur sundul iklan</li>
+                      <li>• Durasi 90 hari</li>
+                      <li>• Maksimal 20 foto</li>
+                      <li>• Tampil paling atas & dilihat pertama</li>
                     </ul>
                   </div>
                 </div>
               </div>
-            </div>
-            <div className="mt-4 p-3 bg-blue-100 rounded-lg">
-              <p className="text-sm text-blue-800">
-                <strong>💡 Tips:</strong> Anda dapat memilih paket setelah mengisi data mobil. Paket gratis tersedia untuk semua user!
-              </p>
             </div>
           </CardContent>
         </Card>
@@ -1198,34 +1394,6 @@ const HalamanKelolaIklan: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Package Info & Refresh */}
-                        {car.listing_packages && (
-                          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg mb-3">
-                            <div className="text-sm">
-                              <p className="text-gray-600">
-                                Paket: <span className="font-semibold text-gray-900">{car.listing_packages.name}</span>
-                              </p>
-                              {car.listing_packages.allows_refresh && (
-                                <p className="text-gray-500 text-xs mt-1">
-                                  Refresh: {car.refresh_count || 0} / {car.total_refreshes_allowed || 0} kali
-                                </p>
-                              )}
-                            </div>
-                            {car.listing_packages.allows_refresh && car.status === 'available' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleRefreshListing(car.id)}
-                                disabled={car.refresh_count >= car.total_refreshes_allowed}
-                                className="flex items-center gap-1"
-                              >
-                                <RefreshCw className="w-4 h-4" />
-                                Sundul
-                              </Button>
-                            )}
-                          </div>
-                        )}
-
                         {/* Actions */}
                         <div className="flex items-center space-x-2">
                           <Button
@@ -1270,9 +1438,31 @@ const HalamanKelolaIklan: React.FC = () => {
           <div className="bg-white rounded-lg max-w-4xl w-full my-8">
             <div className="p-6 border-b sticky top-0 bg-white z-10 rounded-t-lg">
               <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-gray-900">
-                  {isEditMode ? 'Edit Iklan' : 'Pasang Iklan Baru'}
-                </h2>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">
+                    {isEditMode ? 'Edit Iklan' : 'Pasang Iklan Baru'}
+                  </h2>
+                  {/* Show selected package info for new ads */}
+                  {!isEditMode && selectedPackage && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
+                        <Package className="w-3 h-3 mr-1" />
+                        Paket: {selectedPackage.name}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-blue-600 hover:text-blue-700 h-6 px-2 text-xs"
+                        onClick={() => {
+                          setShowModal(false);
+                          setShowPackageModal(true);
+                        }}
+                      >
+                        Ubah Paket
+                      </Button>
+                    </div>
+                  )}
+                </div>
                 <Button variant="outline" size="sm" onClick={() => setShowModal(false)}>
                   <X className="w-4 h-4" />
                 </Button>
@@ -2067,10 +2257,22 @@ const HalamanKelolaIklan: React.FC = () => {
                   )}
 
                   <div>
-                    <Label>Upload Gambar Mobil</Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label>Upload Gambar Mobil</Label>
+                      {!isEditMode && selectedPackage && (
+                        <span className="text-sm text-gray-600">
+                          {existingImages.length + selectedImages.length} / {selectedPackage.max_photos} foto
+                        </span>
+                      )}
+                    </div>
+                    {!isEditMode && selectedPackage && (
+                      <p className="text-xs text-gray-500 mb-2">
+                        Paket {selectedPackage.name} memungkinkan maksimal {selectedPackage.max_photos} foto
+                      </p>
+                    )}
                     <div className="mt-2">
-                      <label 
-                        htmlFor="image_upload" 
+                      <label
+                        htmlFor="image_upload"
                         className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
                       >
                         <div className="flex flex-col items-center justify-center pt-5 pb-6">
@@ -2096,58 +2298,74 @@ const HalamanKelolaIklan: React.FC = () => {
                   {isEditMode && existingImages.length > 0 && (
                     <div>
                       <Label>Gambar Saat Ini ({existingImages.length})</Label>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-                        {existingImages.map((image, index) => (
-                          <div key={image.id} className="relative group">
-                            <img
-                              src={image.image_url}
-                              alt={`Existing ${index + 1}`}
-                              className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeExistingImage(image.id)}
-                              className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <XCircle className="w-5 h-5" />
-                            </button>
-                            {index === 0 && existingImages.length > 0 && imagePreviewUrls.length === 0 && (
-                              <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                                Utama
-                              </div>
-                            )}
+                      <p className="text-sm text-gray-500 mb-2">
+                        Drag gambar atau gunakan tombol panah untuk mengubah urutan. Gambar pertama akan menjadi tampilan utama.
+                      </p>
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleExistingImagesDragEnd}
+                      >
+                        <SortableContext
+                          items={existingImages.map(img => img.id)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                            {existingImages.map((image, index) => (
+                              <SortableImageItem
+                                key={image.id}
+                                id={image.id}
+                                imageUrl={image.image_url}
+                                index={index}
+                                isPrimary={index === 0 && imagePreviewUrls.length === 0}
+                                onRemove={() => removeExistingImage(image.id)}
+                                onMoveUp={() => moveExistingImageUp(index)}
+                                onMoveDown={() => moveExistingImageDown(index)}
+                                isFirst={index === 0}
+                                isLast={index === existingImages.length - 1}
+                                alt={`Existing ${index + 1}`}
+                              />
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        </SortableContext>
+                      </DndContext>
                     </div>
                   )}
 
                   {imagePreviewUrls.length > 0 && (
                     <div>
                       <Label>Preview Gambar Baru ({imagePreviewUrls.length})</Label>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-                        {imagePreviewUrls.map((url, index) => (
-                          <div key={index} className="relative group">
-                            <img
-                              src={url}
-                              alt={`Preview ${index + 1}`}
-                              className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeSelectedImage(index)}
-                              className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <XCircle className="w-5 h-5" />
-                            </button>
-                            {((existingImages.length === 0 && index === 0) || (existingImages.length > 0 && index === 0)) && (
-                              <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                                {existingImages.length === 0 ? 'Utama' : 'Utama Baru'}
-                              </div>
-                            )}
+                      <p className="text-sm text-gray-500 mb-2">
+                        Drag gambar atau gunakan tombol panah untuk mengubah urutan. Gambar pertama akan menjadi tampilan utama.
+                      </p>
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handlePreviewImagesDragEnd}
+                      >
+                        <SortableContext
+                          items={imagePreviewUrls.map((_, index) => index.toString())}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                            {imagePreviewUrls.map((url, index) => (
+                              <SortableImageItem
+                                key={index}
+                                id={index.toString()}
+                                imageUrl={url}
+                                index={index}
+                                isPrimary={(existingImages.length === 0 && index === 0) || (existingImages.length > 0 && index === 0)}
+                                onRemove={() => removeSelectedImage(index)}
+                                onMoveUp={() => movePreviewImageUp(index)}
+                                onMoveDown={() => movePreviewImageDown(index)}
+                                isFirst={index === 0}
+                                isLast={index === imagePreviewUrls.length - 1}
+                                alt={`Preview ${index + 1}`}
+                              />
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        </SortableContext>
+                      </DndContext>
                     </div>
                   )}
 
@@ -2208,8 +2426,22 @@ const HalamanKelolaIklan: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b sticky top-0 bg-white z-10">
-              <h2 className="text-2xl font-bold text-gray-900">Pilih Paket Iklan</h2>
-              <p className="text-gray-600 mt-1">Pilih paket yang sesuai dengan kebutuhan Anda</p>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Pilih Paket Iklan</h2>
+                  <p className="text-gray-600 mt-1">Pilih paket yang sesuai dengan kebutuhan Anda</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowPackageModal(false);
+                    setSelectedPackage(null);
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
 
             <div className="p-6">
@@ -2252,13 +2484,7 @@ const HalamanKelolaIklan: React.FC = () => {
                         {pkg.is_featured && (
                           <li className="flex items-start">
                             <Crown className="w-4 h-4 text-yellow-600 mr-2 flex-shrink-0 mt-0.5" />
-                            <span className="font-semibold">Iklan Premium</span>
-                          </li>
-                        )}
-                        {pkg.allows_refresh && (
-                          <li className="flex items-start">
-                            <Zap className="w-4 h-4 text-orange-600 mr-2 flex-shrink-0 mt-0.5" />
-                            <span>Sundul {pkg.refresh_count}x</span>
+                            <span className="font-semibold">Iklan Featured</span>
                           </li>
                         )}
                         {pkg.badge_text && (
@@ -2271,7 +2497,15 @@ const HalamanKelolaIklan: React.FC = () => {
 
                       <Button
                         className="w-full mt-6"
-                        onClick={() => selectPackage(pkg)}
+                        onClick={() => {
+                          // NEW FLOW: If no car created yet, just save package and open form
+                          // OLD FLOW: If car already created, process payment
+                          if (!newCarId) {
+                            handlePackageSelectedFirst(pkg);
+                          } else {
+                            selectPackage(pkg);
+                          }
+                        }}
                         disabled={submitting}
                       >
                         {submitting ? (
@@ -2280,7 +2514,7 @@ const HalamanKelolaIklan: React.FC = () => {
                             Memproses...
                           </>
                         ) : (
-                          'Pilih Paket'
+                          !newCarId ? 'Lanjut Isi Data Mobil' : 'Pilih Paket'
                         )}
                       </Button>
                     </CardContent>

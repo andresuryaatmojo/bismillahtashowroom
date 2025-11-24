@@ -130,6 +130,24 @@ export interface CarWithRelations extends Car {
     exterior_features?: string;
     interior_features?: string;
   }>;
+  active_package?: {
+    id: number;
+    package_id: number;
+    payment_status: 'pending' | 'processing' | 'success' | 'failed' | 'expired' | 'refunded';
+    activated_at?: string;
+    expires_at?: string;
+    listing_packages?: {
+      id: number;
+      name: string;
+      slug: string;
+      price: number;
+      is_featured: boolean;
+      is_highlighted: boolean;
+      priority_level: number;
+      badge_text?: string;
+    };
+  };
+  package_priority?: number; // For sorting purposes
 }
 
 export interface CarFilters {
@@ -181,10 +199,22 @@ export function computeCatalogDisplay(
   carStatus: string,
   activeTx?: ActiveTransactionLite
 ): CatalogDisplay {
+  // Check if booking has expired
+  const isBookingExpired = activeTx?.booking_expires_at
+    ? new Date(activeTx.booking_expires_at) < new Date()
+    : false;
+
+  // Transaction is only considered "active" if:
+  // 1. It exists
+  // 2. Status is pending/confirmed/processing
+  // 3. booking_status is not cancelled
+  // 4. booking has NOT expired (for pending status with booking_expires_at)
   const hasActiveTx =
     !!activeTx &&
     ['pending', 'confirmed', 'processing'].includes(activeTx.status) &&
-    activeTx.booking_status !== 'booking_cancelled';
+    activeTx.booking_status !== 'booking_cancelled' &&
+    // If status is 'pending' and has booking_expires_at, check if not expired
+    !(activeTx.status === 'pending' && isBookingExpired);
 
   if (carStatus === 'sold') {
     return { label: 'Terjual', badgeColor: 'gray', canBook: false };
@@ -200,7 +230,7 @@ export function computeCatalogDisplay(
       expiresAt: activeTx.booking_expires_at || null
     };
   }
-  // available & no active tx
+  // available & no active tx (or expired booking)
   return { label: 'Tersedia', badgeColor: 'green', canBook: true };
 }
 
@@ -217,7 +247,7 @@ class CarService {
       const { page = 1, limit = 20, sort_by = 'newest' } = options;
       const offset = (page - 1) * limit;
 
-      // Base query dengan join tables
+      // Base query dengan join tables (including listing packages)
       let query = supabase
         .from('cars')
         .select(`
@@ -250,6 +280,23 @@ class CarService {
             full_name,
             seller_rating,
             seller_type
+          ),
+          listing_payments!left (
+            id,
+            package_id,
+            payment_status,
+            activated_at,
+            expires_at,
+            listing_packages!inner (
+              id,
+              name,
+              slug,
+              price,
+              is_featured,
+              is_highlighted,
+              priority_level,
+              badge_text
+            )
           )
         `, { count: 'exact' })
         .in('status', ['available']); // Only show available cars, exclude booked and sold cars
@@ -311,35 +358,8 @@ class CarService {
         query = query.eq('is_featured', true);
       }
 
-      // Apply sorting
-      switch (sort_by) {
-        case 'price_asc':
-          query = query.order('price', { ascending: true });
-          break;
-        case 'price_desc':
-          query = query.order('price', { ascending: false });
-          break;
-        case 'year_asc':
-          query = query.order('year', { ascending: true });
-          break;
-        case 'year_desc':
-          query = query.order('year', { ascending: false });
-          break;
-        case 'popular':
-          query = query.order('view_count', { ascending: false });
-          break;
-        case 'rating':
-          query = query.order('average_rating', { ascending: false });
-          break;
-        case 'newest':
-        default:
-          query = query.order('posted_at', { ascending: false });
-          break;
-      }
-
-      // Apply pagination
-      query = query.range(offset, offset + limit - 1);
-
+      // Fetch all data WITHOUT sorting (we'll sort in JavaScript)
+      // This is because we need to sort by package priority which is in related table
       const { data, error, count } = await query;
 
       if (error) {
@@ -358,7 +378,7 @@ class CarService {
           .in('car_id', carIds)
           .in('status', ['pending', 'confirmed', 'processing'])
           .neq('booking_status', 'booking_cancelled');
-          
+
         if (!txError && transactions) {
           // Create a map of car_id to transaction
           activeTransactions = transactions.reduce((acc, tx) => {
@@ -367,37 +387,127 @@ class CarService {
           }, {} as Record<string, any>);
         }
       }
-      
-      // Enhance car data with computed availability
+
+      // Enhance car data with computed availability and package info
       const enhancedData = data?.map(car => {
         const activeTx = activeTransactions[car.id];
-        const availableForBooking = !activeTx;
-        
+
+        // Check if booking has expired
+        const isBookingExpired = activeTx?.booking_expires_at
+          ? new Date(activeTx.booking_expires_at) < new Date()
+          : false;
+
+        // Transaction is only "blocking" if it exists and has NOT expired (for pending bookings)
+        const hasBlockingTx = activeTx &&
+          ['pending', 'confirmed', 'processing'].includes(activeTx.status) &&
+          !(activeTx.status === 'pending' && isBookingExpired);
+
+        const availableForBooking = !hasBlockingTx;
+
         let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
-        
+
         if (car.status === 'sold') {
           computedAvailability = 'sold';
         } else if (car.status === 'reserved') {
           computedAvailability = 'reserved';
-        } else if (activeTx) {
+        } else if (hasBlockingTx) {
           computedAvailability = 'processing';
         } else {
           computedAvailability = 'available';
         }
-        
+
+        // Extract active package (success payment and not expired)
+        const now = new Date();
+        const allPayments = (car as any).listing_payments || [];
+
+        // Filter active payments
+        const activePayments = allPayments.filter((payment: any) => {
+          return (
+            payment.payment_status === 'success' &&
+            payment.activated_at &&
+            (!payment.expires_at || new Date(payment.expires_at) > now) &&
+            payment.listing_packages?.priority_level !== undefined
+          );
+        });
+
+        // Sort by priority (highest first) and take the first one
+        activePayments.sort((a: any, b: any) => {
+          const priorityA = a.listing_packages?.priority_level || 0;
+          const priorityB = b.listing_packages?.priority_level || 0;
+          return priorityB - priorityA; // Descending order
+        });
+
+        // Get the highest priority package
+        const activePackage = activePayments.length > 0 ? activePayments[0] : undefined;
+
+        // Determine package priority for sorting
+        // Featured (priority 100) > Premium (priority 50) > Paket Umum (priority 20) > Gratis (priority 0)
+        let packagePriority = 0;
+        if (activePackage?.listing_packages) {
+          packagePriority = activePackage.listing_packages.priority_level || 0;
+        }
+
+        // Debug logging (remove after testing)
+        if (allPayments.length > 1) {
+          console.log('Car with multiple payments:', {
+            car_id: car.id,
+            title: car.title,
+            all_payments: allPayments.map((p: any) => ({
+              status: p.payment_status,
+              priority: p.listing_packages?.priority_level,
+              name: p.listing_packages?.name
+            })),
+            selected_package: activePackage?.listing_packages?.name,
+            selected_priority: packagePriority
+          });
+        }
+
         return {
           ...car,
           active_transaction: activeTx || undefined,
           available_for_booking: availableForBooking,
-          computed_availability: computedAvailability
+          computed_availability: computedAvailability,
+          active_package: activePackage || undefined,
+          package_priority: packagePriority
         };
       }) || [];
+
+      // Sort by package priority (highest first), then by user's selected sort
+      let sortedData = [...enhancedData];
+
+      // Primary sort: by package priority (Featured > Premium > Umum > Gratis)
+      sortedData.sort((a, b) => {
+        const priorityDiff = (b.package_priority || 0) - (a.package_priority || 0);
+        if (priorityDiff !== 0) return priorityDiff;
+
+        // Secondary sort: by user's selection
+        switch (sort_by) {
+          case 'price_asc':
+            return a.price - b.price;
+          case 'price_desc':
+            return b.price - a.price;
+          case 'year_asc':
+            return a.year - b.year;
+          case 'year_desc':
+            return b.year - a.year;
+          case 'popular':
+            return b.view_count - a.view_count;
+          case 'rating':
+            return b.average_rating - a.average_rating;
+          case 'newest':
+          default:
+            return new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime();
+        }
+      });
+
+      // Apply pagination AFTER sorting
+      const paginatedData = sortedData.slice(offset, offset + limit);
 
       const total = count || 0;
       const total_pages = Math.ceil(total / limit);
 
       return {
-        data: enhancedData,
+        data: paginatedData,
         total,
         page,
         limit,
@@ -437,15 +547,26 @@ class CarService {
         supabase.from('transactions').select('id, status, booking_status, booking_expires_at').eq('car_id', car.id).in('status', ['pending', 'confirmed', 'processing']).neq('booking_status', 'booking_cancelled').maybeSingle()
       ]);
       
+      // Check if booking has expired
+      const isBookingExpired = activeTx.data?.booking_expires_at
+        ? new Date(activeTx.data.booking_expires_at) < new Date()
+        : false;
+
+      // Transaction is only "blocking" if it exists, is pending/confirmed/processing,
+      // and has NOT expired (for pending bookings)
+      const hasBlockingTx = activeTx.data &&
+        ['pending', 'confirmed', 'processing'].includes(activeTx.data.status) &&
+        !(activeTx.data.status === 'pending' && isBookingExpired);
+
       // Determine computed availability
       let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
-      const availableForBooking = !activeTx.data;
-      
+      const availableForBooking = !hasBlockingTx;
+
       if (car.status === 'sold') {
         computedAvailability = 'sold';
       } else if (car.status === 'reserved') {
         computedAvailability = 'reserved';
-      } else if (activeTx.data) {
+      } else if (hasBlockingTx) {
         computedAvailability = 'processing';
       } else {
         computedAvailability = 'available';
@@ -543,20 +664,31 @@ class CarService {
       // Enhance car data with computed availability
       const enhancedData = data?.map(car => {
         const activeTx = activeTransactions[car.id];
-        const availableForBooking = !activeTx;
-        
+
+        // Check if booking has expired
+        const isBookingExpired = activeTx?.booking_expires_at
+          ? new Date(activeTx.booking_expires_at) < new Date()
+          : false;
+
+        // Transaction is only "blocking" if it exists and has NOT expired (for pending bookings)
+        const hasBlockingTx = activeTx &&
+          ['pending', 'confirmed', 'processing'].includes(activeTx.status) &&
+          !(activeTx.status === 'pending' && isBookingExpired);
+
+        const availableForBooking = !hasBlockingTx;
+
         let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
-        
+
         if (car.status === 'sold') {
           computedAvailability = 'sold';
         } else if (car.status === 'reserved') {
           computedAvailability = 'reserved';
-        } else if (activeTx) {
+        } else if (hasBlockingTx) {
           computedAvailability = 'processing';
         } else {
           computedAvailability = 'available';
         }
-        
+
         return {
           ...car,
           active_transaction: activeTx || undefined,
@@ -620,20 +752,31 @@ class CarService {
       // Enhance car data with computed availability
       const enhancedData = data?.map(car => {
         const activeTx = activeTransactions[car.id];
-        const availableForBooking = !activeTx;
-        
+
+        // Check if booking has expired
+        const isBookingExpired = activeTx?.booking_expires_at
+          ? new Date(activeTx.booking_expires_at) < new Date()
+          : false;
+
+        // Transaction is only "blocking" if it exists and has NOT expired (for pending bookings)
+        const hasBlockingTx = activeTx &&
+          ['pending', 'confirmed', 'processing'].includes(activeTx.status) &&
+          !(activeTx.status === 'pending' && isBookingExpired);
+
+        const availableForBooking = !hasBlockingTx;
+
         let computedAvailability: 'available' | 'processing' | 'reserved' | 'sold';
-        
+
         if (car.status === 'sold') {
           computedAvailability = 'sold';
         } else if (car.status === 'reserved') {
           computedAvailability = 'reserved';
-        } else if (activeTx) {
+        } else if (hasBlockingTx) {
           computedAvailability = 'processing';
         } else {
           computedAvailability = 'available';
         }
-        
+
         return {
           ...car,
           active_transaction: activeTx || undefined,
@@ -1017,6 +1160,51 @@ class CarService {
       return { success: true };
     } catch (error: any) {
       console.error('Error in deleteCarImage:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update car image display order
+   */
+  async updateImageDisplayOrder(imageId: string, displayOrder: number, isPrimary: boolean = false): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase
+        .from('car_images')
+        .update({
+          display_order: displayOrder,
+          is_primary: isPrimary
+        })
+        .eq('id', imageId);
+
+      if (error) {
+        console.error('Error updating image display order:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error in updateImageDisplayOrder:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update all image display orders for a car
+   */
+  async updateAllImageDisplayOrders(carId: string, imageOrders: Array<{id: string, displayOrder: number, isPrimary: boolean}>): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Update each image's display order
+      for (const imageOrder of imageOrders) {
+        const result = await this.updateImageDisplayOrder(imageOrder.id, imageOrder.displayOrder, imageOrder.isPrimary);
+        if (!result.success) {
+          return result;
+        }
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error in updateAllImageDisplayOrders:', error);
       return { success: false, error: error.message };
     }
   }
@@ -1978,17 +2166,31 @@ class CarService {
       if (carErr || !car) return false;
       if (car.status !== 'available') return false;
 
-      // Cek transaksi aktif
+      // Cek transaksi aktif (include booking_expires_at for expiry check)
       const { data: activeTx, error: txErr } = await supabase
         .from('transactions')
-        .select('id')
+        .select('id, status, booking_expires_at')
         .eq('car_id', carId)
         .in('status', ['pending', 'confirmed', 'processing'])
         .neq('booking_status', 'booking_cancelled')
         .limit(1);
 
       if (txErr) return false;
-      return !activeTx || activeTx.length === 0;
+
+      // If no active transactions, car is available
+      if (!activeTx || activeTx.length === 0) return true;
+
+      // Check if the transaction's booking has expired
+      const tx = activeTx[0];
+      if (tx.status === 'pending' && tx.booking_expires_at) {
+        const expiresAt = new Date(tx.booking_expires_at);
+        const now = new Date();
+        // If booking expired, car is available for new booking
+        if (expiresAt < now) return true;
+      }
+
+      // There's an active, non-expired transaction
+      return false;
     } catch (error) {
       console.error('Error checking car availability:', error);
       return false;
@@ -2008,23 +2210,35 @@ class CarService {
         .single();
 
       if (carErr || !car) return 'sold'; // Default to sold if error or not found
-      
+
       if (car.status === 'sold') return 'sold';
       if (car.status === 'reserved') return 'reserved';
       if (car.status !== 'available') return 'sold'; // Any other status (rejected, pending) treated as not available
-      
-      // Check for active transactions
+
+      // Check for active transactions (include booking_expires_at for expiry check)
       const { data: activeTx, error: txErr } = await supabase
         .from('transactions')
-        .select('id')
+        .select('id, status, booking_expires_at')
         .eq('car_id', carId)
         .in('status', ['pending', 'confirmed', 'processing'])
         .neq('booking_status', 'booking_cancelled')
         .limit(1);
 
       if (txErr) return 'sold'; // Default to sold if error
-      
-      return activeTx && activeTx.length > 0 ? 'processing' : 'available';
+
+      // If no active transactions, car is available
+      if (!activeTx || activeTx.length === 0) return 'available';
+
+      // Check if the transaction's booking has expired
+      const tx = activeTx[0];
+      if (tx.status === 'pending' && tx.booking_expires_at) {
+        const expiresAt = new Date(tx.booking_expires_at);
+        const now = new Date();
+        // If booking expired, treat as available
+        if (expiresAt < now) return 'available';
+      }
+
+      return 'processing';
     } catch (error) {
       console.error('Error getting computed availability:', error);
       return 'sold'; // Default to sold if any error

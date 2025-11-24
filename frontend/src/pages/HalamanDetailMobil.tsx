@@ -11,8 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { Separator } from '../components/ui/separator';
-import { 
-  Car, Phone, MapPin, Star, Calendar, Clock, CheckCircle, 
+import {
+  Car, MapPin, Star, Clock, CheckCircle,
   Fuel, Gauge, Settings, Zap, Shield, Award, CreditCard, ArrowLeft, Loader2,
   Camera, KeyRound, Power, Bluetooth, Usb, Fan, Wifi, Sun, Monitor, Radar, MessageSquare
 } from 'lucide-react';
@@ -55,6 +55,7 @@ const HalamanDetailMobil: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInWishlist, setIsInWishlist] = useState(false);
 
@@ -239,6 +240,35 @@ const HalamanDetailMobil: React.FC = () => {
     '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00'
   ];
 
+  // Handle proceeding to chat after disclaimer
+  const handleProceedToChat = async () => {
+    setShowDisclaimerModal(false);
+
+    if (!user?.id || !car?.seller_id) {
+      toast({
+        title: "Perhatian",
+        description: "Anda harus login terlebih dahulu untuk chat dengan penjual",
+        variant: "warning"
+      });
+      return;
+    }
+
+    try {
+      // Buat atau dapatkan chat room
+      const chatRoom = await createChatRoom(user.id, car.seller_id, car.id);
+
+      // Navigasi ke halaman chat dengan parameter room ID
+      navigate('/chat', { state: { activeRoomId: chatRoom.id } });
+    } catch (error) {
+      console.error("Gagal membuat chat room:", error);
+      toast({
+        title: "Error",
+        description: "Gagal memulai chat dengan penjual. Silakan coba lagi.",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Map fuel types
   const getFuelTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
@@ -408,7 +438,34 @@ const HalamanDetailMobil: React.FC = () => {
                 {car.mileage?.toLocaleString() || '0'} km | {car.transmission || 'Manual'}
               </p>
               
-              {/* 3. Harga */}
+              {/* 3. Status Mobil */}
+              {(() => {
+                const display = computeCatalogDisplay(car.status, car.active_transaction);
+                return (
+                  <div className="flex items-center gap-3 mb-4">
+                    <span
+                      className={`px-3 py-1 rounded-full text-white text-sm font-medium ${
+                        display.badgeColor === 'green'
+                          ? 'bg-green-600'
+                          : display.badgeColor === 'yellow'
+                          ? 'bg-yellow-600'
+                          : display.badgeColor === 'orange'
+                          ? 'bg-orange-600'
+                          : 'bg-gray-600'
+                      }`}
+                    >
+                      {display.label}
+                    </span>
+                    {display.expiresAt && (
+                      <span className="text-xs text-yellow-700">
+                        Booking berakhir: {new Date(display.expiresAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* 4. Harga */}
               <div className="mb-5 flex items-center justify-between">
                 <div>
                   <div className="text-3xl font-bold text-red-600">
@@ -506,10 +563,10 @@ const HalamanDetailMobil: React.FC = () => {
                   Tes Drive Gratis
                 </Button>
                 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
-                  onClick={async () => {
+                  onClick={() => {
                     if (!user?.id || !car?.seller_id) {
                       toast({
                         title: "Perhatian",
@@ -518,21 +575,9 @@ const HalamanDetailMobil: React.FC = () => {
                       });
                       return;
                     }
-                    
-                    try {
-                      // Buat atau dapatkan chat room
-                      const chatRoom = await createChatRoom(user.id, car.seller_id, car.id);
-                      
-                      // Navigasi ke halaman chat dengan parameter room ID
-                      navigate('/chat', { state: { activeRoomId: chatRoom.id } });
-                    } catch (error) {
-                      console.error("Gagal membuat chat room:", error);
-                      toast({
-                        title: "Error",
-                        description: "Gagal memulai chat dengan penjual. Silakan coba lagi.",
-                        variant: "destructive"
-                      });
-                    }
+
+                    // Show disclaimer modal
+                    setShowDisclaimerModal(true);
                   }}
                 >
                   <MessageSquare className="w-4 h-4" />
@@ -722,13 +767,17 @@ const HalamanDetailMobil: React.FC = () => {
               </motion.div>
             )}
 
-            {/* Dealer Information */}
+          </div>
+
+          {/* Right Column - Seller Information */}
+          <div className="lg:col-span-1">
             <motion.div
-              initial={{ opacity: 0, x: -20 }}
+              className="sticky top-8"
+              initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.5 }}
+              transition={{ duration: 0.6, delay: 0.3 }}
             >
-              <Card>
+              <Card className="shadow-lg">
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Award className="w-5 h-5 mr-2" />
@@ -758,15 +807,6 @@ const HalamanDetailMobil: React.FC = () => {
                         </span>
                         <span className="font-medium">{car.location_city}</span>
                       </div>
-                      {car.users.phone_number && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 flex items-center">
-                            <Phone className="w-4 h-4 mr-1" />
-                            Telepon
-                          </span>
-                          <span className="font-medium">{car.users.phone_number}</span>
-                        </div>
-                      )}
                       <div className="flex justify-between">
                         <span className="text-gray-600">Rating</span>
                         <div className="flex items-center">
@@ -775,111 +815,6 @@ const HalamanDetailMobil: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </div>
-
-          {/* Right Column - Price Information */}
-          <div className="lg:col-span-1">
-            <motion.div
-              className="sticky top-8"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-            >
-              <Card className="shadow-lg">
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <CreditCard className="w-5 h-5 mr-2" />
-                    Informasi Harga
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Status badge + TTL dari computed availability */}
-              {(() => {
-                const display = computeCatalogDisplay(car.status, car.active_transaction);
-                return (
-                  <div className="flex items-center justify-between mb-2">
-                    <span
-                      className={`px-2 py-1 rounded text-white ${
-                        display.badgeColor === 'green'
-                          ? 'bg-green-600'
-                          : display.badgeColor === 'yellow'
-                          ? 'bg-yellow-600'
-                          : display.badgeColor === 'orange'
-                          ? 'bg-orange-600'
-                          : 'bg-gray-600'
-                      }`}
-                    >
-                      {display.label}
-                    </span>
-                    {display.expiresAt && (
-                      <span className="text-xs text-yellow-700">
-                        Booking berakhir: {new Date(display.expiresAt).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-lg font-semibold text-gray-900">Harga</span>
-                  <span className="text-2xl font-bold text-blue-600">{formatCurrency(car.price)}</span>
-                </div>
-                
-                <div className="space-y-2 text-sm text-gray-600">
-                  <div className="flex justify-between">
-                    <span>Cicilan mulai dari</span>
-                    <span className="font-medium">{formatCurrency(Math.floor(car.price / 60))}/bulan</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>DP minimal (20%)</span>
-                    <span className="font-medium">{formatCurrency(Math.floor(car.price * 0.2))}</span>
-                  </div>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="w-full"
-                  onClick={() => navigate('/simulasi')}
-                >
-                  <CreditCard className="w-4 h-4 mr-2" />
-                  Simulasi Kredit
-                </Button>
-                
-                {/* Tombol Proses Pembelian: disable jika tidak available_for_booking */}
-                {(() => {
-                  const display = computeCatalogDisplay(car.status, car.active_transaction);
-                  return (
-                    <Button
-                      variant="default"
-                      size="lg"
-                      className={`w-full ${
-                        display.canBook
-                          ? 'bg-blue-600 hover:bg-blue-700'
-                          : 'bg-gray-300 cursor-not-allowed text-gray-600'
-                      }`}
-                      disabled={!display.canBook}
-                      onClick={() => navigate('/pembelian', { state: { mobilId: car.id } })}
-                    >
-                      {display.canBook ? 'Proses Pembelian' : 'Sedang Diproses / Tidak Tersedia'}
-                    </Button>
-                  );
-                })()}
-
-                <Button
-                  variant="default"
-                  size="lg"
-                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
-                  onClick={() => setShowBookingModal(true)}
-                >
-                  <Calendar className="w-4 h-4 mr-2" />
-                  Booking Test Drive
-                </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1037,6 +972,110 @@ const HalamanDetailMobil: React.FC = () => {
             </p>
             <Button onClick={() => setShowSuccessModal(false)} className="w-full">
               Tutup
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Disclaimer Modal */}
+      <Dialog open={showDisclaimerModal} onOpenChange={setShowDisclaimerModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex flex-col items-center mb-4">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-10 h-10 text-red-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <DialogTitle className="text-xl font-bold text-gray-900 text-center">
+                Tips transaksi aman
+              </DialogTitle>
+            </div>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-1">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-5 h-5 text-blue-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </div>
+              <p className="text-sm text-gray-700 text-left">
+                Jangan lakukan pembayaran tanpa jaminan dari penjual dan cek keaslian dengan teliti jika jaminan berupa KTP/SIM.
+              </p>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-1">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-5 h-5 text-blue-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="12" y1="1" x2="12" y2="23" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+              </div>
+              <p className="text-sm text-gray-700 text-left">
+                Cek harga pasaran untuk barang yang diminati.
+              </p>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-1">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-5 h-5 text-blue-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+              </div>
+              <p className="text-sm text-gray-700 text-left">
+                Segera laporkan pengguna yang mencurigakan.
+              </p>
+            </div>
+
+            <Button
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-6"
+              onClick={handleProceedToChat}
+            >
+              Lanjutkan untuk chat
             </Button>
           </div>
         </DialogContent>

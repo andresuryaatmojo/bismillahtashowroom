@@ -91,7 +91,6 @@ const HalamanProfil: React.FC = () => {
     city: '',
     province: '',
     postalCode: '',
-    currentMode: 'buyer' as 'buyer' | 'seller',
   });
 
   const [errors, setErrors] = useState<FormErrors>({
@@ -116,7 +115,6 @@ const HalamanProfil: React.FC = () => {
         city: profile.city || '',
         province: profile.province || '',
         postalCode: profile.postal_code || '',
-        currentMode: profile.current_mode || 'buyer',
       });
 
       // Load notification preferences from profile.preferences
@@ -222,7 +220,6 @@ const HalamanProfil: React.FC = () => {
           city: formData.city.trim() || null,
           province: formData.province.trim() || null,
           postal_code: formData.postalCode.trim() || null,
-          current_mode: formData.currentMode,
           updated_at: new Date().toISOString(),
         })
         .eq('id', profile.id)
@@ -272,7 +269,6 @@ const HalamanProfil: React.FC = () => {
         city: profile.city || '',
         province: profile.province || '',
         postalCode: profile.postal_code || '',
-        currentMode: profile.current_mode || 'buyer',
       });
     }
 
@@ -515,11 +511,6 @@ const HalamanProfil: React.FC = () => {
     );
   }
 
-  const modeOptions = [
-    { value: 'buyer', label: 'Mode Pembeli' },
-    { value: 'seller', label: 'Mode Penjual' }
-  ];
-
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto">
@@ -579,20 +570,14 @@ const HalamanProfil: React.FC = () => {
                 </Avatar>
                 <h3 className="text-xl font-semibold mb-2">{profile.full_name}</h3>
                 <p className="text-gray-600 mb-2">@{profile.username}</p>
-                <div className="flex justify-center items-center gap-2 mb-4">
-                  <Badge 
-                    variant={profile.current_mode === 'buyer' ? 'default' : 'secondary'}
-                    className="text-xs"
-                  >
-                    {modeOptions.find(m => m.value === profile.current_mode)?.label}
-                  </Badge>
-                  {profile.is_verified && (
+                {profile.is_verified && (
+                  <div className="flex justify-center items-center gap-2 mb-4">
                     <Badge variant="secondary" className="text-xs flex items-center gap-1">
                       <CheckCircle className="w-3 h-3" />
                       Terverifikasi
                     </Badge>
-                  )}
-                </div>
+                  </div>
+                )}
                 <p className="text-sm text-gray-500">
                   Member sejak {new Date(profile.registered_at).getFullYear()}
                 </p>
@@ -776,33 +761,6 @@ const HalamanProfil: React.FC = () => {
                       placeholder="12345"
                     />
                   </div>
-                </div>
-
-                {/* Mode */}
-                <div className="space-y-2">
-                  <Label htmlFor="currentMode" className="flex items-center gap-2">
-                    <Shield className="w-4 h-4" />
-                    Mode Akun
-                  </Label>
-                  <Select 
-                    value={formData.currentMode} 
-                    onValueChange={(value) => handleInputChange('currentMode', value as 'buyer' | 'seller')}
-                    disabled={!isEditing}
-                  >
-                    <SelectTrigger className={!isEditing ? "bg-gray-50" : ""}>
-                      <SelectValue placeholder="Pilih mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modeOptions.map((mode) => (
-                        <SelectItem key={mode.value} value={mode.value}>
-                          {mode.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-gray-500">
-                    Mode pembeli untuk membeli mobil, mode penjual untuk menjual mobil
-                  </p>
                 </div>
 
                 {isEditing && (

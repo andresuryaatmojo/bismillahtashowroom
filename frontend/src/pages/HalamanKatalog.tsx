@@ -9,14 +9,14 @@ import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Separator } from '../components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { 
-  Search, 
-  Filter, 
-  Grid3X3, 
-  List, 
-  MapPin, 
-  Calendar, 
-  Settings, 
+import {
+  Search,
+  Filter,
+  Grid3X3,
+  List,
+  MapPin,
+  Calendar,
+  Settings,
   Heart,
   Eye,
   Phone,
@@ -24,7 +24,8 @@ import {
   Star,
   ArrowUpDown,
   SlidersHorizontal,
-  Loader2
+  Loader2,
+  Clock
 } from 'lucide-react';
 import { carService, type CarWithRelations, type CarFilters, type CarQueryOptions } from '../services/carService';
 import { wishlistService } from '../services/wishlistService';
@@ -167,9 +168,57 @@ const HalamanKatalog: React.FC = () => {
     }).format(price);
   };
 
+  // Countdown Timer Hook
+  const useCountdown = (targetDate: string | null) => {
+    const [timeLeft, setTimeLeft] = useState<{
+      days: number;
+      hours: number;
+      minutes: number;
+      seconds: number;
+      expired: boolean;
+    }>({ days: 0, hours: 0, minutes: 0, seconds: 0, expired: true });
+
+    useEffect(() => {
+      if (!targetDate) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, expired: true });
+        return;
+      }
+
+      const calculateTimeLeft = () => {
+        const difference = new Date(targetDate).getTime() - new Date().getTime();
+
+        if (difference <= 0) {
+          setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, expired: true });
+          return;
+        }
+
+        const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((difference / (1000 * 60 * 60)) % 24);
+        const minutes = Math.floor((difference / 1000 / 60) % 60);
+        const seconds = Math.floor((difference / 1000) % 60);
+
+        setTimeLeft({ days, hours, minutes, seconds, expired: false });
+      };
+
+      calculateTimeLeft();
+      const timer = setInterval(calculateTimeLeft, 1000);
+
+      return () => clearInterval(timer);
+    }, [targetDate]);
+
+    return timeLeft;
+  };
+
   const CarCard = ({ car }: { car: CarWithRelations }) => {
     const isInWishlist = wishlistItems.has(car.id);
     const primaryImage = car.car_images?.find(img => img.is_primary) || car.car_images?.[0];
+    const totalImages = car.car_images?.length || 0;
+
+    // Check if car is currently booked
+    const isBooked = car.active_transaction?.booking_expires_at &&
+                     car.active_transaction?.booking_status !== 'booking_cancelled';
+    const bookingExpiresAt = isBooked ? car.active_transaction?.booking_expires_at : null;
+    const countdown = useCountdown(bookingExpiresAt || null);
 
     return (
       <motion.div
@@ -177,137 +226,160 @@ const HalamanKatalog: React.FC = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         whileHover={{ y: -8 }}
-        className="group"
+        className="group relative"
       >
-        <Card className="h-full border-0 shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden bg-white">
-          <div className="relative overflow-hidden">
+        <Card className={`h-full border shadow-md hover:shadow-2xl transition-all duration-300 overflow-hidden bg-white rounded-xl ${
+          isBooked && !countdown.expired ? 'ring-2 ring-orange-400' : ''
+        }`}>
+          <div className="relative overflow-hidden aspect-[4/3] bg-gray-100">
             <img
               src={primaryImage?.image_url || 'https://via.placeholder.com/400x300'}
               alt={car.title}
-              className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-500"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             />
-            
-            {/* Overlay with actions */}
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
-              <div className="flex gap-2">
-                <Button 
-                  size="sm" 
-                  variant="secondary" 
-                  className="bg-white/90 hover:bg-white"
-                  onClick={() => navigate(`/mobil/${car.id}`)}
-                >
-                  <Eye className="w-4 h-4" />
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant="secondary" 
-                  className={`bg-white/90 hover:bg-white ${isInWishlist ? 'text-red-500' : ''}`}
-                  onClick={() => handleToggleWishlist(car.id)}
-                >
-                  <Heart className={`w-4 h-4 ${isInWishlist ? 'fill-current' : ''}`} />
-                </Button>
-              </div>
-            </div>
 
-            {/* Badges */}
+            {/* Subtle booking indicator overlay */}
+            {isBooked && !countdown.expired && (
+              <div className="absolute inset-0 bg-gradient-to-t from-orange-900/40 via-transparent to-transparent pointer-events-none" />
+            )}
+
+            {/* Heart button - top right */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleWishlist(car.id);
+              }}
+              className={`absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 ${
+                isInWishlist
+                  ? 'bg-red-500 text-white shadow-lg'
+                  : 'bg-white/90 hover:bg-white text-gray-700 shadow-md'
+              }`}
+            >
+              <Heart className={`w-5 h-5 ${isInWishlist ? 'fill-current' : ''}`} />
+            </button>
+
+            {/* Image counter - bottom right */}
+            {totalImages > 0 && (
+              <div className="absolute bottom-3 right-3 bg-gray-900/80 text-white text-xs font-medium px-2 py-1 rounded">
+                1/{totalImages}
+              </div>
+            )}
+
+            {/* Badges - top left */}
             <div className="absolute top-3 left-3 flex flex-col gap-2">
+              {/* Package Badge - Berdasarkan priority_level untuk konsistensi */}
+              {car.active_package?.listing_packages && (
+                <>
+                  {/* FEATURED: priority >= 100 */}
+                  {car.active_package.listing_packages.priority_level >= 100 && (
+                    <Badge className="bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-600 hover:to-amber-600 text-white font-bold shadow-lg">
+                      <Star className="w-3 h-3 mr-1 fill-current" />
+                      FEATURED
+                    </Badge>
+                  )}
+                  {/* PREMIUM: priority 50-99 */}
+                  {car.active_package.listing_packages.priority_level >= 50 && car.active_package.listing_packages.priority_level < 100 && (
+                    <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold shadow-lg">
+                      <Star className="w-3 h-3 mr-1" />
+                      PREMIUM
+                    </Badge>
+                  )}
+                  {/* PAKET UMUM: priority 20-49 */}
+                  {car.active_package.listing_packages.priority_level >= 20 && car.active_package.listing_packages.priority_level < 50 && (
+                    <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-medium">
+                      <CheckCircle className="w-3 h-3 mr-1" />
+                      PAKET UMUM
+                    </Badge>
+                  )}
+                  {/* Additional badges */}
+                  {car.active_package.listing_packages.is_highlighted && (
+                    <Badge className="bg-gradient-to-r from-orange-400 to-red-400 hover:from-orange-500 hover:to-red-500 text-white">
+                      Highlighted
+                    </Badge>
+                  )}
+                  {car.active_package.listing_packages.badge_text && (
+                    <Badge className="bg-indigo-500 hover:bg-indigo-600 text-white">
+                      {car.active_package.listing_packages.badge_text}
+                    </Badge>
+                  )}
+                </>
+              )}
+
               {car.is_verified && (
                 <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white">
                   <CheckCircle className="w-3 h-3 mr-1" />
                   Verified
                 </Badge>
               )}
-              <Badge variant={car.condition === 'new' ? 'default' : 'secondary'}>
-                {car.condition === 'new' ? 'Baru' : 'Bekas'}
-              </Badge>
-              {car.is_featured && (
-                <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white">
-                  Featured
-                </Badge>
-              )}
             </div>
           </div>
-          
-          <CardContent className="p-6">
-            <div className="mb-4">
-              <h3 className="text-xl font-bold text-slate-900 mb-1 group-hover:text-blue-600 transition-colors">
-                {car.title}
-              </h3>
-              <p className="text-slate-600 text-sm">{car.car_categories?.name} • {car.condition === 'new' ? 'Baru' : 'Bekas'}</p>
-            </div>
 
-            <div className="mb-4">
-              <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-2xl font-bold text-blue-600">
-                  {formatPrice(car.price)}
-                </span>
-                {car.market_price && car.market_price > car.price && (
-                  <span className="text-sm text-slate-500 line-through">
-                    {formatPrice(car.market_price)}
-                  </span>
-                )}
-              </div>
-              {car.is_negotiable && (
-                <Badge variant="outline" className="text-xs">Nego</Badge>
-              )}
-            </div>
+          <CardContent className="p-5 cursor-pointer" onClick={() => navigate(`/mobil/${car.id}`)}>
+            {/* Title */}
+            <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors line-clamp-2">
+              {car.year} {car.car_brands?.name} {car.title}
+            </h3>
 
-            <div className="space-y-3 mb-6">
-              <div className="flex items-center text-sm text-slate-600">
-                <MapPin className="w-4 h-4 mr-2 text-slate-400" />
-                {car.location_city}
-              </div>
-              <div className="flex items-center text-sm text-slate-600">
-                <Settings className="w-4 h-4 mr-2 text-slate-400" />
-                {car.transmission.toUpperCase()} • {car.fuel_type === 'gasoline' ? 'Bensin' : car.fuel_type}
-              </div>
+            {/* Car details - compact */}
+            <div className="flex items-center gap-2 text-sm text-gray-600 mb-3 flex-wrap">
               {car.mileage > 0 && (
-                <div className="flex items-center text-sm text-slate-600">
-                  <Calendar className="w-4 h-4 mr-2 text-slate-400" />
+                <span className="flex items-center">
                   {car.mileage.toLocaleString()} km
+                </span>
+              )}
+              <span>•</span>
+              <span>{car.transmission === 'automatic' ? 'Automatic' : car.transmission === 'manual' ? 'Manual' : 'CVT'}</span>
+              <span>•</span>
+              <span className="flex items-center">
+                <MapPin className="w-3 h-3 mr-1" />
+                {car.location_city}
+              </span>
+            </div>
+
+            {/* Price - prominent */}
+            <div className="mb-3">
+              <div className="text-2xl font-bold text-red-600 mb-1">
+                Rp{(car.price / 1000000).toFixed(3).replace('.', ',')}.000
+              </div>
+              {car.market_price && car.market_price > car.price && (
+                <div className="text-sm text-gray-600">
+                  Rp {((car.market_price - car.price) / 1000000).toFixed(0)}.000.000 (Cash)
                 </div>
               )}
             </div>
 
-            {/* Dealer info */}
-            <div className="flex items-center justify-between mb-4 p-3 bg-slate-50 rounded-lg">
-              <div>
-                <p className="text-sm font-medium text-slate-900">{car.users.full_name}</p>
-                <div className="flex items-center gap-1">
-                  <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                  <span className="text-xs text-slate-600">{car.users.seller_rating?.toFixed(1) || '0.0'}</span>
-                  <span className="text-xs text-slate-400">
-                    • {car.seller_type === 'showroom' ? 'Showroom' : 'Penjual'}
-                  </span>
+            {/* Booking Status with Countdown */}
+            {isBooked && !countdown.expired && (
+              <div className="bg-orange-50 border-2 border-orange-400 rounded-lg p-3 mt-3">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Clock className="w-4 h-4 text-orange-600" />
+                  <span className="text-sm font-semibold text-orange-800">Sedang Dalam Proses Booking</span>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-orange-700 mb-2">Tersedia kembali dalam:</p>
+                  <div className="flex justify-center gap-1 text-xs font-mono">
+                    {countdown.days > 0 && (
+                      <div className="bg-orange-600 text-white rounded px-2 py-1 min-w-[45px]">
+                        <div className="font-bold text-base">{countdown.days}</div>
+                        <div className="text-[10px]">hari</div>
+                      </div>
+                    )}
+                    <div className="bg-orange-600 text-white rounded px-2 py-1 min-w-[45px]">
+                      <div className="font-bold text-base">{countdown.hours.toString().padStart(2, '0')}</div>
+                      <div className="text-[10px]">jam</div>
+                    </div>
+                    <div className="bg-orange-600 text-white rounded px-2 py-1 min-w-[45px]">
+                      <div className="font-bold text-base">{countdown.minutes.toString().padStart(2, '0')}</div>
+                      <div className="text-[10px]">mnt</div>
+                    </div>
+                    <div className="bg-orange-600 text-white rounded px-2 py-1 min-w-[45px]">
+                      <div className="font-bold text-base">{countdown.seconds.toString().padStart(2, '0')}</div>
+                      <div className="text-[10px]">dtk</div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-
-            {/* Stats */}
-            <div className="flex items-center justify-between text-xs text-slate-500 mb-4">
-              <div className="flex items-center gap-1">
-                <Eye className="w-3 h-3" />
-                {car.view_count}
-              </div>
-              <div className="flex items-center gap-1">
-                <Heart className="w-3 h-3" />
-                {car.wishlist_count}
-              </div>
-            </div>
-
-            <Separator className="mb-4" />
-            
-            <div className="flex gap-2">
-              <Button 
-                className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
-                onClick={() => navigate(`/mobil/${car.id}`)}
-              >
-                Lihat Detail
-              </Button>
-              <Button variant="outline" size="sm" className="px-3">
-                <Phone className="w-4 h-4" />
-              </Button>
-            </div>
+            )}
           </CardContent>
         </Card>
       </motion.div>
