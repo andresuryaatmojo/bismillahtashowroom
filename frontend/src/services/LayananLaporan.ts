@@ -193,10 +193,7 @@ class LayananLaporan {
 
       let query = supabase
         .from('reports')
-        .select(`
-          *,
-          report_distributions(*)
-        `);
+        .select('*');
 
       // Apply filters
       if (filter) {
@@ -263,10 +260,7 @@ class LayananLaporan {
 
       const { data: report, error } = await supabase
         .from('reports')
-        .select(`
-          *,
-          report_distributions(*)
-        `)
+        .select('*')
         .eq('id', reportId)
         .single();
 
@@ -275,7 +269,18 @@ class LayananLaporan {
         return { success: false, error: 'Laporan tidak ditemukan' };
       }
 
-      return { success: true, report };
+      // Optionally fetch distributions separately to avoid PostgREST relationship requirements
+      const { data: distributions } = await supabase
+        .from('report_distributions')
+        .select('*')
+        .eq('report_id', reportId);
+
+      const fullReport: any = {
+        ...report,
+        report_distributions: distributions || []
+      };
+
+      return { success: true, report: fullReport as Report };
 
     } catch (error) {
       console.error('[LayananLaporan] Error getting report:', error);
