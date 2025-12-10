@@ -269,8 +269,7 @@ class LayananLaporan {
         return { success: false, error: 'Laporan tidak ditemukan' };
       }
 
-      // Optionally fetch distributions separately to avoid PostgREST relationship requirements
-      const { data: distributions } = await supabase
+      const { data: distributions, error: distError } = await supabase
         .from('report_distributions')
         .select('*')
         .eq('report_id', reportId);
@@ -308,7 +307,11 @@ class LayananLaporan {
         return { success: false, error: 'Laporan belum selesai dibuat' };
       }
 
-      // Create distribution records
+      if (method === 'google_drive' && (!recipients || recipients.length === 0)) {
+        this.processReportDistribution(reportId, method, recipients);
+        return { success: true };
+      }
+
       const distributions = recipients.map(recipient => ({
         report_id: reportId,
         recipient_user_id: recipient.userId,
@@ -758,6 +761,10 @@ class LayananLaporan {
               .eq('report_id', reportId)
               .eq('status', 'pending');
           }
+        }
+
+        if (method === 'google_drive' && (!recipients || recipients.length === 0)) {
+          return;
         }
 
         // Update distribution records
